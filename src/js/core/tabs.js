@@ -1,4 +1,5 @@
 // tabs.js - Tab management, one EditorView at a time
+import * as backend from '../backend.js';
 
 function showConfirmDialog(message, onConfirm) {
   const overlay = document.createElement('div');
@@ -92,6 +93,12 @@ export function closeTab(id) {
 function forceCloseTab(id) {
   const index = tabs.findIndex((t) => t.id === id);
   if (index === -1) return;
+
+  // Delete temp file if it exists
+  const tab = tabs[index];
+  if (tab.path) {
+    backend.deleteTempFile(tab.path).catch(() => {});
+  }
 
   tabs.splice(index, 1);
 
