@@ -1,0 +1,33 @@
+#!/bin/sh
+# fude-browser - Launch Fude in browser mode
+# Finds the bundled resources and starts the HTTP server
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+
+# Check common install locations for bundled resources
+if [ -d "/usr/lib/fude" ]; then
+  RESOURCE_DIR="/usr/lib/fude"
+elif [ -d "/usr/share/fude/resources" ]; then
+  RESOURCE_DIR="/usr/share/fude/resources"
+elif [ -d "$SCRIPT_DIR/../dist" ]; then
+  # Development mode
+  RESOURCE_DIR="$SCRIPT_DIR/.."
+else
+  echo "Error: Fude resources not found"
+  exit 1
+fi
+
+# Find serve.js
+if [ -f "$RESOURCE_DIR/serve.js" ]; then
+  SERVE_JS="$RESOURCE_DIR/serve.js"
+elif [ -f "$SCRIPT_DIR/serve.js" ]; then
+  SERVE_JS="$SCRIPT_DIR/serve.js"
+else
+  echo "Error: serve.js not found"
+  exit 1
+fi
+
+# Set DIST_DIR for serve.js
+export FUDE_DIST_DIR="$RESOURCE_DIR"
+
+exec node "$SERVE_JS" "$@"

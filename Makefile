@@ -75,6 +75,20 @@ format-check:
 # 全チェック（CI向け）
 check: format-check lint test build-frontend
 
+# インストール（dpkg + ブラウザモード）
+install: build
+	sudo dpkg -i src-tauri/target/release/bundle/deb/Fude_0.1.0_amd64.deb
+	sudo mkdir -p /usr/lib/fude
+	sudo cp dist/* /usr/lib/fude/
+	sudo cp scripts/serve.js /usr/lib/fude/
+	sudo cp scripts/fude-browser /usr/bin/fude-browser
+
+# アンインストール
+uninstall:
+	sudo dpkg -r fude
+	sudo rm -rf /usr/lib/fude
+	sudo rm -f /usr/bin/fude-browser
+
 # クリーン
 clean:
 	rm -rf dist/bundle.js dist/index.html dist/style.css
