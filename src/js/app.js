@@ -101,12 +101,17 @@ async function init() {
   // Global keyboard shortcuts - capture at window level to override browser defaults
   window.addEventListener('keydown', handleGlobalKeys, true);
 
-  // Ctrl+mouse wheel zoom
+  // Ctrl+mouse wheel zoom (debounced to prevent freezing)
+  let zoomTimeout = null;
   window.addEventListener(
     'wheel',
     (e) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
+        if (zoomTimeout) return;
+        zoomTimeout = setTimeout(() => {
+          zoomTimeout = null;
+        }, 50);
         if (e.deltaY < 0) {
           setFontSize(Math.min(32, getFontSize() + 1));
         } else {

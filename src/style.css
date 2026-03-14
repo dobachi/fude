@@ -393,29 +393,31 @@ body {
 
 #workspace.split-horizontal > .pane + .pane {
   border-left: none;
-  border-top: 2px solid var(--border);
+  border-top: none;
 }
 
-.pane + .pane::before {
-  content: '';
-  position: absolute;
+/* Resize handle between panes */
+.pane-resize-handle {
+  flex-shrink: 0;
+  background: var(--border);
   z-index: 10;
 }
 
-#workspace.split-vertical > .pane + .pane::before {
-  left: -3px;
-  top: 0;
-  width: 6px;
-  height: 100%;
+.pane-resize-handle.vertical {
+  width: 4px;
   cursor: col-resize;
 }
 
-#workspace.split-horizontal > .pane + .pane::before {
-  top: -3px;
-  left: 0;
-  height: 6px;
-  width: 100%;
+.pane-resize-handle.horizontal {
+  height: 4px;
   cursor: row-resize;
+}
+
+.pane-resize-handle:hover {
+  background: var(--split-handle);
+}
+
+/* Old pseudo-element resize cursors removed - using .pane-resize-handle instead */
 }
 
 .pane.active {

@@ -112,6 +112,12 @@ function doSplit(cssClass) {
 
   const source = getActivePane();
 
+  // Create resize handle
+  const isVertical = cssClass === 'split-vertical';
+  const handle = document.createElement('div');
+  handle.className = `pane-resize-handle ${isVertical ? 'vertical' : 'horizontal'}`;
+  workspace.appendChild(handle);
+
   // Create DOM
   const paneId = `pane-${Date.now()}`;
   const el = document.createElement('div');
@@ -119,6 +125,9 @@ function doSplit(cssClass) {
   el.dataset.paneId = paneId;
   el.innerHTML = '<div class="editor-pane"></div><div class="preview-pane"></div>';
   workspace.appendChild(el);
+
+  // Drag resize
+  initResizeHandle(handle, workspace, isVertical);
 
   // Click-to-focus
   el.addEventListener('mousedown', () => {
@@ -213,17 +222,29 @@ export function closeActivePane() {
     pane.editorView = null;
   }
 
-  // Remove DOM
+  // Remove DOM and adjacent resize handle
+  const prevHandle = pane.element.previousElementSibling;
+  if (prevHandle && prevHandle.classList.contains('pane-resize-handle')) {
+    prevHandle.remove();
+  } else {
+    const nextHandle = pane.element.nextElementSibling;
+    if (nextHandle && nextHandle.classList.contains('pane-resize-handle')) {
+      nextHandle.remove();
+    }
+  }
   pane.element.remove();
 
   // Remove from list
   const idx = panes.findIndex((p) => p.id === pane.id);
   panes.splice(idx, 1);
 
-  // If only one pane left, remove split class
+  // If only one pane left, remove split class and reset flex
   const workspace = document.getElementById('workspace');
   if (workspace && panes.length === 1) {
     workspace.classList.remove('split-vertical', 'split-horizontal');
+    panes[0].element.style.flex = '';
+    // Remove any remaining resize handles
+    workspace.querySelectorAll('.pane-resize-handle').forEach((h) => h.remove());
   }
 
   // Focus remaining pane
@@ -274,6 +295,81 @@ function updatePaneStyles() {
 
   workspace.querySelectorAll('.pane').forEach((el) => {
     el.classList.toggle('active', el.dataset.paneId === activePaneId);
+  });
+}
+
+// ── Clear panes showing a closed file ─────────────────────
+
+export function clearPanesWithFile(filePath) {
+  for (const pane of panes) {
+    if (pane.filePath === filePath) {
+      pane.filePath = null;
+      pane.content = '';
+      pane.dirty = false;
+      if (pane.editorView) {
+        pane.editorView.destroy();
+        pane.editorView = null;
+      }
+      // Remove split view class so empty state fills the pane
+      pane.element.classList.remove('view-split', 'view-preview');
+      if (pane.editorContainer) {
+        pane.editorContainer.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-title">Fude</div>
+            <div class="empty-state-hint"><kbd>Ctrl+O</kbd> Open folder &nbsp; <kbd>Ctrl+N</kbd> New file</div>
+          </div>`;
+      }
+      if (pane.previewContainer) {
+        pane.previewContainer.innerHTML = '';
+      }
+    }
+  }
+}
+
+// ── Resize handle ────────────────────────────────────────
+
+function initResizeHandle(handle, workspace, isVertical) {
+  let startPos = 0;
+  let startSizes = [];
+
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    startPos = isVertical ? e.clientX : e.clientY;
+    const paneEls = Array.from(workspace.querySelectorAll('.pane'));
+    const totalSize = isVertical ? workspace.clientWidth : workspace.clientHeight;
+    startSizes = paneEls.map((el) => {
+      const rect = el.getBoundingClientRect();
+      return isVertical ? rect.width : rect.height;
+    });
+
+    const onMouseMove = (ev) => {
+      const delta = (isVertical ? ev.clientX : ev.clientY) - startPos;
+      const handleIndex = Array.from(workspace.querySelectorAll('.pane-resize-handle')).indexOf(handle);
+      const totalSize = isVertical ? workspace.clientWidth : workspace.clientHeight;
+      const handleSize = isVertical ? handle.offsetWidth : handle.offsetHeight;
+      const available = totalSize - handleSize * (paneEls.length - 1);
+
+      if (handleIndex >= 0 && handleIndex < startSizes.length - 1) {
+        const newFirst = Math.max(100, startSizes[handleIndex] + delta);
+        const newSecond = Math.max(100, startSizes[handleIndex + 1] - delta);
+        const firstPct = (newFirst / available) * 100;
+        const secondPct = (newSecond / available) * 100;
+        paneEls[handleIndex].style.flex = `0 0 ${firstPct}%`;
+        paneEls[handleIndex + 1].style.flex = `0 0 ${secondPct}%`;
+      }
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    document.body.style.cursor = isVertical ? 'col-resize' : 'row-resize';
+    document.body.style.userSelect = 'none';
   });
 }
 

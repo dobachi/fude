@@ -1,5 +1,6 @@
 // tabs.js - Tab management, one EditorView at a time
 import * as backend from '../backend.js';
+import { clearPanesWithFile } from './panes.js';
 
 function showConfirmDialog(message, onConfirm) {
   const overlay = document.createElement('div');
@@ -94,10 +95,11 @@ function forceCloseTab(id) {
   const index = tabs.findIndex((t) => t.id === id);
   if (index === -1) return;
 
-  // Delete temp file if it exists
+  // Delete temp file and clear panes showing this file
   const tab = tabs[index];
   if (tab.path) {
     backend.deleteTempFile(tab.path).catch(() => {});
+    clearPanesWithFile(tab.path);
   }
 
   tabs.splice(index, 1);
