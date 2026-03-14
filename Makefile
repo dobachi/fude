@@ -25,7 +25,7 @@ setup:
 # 開発モード
 dev:
 	npm run build:frontend
-	cargo tauri dev
+	npx tauri dev
 
 # フロントエンドのみビルド
 build-frontend:
@@ -34,7 +34,7 @@ build-frontend:
 # プロダクションビルド
 build:
 	npm run build:frontend
-	cargo tauri build
+	npx tauri build
 
 # テスト
 test: test-js test-rust

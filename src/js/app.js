@@ -22,6 +22,7 @@ import {
   updateTabContent,
   updateTabCursor,
   updateTabScroll,
+  updateTabPath,
   setTabChangeCallback,
   getTabsForSession,
   getActiveTabIndex,
@@ -38,8 +39,9 @@ import { initSidebar, loadDirectory, toggleSidebar, highlightFile } from './core
 import { scheduleSave, restoreSession } from './core/session.js';
 import { initTheme } from './core/theme.js';
 import { onContentChange, triggerSave } from './core/autosave.js';
-import { reapplyMode } from './core/keymode.js';
+import { reapplyMode, cycleMode } from './core/keymode.js';
 import { openSettings } from './settings.js';
+import { openHelp } from './help.js';
 
 let currentView = null;
 let viewMode = 'split';
@@ -75,8 +77,8 @@ async function init() {
   // Tab change callback
   setTabChangeCallback(handleTabChange);
 
-  // Global keyboard shortcuts
-  document.addEventListener('keydown', handleGlobalKeys, true);
+  // Global keyboard shortcuts - capture at window level to override browser defaults
+  window.addEventListener('keydown', handleGlobalKeys, true);
 
   // Sidebar toggle button
   const sidebarToggle = document.getElementById('sidebar-toggle');
@@ -242,6 +244,15 @@ function scheduleSessionSave() {
   }));
 }
 
+// ── Refresh sidebar ────────────────────────────────────────
+async function refreshSidebar() {
+  if (!vaultPath) return;
+  try {
+    const tree = await backend.readDirTree(vaultPath);
+    loadDirectory(tree);
+  } catch { /* ignore */ }
+}
+
 // ── Open folder dialog ─────────────────────────────────────
 async function handleOpenFolder() {
   try {
@@ -262,6 +273,51 @@ async function handleOpenFolder() {
 function handleGlobalKeys(e) {
   const mod = e.ctrlKey || e.metaKey;
   if (!mod) return;
+
+  // Help: Ctrl+? (Ctrl+Shift+/)
+  if ((e.key === '?' || (e.key === '/' && e.shiftKey)) && !e.altKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    openHelp();
+    return;
+  }
+
+  // Vim toggle: Ctrl+Shift+M
+  if (e.key === 'M' && e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    cycleMode();
+    return;
+  }
+
+  // Save As: Ctrl+Shift+S
+  if (e.key === 'S' && e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    (async () => {
+      const tab = getActiveTab();
+      if (!tab || !currentView) return;
+      const content = getContent(currentView);
+      try {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        const filePath = await save({
+          filters: [{ name: 'Markdown', extensions: ['md'] }],
+          defaultPath: tab.path || vaultPath || undefined,
+        });
+        if (filePath) {
+          const ok = await triggerSave(filePath, content);
+          if (ok) {
+            updateTabPath(tab.id, filePath);
+            markClean(tab.id);
+            refreshSidebar();
+          }
+        }
+      } catch (err) {
+        console.error('Save As failed:', err);
+      }
+    })();
+    return;
+  }
 
   switch (e.key) {
     case 'j':
@@ -296,7 +352,7 @@ function handleGlobalKeys(e) {
       if (active) closeTab(active.id);
       break;
     }
-    case ';':
+    case 'e':
       e.preventDefault();
       e.stopPropagation();
       toggleSidebar();
@@ -306,10 +362,33 @@ function handleGlobalKeys(e) {
       e.stopPropagation();
       (async () => {
         const tab = getActiveTab();
-        if (tab && tab.path && currentView) {
-          const content = getContent(currentView);
+        if (!tab || !currentView) return;
+        const content = getContent(currentView);
+        if (tab.path) {
           const ok = await triggerSave(tab.path, content);
-          if (ok) markClean(tab.id);
+          if (ok) {
+            markClean(tab.id);
+            refreshSidebar();
+          }
+        } else {
+          // Save As dialog for untitled tabs
+          try {
+            const { save } = await import('@tauri-apps/plugin-dialog');
+            const filePath = await save({
+              filters: [{ name: 'Markdown', extensions: ['md'] }],
+              defaultPath: vaultPath || undefined,
+            });
+            if (filePath) {
+              const ok = await triggerSave(filePath, content);
+              if (ok) {
+                updateTabPath(tab.id, filePath);
+                markClean(tab.id);
+                refreshSidebar();
+              }
+            }
+          } catch (err) {
+            console.error('Save As failed:', err);
+          }
         }
       })();
       break;
@@ -323,16 +402,17 @@ function handleGlobalKeys(e) {
       e.stopPropagation();
       openTab(null, '');
       break;
-    case '|':
-      e.preventDefault();
-      e.stopPropagation();
-      splitVertical();
-      break;
-    case '\\':
-      e.preventDefault();
-      e.stopPropagation();
-      splitHorizontal();
-      break;
+    // Pane split disabled until fully implemented
+    // case '|':
+    //   e.preventDefault();
+    //   e.stopPropagation();
+    //   splitVertical();
+    //   break;
+    // case '\\':
+    //   e.preventDefault();
+    //   e.stopPropagation();
+    //   splitHorizontal();
+    //   break;
     case '-':
       e.preventDefault();
       e.stopPropagation();
@@ -369,6 +449,7 @@ function handleGlobalKeys(e) {
       e.stopPropagation();
       openSettings();
       break;
+    // Ctrl+Shift+V and Ctrl+? are handled above the switch
   }
 }
 

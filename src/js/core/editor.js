@@ -130,7 +130,9 @@ export function createEditor(container, content = '', onChange = null) {
     autoListExtension(),
     boldKeymap(),
     baseTheme,
-    themeCompartment.of(darkTheme),
+    themeCompartment.of(
+      document.documentElement.getAttribute('data-theme') === 'light' ? lightTheme : darkTheme,
+    ),
     keymodeCompartment.of([]),
     EditorView.lineWrapping,
   ];

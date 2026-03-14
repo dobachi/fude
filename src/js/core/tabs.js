@@ -115,6 +115,15 @@ export function markClean(id) {
   }
 }
 
+export function updateTabPath(id, path) {
+  const tab = tabs.find((t) => t.id === id);
+  if (tab) {
+    tab.path = path;
+    tab.name = getFilename(path);
+    renderTabBar();
+  }
+}
+
 export function updateTabContent(id, content) {
   const tab = tabs.find((t) => t.id === id);
   if (tab) tab.content = content;

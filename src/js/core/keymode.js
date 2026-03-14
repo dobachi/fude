@@ -35,3 +35,11 @@ export function getMode() {
 export async function reapplyMode() {
   await setMode(currentMode);
 }
+
+export async function cycleMode() {
+  const modes = ['normal', 'vim'];
+  const index = modes.indexOf(currentMode);
+  const next = modes[(index + 1) % modes.length];
+  await setMode(next);
+  return next;
+}

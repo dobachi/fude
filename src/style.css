@@ -724,6 +724,126 @@ body {
   }
 }
 
+/* ===== Settings / Modal Overlay ===== */
+.settings-overlay,
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.settings-panel,
+.help-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 480px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.settings-header,
+.help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-header h2,
+.help-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+
+.settings-body,
+.help-body {
+  padding: 16px 20px;
+}
+
+.setting-group {
+  margin-bottom: 16px;
+}
+
+.setting-group label {
+  display: block;
+  font-size: 13px;
+  color: var(--fg-secondary);
+  margin-bottom: 6px;
+}
+
+.setting-group select,
+.setting-group input[type='range'],
+.setting-group input[type='password'] {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-primary);
+  font-size: 13px;
+}
+
+.setting-group input[type='checkbox'] {
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.settings-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  text-align: right;
+}
+
+.btn-save-settings {
+  padding: 6px 16px;
+  background: var(--fg-accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.btn-save-settings:hover {
+  opacity: 0.9;
+}
+
+/* Help panel table */
+.help-body table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.help-body th,
+.help-body td {
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.help-body th {
+  color: var(--fg-secondary);
+  font-weight: 600;
+}
+
+.help-body kbd {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
 /* ===== Utility ===== */
 .hidden {
   display: none !important;

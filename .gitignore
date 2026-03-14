@@ -3,3 +3,6 @@ dist/
 src-tauri/target/
 *.tmp
 .DS_Store
+testfile
+testfile.md
+testfile2.md
