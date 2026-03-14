@@ -60,8 +60,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Fude ${{ github.ref_name }}'
-          releaseBody: 'See the changelog for details.'
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('Fude {0}', github.ref_name) || '' }}
+          releaseBody: 'Download the portable exe (Windows), AppImage (Linux), or dmg (macOS).'
           releaseDraft: true
           prerelease: false
+
+      - name: Upload artifacts
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: fude-${{ matrix.target }}
+          path: |
+            src-tauri/target/release/bundle/**/*
+            src-tauri/target/release/markdown-editor*
+            !src-tauri/target/release/bundle/**/deps
+          retention-days: 7
