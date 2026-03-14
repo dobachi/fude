@@ -42,6 +42,7 @@ import { onContentChange, triggerSave } from './core/autosave.js';
 import { reapplyMode, cycleMode } from './core/keymode.js';
 import { openSettings } from './settings.js';
 import { openHelp } from './help.js';
+import { checkForUpdates } from './core/updater.js';
 
 let currentView = null;
 let viewMode = 'split';
@@ -125,6 +126,14 @@ async function init() {
       if (path) await openPath(path);
     });
   }
+
+  // Auto-focus editor when window gains focus
+  window.addEventListener('focus', () => {
+    if (currentView) currentView.focus();
+  });
+
+  // Check for updates (non-blocking)
+  checkForUpdates();
 }
 
 // ── File handling ──────────────────────────────────────────

@@ -12,6 +12,8 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "cli:default",
-    "cli:allow-cli-matches"
+    "cli:allow-cli-matches",
+    "updater:default",
+    "process:default"
   ]
 }

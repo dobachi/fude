@@ -33,6 +33,12 @@
     ]
   },
   "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/dobachi/fude/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM2N0UzRDVBMDkzOENDNjIKUldSaXpEZ0pXajErTm9KelJrR2w0cFYyQWNDRW91MS91YksvMFdjNGFtRDV6ZjRwM1p5Yk10ZkIK"
+    },
     "cli": {
       "args": [
         {
