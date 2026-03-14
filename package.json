@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev:frontend": "esbuild src/js/app.js --bundle --outfile=dist/bundle.js --format=esm --sourcemap --watch",
-    "build:frontend": "cp src/index.html src/style.css dist/ && esbuild src/js/app.js --bundle --outfile=dist/bundle.js --format=esm --minify --tree-shaking=true",
+    "prebuild:frontend": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\"",
+    "build:frontend": "node -e \"require('fs').cpSync('src/index.html','dist/index.html');require('fs').cpSync('src/style.css','dist/style.css')\" && esbuild src/js/app.js --bundle --outfile=dist/bundle.js --format=esm --minify --tree-shaking=true",
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
