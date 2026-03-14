@@ -24,6 +24,7 @@ const shortcuts = [
   ['Ctrl+-', '文字縮小'],
   ['Ctrl++', '文字拡大'],
   ['Ctrl+Shift+M', 'Vimモード切替'],
+  ['jj / jk', 'Vimインサートモード解除（ESC代替）'],
   ['Ctrl+,', '設定'],
   ['Ctrl+?', 'このヘルプ'],
 ];
