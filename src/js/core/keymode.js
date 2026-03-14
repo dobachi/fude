@@ -1,5 +1,6 @@
 // keymode.js - Keyboard mode management (vim/emacs/normal)
 import { toggleVim, getCurrentView } from './editor.js';
+import { getAllPanes } from './panes.js';
 
 let currentMode = 'normal';
 
@@ -9,22 +10,21 @@ export async function initKeymode(savedMode = 'normal') {
 
 export async function setMode(mode) {
   currentMode = mode;
-  const view = getCurrentView();
-  if (!view) return;
 
-  switch (mode) {
-    case 'vim':
-      await toggleVim(view, true);
-      break;
-    case 'emacs':
-      // TODO: Implement emacs keymap
-      console.info('Emacs mode not yet implemented');
-      await toggleVim(view, false);
-      break;
-    case 'normal':
-    default:
-      await toggleVim(view, false);
-      break;
+  const enable = mode === 'vim';
+
+  // Apply to all pane views
+  const panes = getAllPanes();
+  for (const pane of panes) {
+    if (pane.editorView) {
+      await toggleVim(pane.editorView, enable);
+    }
+  }
+
+  // Fallback: also apply to active view if panes not ready
+  const view = getCurrentView();
+  if (view) {
+    await toggleVim(view, enable);
   }
 }
 

@@ -2,12 +2,11 @@
 import markdownIt from 'markdown-it';
 
 let md = null;
-let previewContainer = null;
 let currentBasePath = '';
 let gPending = false;
 
-export function initPreview(container) {
-  previewContainer = container;
+function ensureMd() {
+  if (md) return;
 
   md = markdownIt({
     html: false,
@@ -40,47 +39,44 @@ export function initPreview(container) {
     }
     return defaultImageRender(tokens, idx, options, env, self);
   };
-
-  // Vim-like keyboard navigation in preview
-  container.setAttribute('tabindex', '0');
-  container.addEventListener('keydown', handlePreviewKeys);
 }
 
 function handlePreviewKeys(e) {
-  if (!previewContainer) return;
+  const container = e.currentTarget;
+  if (!container) return;
 
   const scrollAmount = 60;
-  const pageAmount = previewContainer.clientHeight * 0.8;
+  const pageAmount = container.clientHeight * 0.8;
 
   switch (e.key) {
     case 'j':
-      previewContainer.scrollTop += scrollAmount;
+      container.scrollTop += scrollAmount;
       e.preventDefault();
       break;
     case 'k':
-      previewContainer.scrollTop -= scrollAmount;
+      container.scrollTop -= scrollAmount;
       e.preventDefault();
       break;
     case 'd':
-      previewContainer.scrollTop += pageAmount;
+      container.scrollTop += pageAmount;
       e.preventDefault();
       break;
     case 'u':
-      previewContainer.scrollTop -= pageAmount;
+      container.scrollTop -= pageAmount;
       e.preventDefault();
       break;
     case 'PageDown':
     case ' ':
-      previewContainer.scrollTop += pageAmount;
+      container.scrollTop += pageAmount;
       e.preventDefault();
       break;
     case 'PageUp':
-      previewContainer.scrollTop -= pageAmount;
+      container.scrollTop -= pageAmount;
       e.preventDefault();
       break;
     case 'g':
       if (gPending) {
-        previewContainer.scrollTop = 0;
+        container.scrollTop = 0;
         gPending = false;
         e.preventDefault();
       } else {
@@ -91,17 +87,34 @@ function handlePreviewKeys(e) {
       }
       break;
     case 'G':
-      previewContainer.scrollTop = previewContainer.scrollHeight;
+      container.scrollTop = container.scrollHeight;
       e.preventDefault();
       break;
   }
 }
 
-export function renderMarkdown(text, basePath = '') {
-  if (!md || !previewContainer) return;
+/**
+ * Initialise a preview container (vim-like key navigation).
+ * Can be called multiple times for different containers (one per pane).
+ */
+export function initPreview(container) {
+  ensureMd();
+  container.setAttribute('tabindex', '0');
+  container.addEventListener('keydown', handlePreviewKeys);
+}
+
+/**
+ * Render markdown into a specific container.
+ * @param {string} text
+ * @param {string} basePath
+ * @param {HTMLElement} [container] - target container. If omitted, does nothing.
+ */
+export function renderMarkdown(text, basePath = '', container = null) {
+  ensureMd();
+  if (!container) return;
   currentBasePath = basePath;
   const html = md.render(text);
-  previewContainer.innerHTML = html;
+  container.innerHTML = html;
 }
 
 export function setTheme(_theme) {

@@ -14,10 +14,6 @@ import { searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codem
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
 import { oneDark } from '@codemirror/theme-one-dark';
 
-const themeCompartment = new Compartment();
-const keymodeCompartment = new Compartment();
-
-let currentView = null;
 let currentFontSize = 14;
 
 const baseTheme = EditorView.theme({
@@ -110,12 +106,16 @@ function boldKeymap() {
   ]);
 }
 
+/**
+ * Create a new EditorView in the given container.
+ * Each call creates an independent view; previous views are NOT destroyed.
+ * The caller is responsible for destroying old views when needed.
+ */
 export function createEditor(container, content = '', onChange = null, onScroll = null) {
-  if (currentView) {
-    currentView.destroy();
-  }
-
   container.innerHTML = '';
+
+  const themeCompartment = new Compartment();
+  const keymodeCompartment = new Compartment();
 
   const extensions = [
     lineNumbers(),
@@ -127,7 +127,6 @@ export function createEditor(container, content = '', onChange = null, onScroll 
     highlightSelectionMatches(),
     markdown({ base: markdownLanguage, codeLanguages: languages }),
     keymap.of([
-      // Ctrl+R removed - search/replace is unified under Ctrl+F
       {
         key: 'Ctrl-d',
         run(view) {
@@ -169,21 +168,25 @@ export function createEditor(container, content = '', onChange = null, onScroll 
     );
   }
 
-  currentView = new EditorView({
+  const view = new EditorView({
     state: EditorState.create({ doc: content, extensions }),
     parent: container,
   });
 
+  // Store compartment references on the view for later reconfiguration
+  view._themeCompartment = themeCompartment;
+  view._keymodeCompartment = keymodeCompartment;
+
   if (onScroll) {
-    currentView.scrollDOM.addEventListener('scroll', () => {
-      const { scrollTop, scrollHeight, clientHeight } = currentView.scrollDOM;
+    view.scrollDOM.addEventListener('scroll', () => {
+      const { scrollTop, scrollHeight, clientHeight } = view.scrollDOM;
       const maxScroll = scrollHeight - clientHeight;
       const ratio = maxScroll > 0 ? scrollTop / maxScroll : 0;
       onScroll(ratio);
     });
   }
 
-  return currentView;
+  return view;
 }
 
 export function setContent(view, content) {
@@ -195,8 +198,9 @@ export function getContent(view) {
 }
 
 export function setTheme(view, theme) {
+  if (!view._themeCompartment) return;
   const themeExt = theme === 'dark' ? darkTheme : lightTheme;
-  view.dispatch({ effects: themeCompartment.reconfigure(themeExt) });
+  view.dispatch({ effects: view._themeCompartment.reconfigure(themeExt) });
 }
 
 export function getCursor(view) {
@@ -231,19 +235,44 @@ export function getFontSize() {
   return currentFontSize;
 }
 
+/**
+ * Get the currently active EditorView (from the active pane).
+ * Uses lazy import to avoid circular dependency with panes.js.
+ */
+export function getCurrentView() {
+  // Lazy-resolve to avoid circular import at module evaluation time
+  if (!_getActivePaneView) {
+    try {
+      // eslint-disable-next-line no-eval
+      const mod = _panesModule;
+      if (mod) _getActivePaneView = mod.getActivePaneView;
+    } catch { /* ignore */ }
+  }
+  return _getActivePaneView ? _getActivePaneView() : null;
+}
+
+let _getActivePaneView = null;
+let _panesModule = null;
+
+/**
+ * Register the panes module so getCurrentView() can resolve without circular imports.
+ * Called once from app.js after both modules are loaded.
+ */
+export function registerPanesModule(mod) {
+  _panesModule = mod;
+  _getActivePaneView = mod.getActivePaneView;
+}
+
 export async function toggleVim(view, enable) {
+  if (!view._keymodeCompartment) return;
   if (enable) {
     try {
       const { vim } = await import('@replit/codemirror-vim');
-      view.dispatch({ effects: keymodeCompartment.reconfigure(vim()) });
+      view.dispatch({ effects: view._keymodeCompartment.reconfigure(vim()) });
     } catch (e) {
       console.warn('Vim extension not available:', e);
     }
   } else {
-    view.dispatch({ effects: keymodeCompartment.reconfigure([]) });
+    view.dispatch({ effects: view._keymodeCompartment.reconfigure([]) });
   }
-}
-
-export function getCurrentView() {
-  return currentView;
 }

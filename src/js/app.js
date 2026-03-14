@@ -1,7 +1,6 @@
 // app.js - Main orchestrator
 import * as backend from './backend.js';
 import {
-  createEditor,
   getContent,
   getCursor,
   getScroll,
@@ -10,6 +9,7 @@ import {
   setFontSize,
   getFontSize,
   setContent,
+  registerPanesModule,
 } from './core/editor.js';
 import { initPreview, renderMarkdown } from './core/preview.js';
 import {
@@ -29,14 +29,19 @@ import {
   getActiveTabIndex,
   getAllTabs,
 } from './core/tabs.js';
-import {
+import * as panesModule from './core/panes.js';
+const {
   initPanes,
   splitVertical,
   splitHorizontal,
+  closeActivePane,
   focusPane,
-  getActivePaneEditorContainer,
-  getActivePanePreviewContainer,
-} from './core/panes.js';
+  getActivePane,
+  getActivePaneView,
+  setCallbacks,
+  createEditorInPane,
+  getPaneCount,
+} = panesModule;
 import { initSidebar, loadDirectory, toggleSidebar, highlightFile } from './core/sidebar.js';
 import { scheduleSave, restoreSession } from './core/session.js';
 import { initTheme } from './core/theme.js';
@@ -46,10 +51,17 @@ import { openSettings } from './settings.js';
 import { openHelp } from './help.js';
 import { checkForUpdates } from './core/updater.js';
 
-let currentView = null;
 let viewMode = 'split';
 let vaultPath = '';
 let config = {};
+
+// Register panes module with editor.js so getCurrentView() works without circular imports
+registerPanesModule(panesModule);
+
+/** Helper: get the active pane's EditorView */
+function currentView() {
+  return getActivePaneView();
+}
 
 // ── Initialization ─────────────────────────────────────────
 async function init() {
@@ -67,11 +79,17 @@ async function init() {
   initTheme(config.theme || 'dark');
   if (config.font_size) setFontSize(config.font_size);
 
-  // Init preview
+  // Init preview for the default pane
   const previewEl = document.querySelector('.pane[data-pane-id="default"] .preview-pane');
   if (previewEl) initPreview(previewEl);
 
   initPanes();
+
+  // Wire up pane callbacks for editor changes and scroll sync
+  setCallbacks({
+    onChange: handlePaneContentChange,
+    onScroll: handlePaneScroll,
+  });
 
   // Init sidebar
   const fileTree = document.getElementById('file-tree');
@@ -99,9 +117,11 @@ async function init() {
     { passive: false },
   );
 
-  // Sidebar toggle button
+  // Sidebar toggle buttons
   const sidebarToggle = document.getElementById('sidebar-toggle');
   if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
+  const sidebarOpen = document.getElementById('sidebar-open');
+  if (sidebarOpen) sidebarOpen.addEventListener('click', toggleSidebar);
 
   // Try restore session
   const session = await restoreSession();
@@ -153,9 +173,9 @@ async function init() {
               // If this is the active tab, reload the editor
               const active = getActiveTab();
               if (active && active.id === tab.id) {
-                const editorContainer = getActivePaneEditorContainer();
-                if (editorContainer && currentView) {
-                  setContent(currentView, tempContent);
+                const view = currentView();
+                if (view) {
+                  setContent(view, tempContent);
                 }
               }
             }
@@ -193,7 +213,8 @@ async function init() {
 
   // Auto-focus editor when window gains focus
   window.addEventListener('focus', () => {
-    if (currentView) currentView.focus();
+    const view = currentView();
+    if (view) view.focus();
   });
 
   // Warn on window close if unsaved changes (Tauri)
@@ -214,6 +235,32 @@ async function init() {
 
   // Check for updates (non-blocking)
   checkForUpdates();
+}
+
+// ── Pane content/scroll callbacks ──────────────────────────
+
+function handlePaneContentChange(pane, newContent) {
+  // Find the tab for the active pane
+  const tab = getActiveTab();
+  if (!tab) return;
+
+  updateTabContent(tab.id, newContent);
+  markDirty(tab.id);
+  onContentChange(tab.path, newContent);
+
+  if (viewMode === 'split' || viewMode === 'preview') {
+    const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : '';
+    renderMarkdown(newContent, basePath, pane.previewContainer);
+  }
+
+  scheduleSessionSave();
+}
+
+function handlePaneScroll(pane, ratio) {
+  if (viewMode === 'split' && pane.previewContainer) {
+    const maxScroll = pane.previewContainer.scrollHeight - pane.previewContainer.clientHeight;
+    pane.previewContainer.scrollTop = maxScroll * ratio;
+  }
 }
 
 // ── File handling ──────────────────────────────────────────
@@ -244,8 +291,11 @@ async function openPath(path) {
 
 // ── Tab change handler ─────────────────────────────────────
 function handleTabChange(tab) {
-  const editorContainer = getActivePaneEditorContainer();
-  const previewContainer = getActivePanePreviewContainer();
+  const pane = getActivePane();
+  if (!pane) return;
+
+  const editorContainer = pane.editorContainer;
+  const previewContainer = pane.previewContainer;
 
   if (!tab) {
     if (editorContainer) {
@@ -256,58 +306,37 @@ function handleTabChange(tab) {
         </div>`;
     }
     if (previewContainer) previewContainer.innerHTML = '';
+    pane.editorView = null;
+    pane.filePath = null;
+    pane.content = '';
     return;
   }
 
-  // Save previous tab state
-  if (currentView) {
-    const prevTab = getActiveTab();
-    if (prevTab) {
-      updateTabCursor(prevTab.id, getCursor(currentView));
-      updateTabScroll(prevTab.id, getScroll(currentView));
-    }
-  }
+  // Create a new editor in the active pane
+  const view = createEditorInPane(pane, tab.content);
 
-  currentView = createEditor(
-    editorContainer,
-    tab.content,
-    (newContent) => {
-      updateTabContent(tab.id, newContent);
-      markDirty(tab.id);
-      onContentChange(tab.path, newContent);
-
-      if (viewMode === 'split' || viewMode === 'preview') {
-        const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : '';
-        renderMarkdown(newContent, basePath);
-      }
-
-      scheduleSessionSave();
-    },
-    (scrollRatio) => {
-      if (viewMode === 'split' && previewContainer) {
-        const maxScroll = previewContainer.scrollHeight - previewContainer.clientHeight;
-        previewContainer.scrollTop = maxScroll * scrollRatio;
-      }
-    },
-  );
+  // Update pane file tracking
+  pane.filePath = tab.path;
+  pane.content = tab.content;
+  pane.dirty = tab.dirty;
 
   // Apply vim mode
   reapplyMode();
 
   // Restore cursor and scroll
-  if (tab.cursor) setCursor(currentView, tab.cursor.from || 0, tab.cursor.to || 0);
-  if (tab.scroll) setScroll(currentView, tab.scroll);
+  if (tab.cursor) setCursor(view, tab.cursor.from || 0, tab.cursor.to || 0);
+  if (tab.scroll) setScroll(view, tab.scroll);
 
   // Render preview
   if (viewMode === 'split' || viewMode === 'preview') {
     const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : '';
-    renderMarkdown(tab.content, basePath);
+    renderMarkdown(tab.content, basePath, previewContainer);
   }
 
   if (tab.path) highlightFile(tab.path);
 
   // Focus editor after tab switch
-  if (currentView) currentView.focus();
+  if (view) view.focus();
 
   // Save session on tab change
   scheduleSessionSave();
@@ -315,18 +344,22 @@ function handleTabChange(tab) {
 
 // ── View mode ──────────────────────────────────────────────
 function applyViewMode() {
-  const pane = document.querySelector('.pane[data-pane-id="default"]');
-  if (!pane) return;
-
-  pane.classList.remove('view-split', 'view-preview');
-  if (viewMode === 'split') pane.classList.add('view-split');
-  else if (viewMode === 'preview') pane.classList.add('view-preview');
+  // Apply to all panes
+  const allPanes = panesModule.getAllPanes();
+  for (const p of allPanes) {
+    p.element.classList.remove('view-split', 'view-preview');
+    if (viewMode === 'split') p.element.classList.add('view-split');
+    else if (viewMode === 'preview') p.element.classList.add('view-preview');
+  }
 
   if (viewMode === 'split' || viewMode === 'preview') {
     const tab = getActiveTab();
     if (tab) {
-      const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : '';
-      renderMarkdown(tab.content, basePath);
+      const pane = getActivePane();
+      if (pane) {
+        const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : '';
+        renderMarkdown(tab.content, basePath, pane.previewContainer);
+      }
     }
   }
 }
@@ -429,6 +462,18 @@ async function handleOpenFolder() {
   }
 }
 
+// ── Helpers ────────────────────────────────────────────────
+
+/** Save the current active pane's tab state (cursor, scroll) before switching. */
+function saveActivePaneTabState() {
+  const view = currentView();
+  if (!view) return;
+  const tab = getActiveTab();
+  if (!tab) return;
+  updateTabCursor(tab.id, getCursor(view));
+  updateTabScroll(tab.id, getScroll(view));
+}
+
 // ── Global keyboard shortcuts ──────────────────────────────
 function handleGlobalKeys(e) {
   const mod = e.ctrlKey || e.metaKey;
@@ -460,8 +505,9 @@ function handleGlobalKeys(e) {
     e.stopPropagation();
     (async () => {
       const tab = getActiveTab();
-      if (!tab || !currentView) return;
-      const content = getContent(currentView);
+      const view = currentView();
+      if (!tab || !view) return;
+      const content = getContent(view);
       try {
         const { save } = await import('@tauri-apps/plugin-dialog');
         const filePath = await save({
@@ -507,13 +553,19 @@ function handleGlobalKeys(e) {
     case 'Tab':
       e.preventDefault();
       e.stopPropagation();
+      saveActivePaneTabState();
       e.shiftKey ? prevTab() : nextTab();
       break;
     case 'w': {
       e.preventDefault();
       e.stopPropagation();
-      const active = getActiveTab();
-      if (active) closeTab(active.id);
+      // Ctrl+Shift+W closes the active split pane; Ctrl+W closes the tab
+      if (e.shiftKey && getPaneCount() > 1) {
+        closeActivePane();
+      } else {
+        const active = getActiveTab();
+        if (active) closeTab(active.id);
+      }
       break;
     }
     case 'e':
@@ -526,8 +578,9 @@ function handleGlobalKeys(e) {
       e.stopPropagation();
       (async () => {
         const tab = getActiveTab();
-        if (!tab || !currentView) return;
-        const content = getContent(currentView);
+        const view = currentView();
+        if (!tab || !view) return;
+        const content = getContent(view);
         if (tab.path) {
           const ok = await triggerSave(tab.path, content);
           if (ok) {
@@ -566,17 +619,23 @@ function handleGlobalKeys(e) {
       e.stopPropagation();
       openTab(null, '');
       break;
-    // Pane split disabled until fully implemented
-    // case '|':
-    //   e.preventDefault();
-    //   e.stopPropagation();
-    //   splitVertical();
-    //   break;
-    // case '\\':
-    //   e.preventDefault();
-    //   e.stopPropagation();
-    //   splitHorizontal();
-    //   break;
+    // Pane split
+    case '|':  // Ctrl+Shift+\
+    case 'D':  // Ctrl+Shift+D (alternative)
+      if (e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        splitVertical();
+      }
+      break;
+    case '\\': // Ctrl+\
+    case 'H':  // Ctrl+Shift+H (alternative)
+      if (e.shiftKey || e.key === '\\') {
+        e.preventDefault();
+        e.stopPropagation();
+        splitHorizontal();
+      }
+      break;
     case '-':
       e.preventDefault();
       e.stopPropagation();

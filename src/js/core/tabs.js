@@ -192,7 +192,8 @@ function renderTabBar() {
   const tabBar = document.getElementById('tab-bar');
   if (!tabBar) return;
 
-  tabBar.innerHTML = '';
+  // Remove only tab elements, preserve the sidebar-open button
+  tabBar.querySelectorAll('.tab').forEach((el) => el.remove());
 
   tabs.forEach((tab) => {
     const el = document.createElement('div');
