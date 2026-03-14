@@ -22,10 +22,15 @@ setup:
 	cargo build --manifest-path src-tauri/Cargo.toml
 	@echo "==> セットアップ完了"
 
-# 開発モード
+# 開発モード（Tauriネイティブ）
 dev:
 	npm run build:frontend
 	npx tauri dev
+
+# ブラウザモード（WSL向け、日本語IME対応）
+browser:
+	npm run build:frontend
+	node scripts/serve.js
 
 # フロントエンドのみビルド
 build-frontend:

@@ -5,7 +5,7 @@ if (window.__TAURI__) {
   invoke = window.__TAURI__.core.invoke;
 } else {
   invoke = async (cmd, args = {}) => {
-    const res = await fetch(`http://localhost:3030/api/${cmd}`, {
+    const res = await fetch(`/api/${cmd}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(args),
