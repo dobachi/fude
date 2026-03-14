@@ -499,6 +499,14 @@ function handleGlobalKeys(e) {
     return;
   }
 
+  // Close pane: Ctrl+Shift+W
+  if (e.key === 'W' && e.shiftKey && getPaneCount() > 1) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeActivePane();
+    return;
+  }
+
   // Save As: Ctrl+Shift+S
   if (e.key === 'S' && e.shiftKey) {
     e.preventDefault();

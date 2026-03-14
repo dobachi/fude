@@ -255,7 +255,9 @@ export function focusPane(direction) {
   if (targetIndex !== currentIndex) {
     setActivePaneById(panes[targetIndex].id);
     const target = panes[targetIndex];
-    if (target.editorView) target.editorView.focus();
+    if (target.editorView) {
+      setTimeout(() => target.editorView.focus(), 0);
+    }
   }
 }
 
