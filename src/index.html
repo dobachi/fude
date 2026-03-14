@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fude</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="sidebar">
+        <div id="sidebar-header">
+          <span class="sidebar-title">Files</span>
+          <button id="sidebar-toggle" class="icon-btn" aria-label="Toggle sidebar">&#x2039;</button>
+        </div>
+        <div id="file-tree"></div>
+      </div>
+
+      <div id="main">
+        <div id="tab-bar"></div>
+        <div id="workspace">
+          <div class="pane active view-split" data-pane-id="default">
+            <div class="editor-pane"></div>
+            <div class="preview-pane"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="ai-panel">
+        <div id="ai-panel-header">
+          <span class="ai-panel-title">AI Copilot</span>
+          <button id="ai-panel-close" class="icon-btn" aria-label="Close AI panel">&times;</button>
+        </div>
+        <div id="ai-panel-content"></div>
+      </div>
+    </div>
+
+    <script type="module" src="dist/bundle.js"></script>
+  </body>
+</html>
