@@ -49,6 +49,9 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Build frontend
+        run: npm run build:frontend
+
       - name: Run JS tests
         run: npx vitest run
 

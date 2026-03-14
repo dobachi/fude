@@ -81,6 +81,22 @@ async function init() {
   // Global keyboard shortcuts - capture at window level to override browser defaults
   window.addEventListener('keydown', handleGlobalKeys, true);
 
+  // Ctrl+mouse wheel zoom
+  window.addEventListener(
+    'wheel',
+    (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        if (e.deltaY < 0) {
+          setFontSize(Math.min(32, getFontSize() + 1));
+        } else {
+          setFontSize(Math.max(10, getFontSize() - 1));
+        }
+      }
+    },
+    { passive: false },
+  );
+
   // Sidebar toggle button
   const sidebarToggle = document.getElementById('sidebar-toggle');
   if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
@@ -188,18 +204,28 @@ function handleTabChange(tab) {
     }
   }
 
-  currentView = createEditor(editorContainer, tab.content, (newContent) => {
-    updateTabContent(tab.id, newContent);
-    markDirty(tab.id);
-    onContentChange(tab.path, newContent);
+  currentView = createEditor(
+    editorContainer,
+    tab.content,
+    (newContent) => {
+      updateTabContent(tab.id, newContent);
+      markDirty(tab.id);
+      onContentChange(tab.path, newContent);
 
-    if (viewMode === 'split' || viewMode === 'preview') {
-      const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : '';
-      renderMarkdown(newContent, basePath);
-    }
+      if (viewMode === 'split' || viewMode === 'preview') {
+        const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : '';
+        renderMarkdown(newContent, basePath);
+      }
 
-    scheduleSessionSave();
-  });
+      scheduleSessionSave();
+    },
+    (scrollRatio) => {
+      if (viewMode === 'split' && previewContainer) {
+        const maxScroll = previewContainer.scrollHeight - previewContainer.clientHeight;
+        previewContainer.scrollTop = maxScroll * scrollRatio;
+      }
+    },
+  );
 
   // Apply vim mode
   reapplyMode();

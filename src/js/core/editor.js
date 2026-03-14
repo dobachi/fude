@@ -110,7 +110,7 @@ function boldKeymap() {
   ]);
 }
 
-export function createEditor(container, content = '', onChange = null) {
+export function createEditor(container, content = '', onChange = null, onScroll = null) {
   if (currentView) {
     currentView.destroy();
   }
@@ -151,6 +151,15 @@ export function createEditor(container, content = '', onChange = null) {
     state: EditorState.create({ doc: content, extensions }),
     parent: container,
   });
+
+  if (onScroll) {
+    currentView.scrollDOM.addEventListener('scroll', () => {
+      const { scrollTop, scrollHeight, clientHeight } = currentView.scrollDOM;
+      const maxScroll = scrollHeight - clientHeight;
+      const ratio = maxScroll > 0 ? scrollTop / maxScroll : 0;
+      onScroll(ratio);
+    });
+  }
 
   return currentView;
 }
