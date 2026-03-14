@@ -1,5 +1,31 @@
 // tabs.js - Tab management, one EditorView at a time
 
+function showConfirmDialog(message, onConfirm) {
+  const overlay = document.createElement('div');
+  overlay.className = 'settings-overlay';
+  overlay.innerHTML = `
+    <div class="settings-panel" style="width:360px">
+      <div class="settings-body" style="padding:20px">
+        <p style="margin-bottom:16px;color:var(--fg-primary)">${message}</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn-cancel" style="padding:6px 16px;background:var(--bg-tertiary);color:var(--fg-primary);border:1px solid var(--border);border-radius:4px;cursor:pointer">キャンセル</button>
+          <button class="btn-confirm" style="padding:6px 16px;background:var(--fg-accent);color:#fff;border:none;border-radius:4px;cursor:pointer">閉じる</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('.btn-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('.btn-confirm').addEventListener('click', () => {
+    overlay.remove();
+    onConfirm();
+  });
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+}
+
 let tabs = [];
 let activeTabId = null;
 let nextTabId = 1;
@@ -48,6 +74,22 @@ export function openTab(path, content = '') {
 }
 
 export function closeTab(id) {
+  const index = tabs.findIndex((t) => t.id === id);
+  if (index === -1) return;
+
+  const tab = tabs[index];
+  if (tab.dirty) {
+    const name = tab.path ? tab.path.split('/').pop() : 'Untitled';
+    showConfirmDialog(`"${name}" は未保存です。閉じますか？`, () => {
+      forceCloseTab(id);
+    });
+    return;
+  }
+
+  forceCloseTab(id);
+}
+
+function forceCloseTab(id) {
   const index = tabs.findIndex((t) => t.id === id);
   if (index === -1) return;
 
@@ -162,9 +204,14 @@ function renderTabBar() {
     const closeBtn = document.createElement('button');
     closeBtn.className = 'tab-close';
     closeBtn.textContent = '\u00d7';
+    closeBtn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+    });
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      closeTab(tab.id);
+      // Use setTimeout to let the click event fully complete before showing confirm
+      setTimeout(() => closeTab(tab.id), 0);
     });
     el.appendChild(closeBtn);
 
@@ -172,7 +219,8 @@ function renderTabBar() {
     el.addEventListener('mousedown', (e) => {
       if (e.button === 1) {
         e.preventDefault();
-        closeTab(tab.id);
+        e.stopPropagation();
+        setTimeout(() => closeTab(tab.id), 0);
       }
     });
 

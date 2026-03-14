@@ -9,6 +9,7 @@ import {
   setScroll,
   setFontSize,
   getFontSize,
+  setContent,
 } from './core/editor.js';
 import { initPreview, renderMarkdown } from './core/preview.js';
 import {
@@ -26,6 +27,7 @@ import {
   setTabChangeCallback,
   getTabsForSession,
   getActiveTabIndex,
+  getAllTabs,
 } from './core/tabs.js';
 import {
   initPanes,
@@ -38,7 +40,7 @@ import {
 import { initSidebar, loadDirectory, toggleSidebar, highlightFile } from './core/sidebar.js';
 import { scheduleSave, restoreSession } from './core/session.js';
 import { initTheme } from './core/theme.js';
-import { onContentChange, triggerSave } from './core/autosave.js';
+import { onContentChange, triggerSave, checkRecovery } from './core/autosave.js';
 import { reapplyMode, cycleMode } from './core/keymode.js';
 import { openSettings } from './settings.js';
 import { openHelp } from './help.js';
@@ -117,7 +119,16 @@ async function init() {
       }
     }
 
-    // Restore tabs
+    // Check for crash recovery temp files
+    const tabPaths = session.open_tabs.map((t) => t.path).filter(Boolean);
+    const recoverable = await checkRecovery(tabPaths);
+    const recoverableMap = {};
+    for (const info of recoverable) {
+      recoverableMap[info.original_path] = info.temp_path;
+    }
+    const recoverablePaths = Object.keys(recoverableMap);
+
+    // First, open all tabs with saved content
     for (const tabInfo of session.open_tabs) {
       try {
         const content = await backend.readFile(tabInfo.path);
@@ -125,6 +136,43 @@ async function init() {
       } catch {
         /* ignore */
       }
+    }
+
+    // Then ask about recovery if temp files exist
+    if (recoverablePaths.length > 0) {
+      const names = recoverablePaths.map((p) => p.split('/').pop()).join(', ');
+      showRecoveryDialog(names, async () => {
+        // Recover: replace tab content with temp file content
+        for (const path of recoverablePaths) {
+          try {
+            const tempContent = await backend.readFile(recoverableMap[path]);
+            const tab = getAllTabs().find((t) => t.path === path);
+            if (tab) {
+              updateTabContent(tab.id, tempContent);
+              markDirty(tab.id);
+              // If this is the active tab, reload the editor
+              const active = getActiveTab();
+              if (active && active.id === tab.id) {
+                const editorContainer = getActivePaneEditorContainer();
+                if (editorContainer && currentView) {
+                  setContent(currentView, tempContent);
+                }
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }, async () => {
+        // Decline: delete temp files
+        for (const path of recoverablePaths) {
+          try {
+            await backend.deleteTempFile(path);
+          } catch {
+            /* ignore */
+          }
+        }
+      });
     }
   } else {
     openTab(
@@ -147,6 +195,22 @@ async function init() {
   window.addEventListener('focus', () => {
     if (currentView) currentView.focus();
   });
+
+  // Warn on window close if unsaved changes (Tauri)
+  if (window.__TAURI__) {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const appWindow = getCurrentWindow();
+    appWindow.onCloseRequested(async (event) => {
+      const hasDirty = getAllTabs().some((t) => t.dirty);
+      if (hasDirty) {
+        event.preventDefault();
+        showCloseAppDialog(async () => {
+          const { exit } = await import('@tauri-apps/plugin-process');
+          await exit(0);
+        });
+      }
+    });
+  }
 
   // Check for updates (non-blocking)
   checkForUpdates();
@@ -273,6 +337,61 @@ function setViewMode(mode) {
   scheduleSessionSave();
 }
 
+// ── Recovery dialog ────────────────────────────────────────
+function showRecoveryDialog(fileNames, onRecover, onDiscard) {
+  const overlay = document.createElement('div');
+  overlay.className = 'settings-overlay';
+  overlay.innerHTML = `
+    <div class="settings-panel" style="width:400px">
+      <div class="settings-body" style="padding:20px">
+        <p style="margin-bottom:8px;color:var(--fg-primary);font-weight:600">未保存の編集が見つかりました</p>
+        <p style="margin-bottom:16px;color:var(--fg-secondary);font-size:13px">${fileNames}</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn-discard" style="padding:6px 16px;background:var(--bg-tertiary);color:var(--fg-primary);border:1px solid var(--border);border-radius:4px;cursor:pointer">破棄</button>
+          <button class="btn-recover" style="padding:6px 16px;background:var(--fg-accent);color:#fff;border:none;border-radius:4px;cursor:pointer">復元</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('.btn-discard').addEventListener('click', () => {
+    overlay.remove();
+    if (onDiscard) onDiscard();
+  });
+  overlay.querySelector('.btn-recover').addEventListener('click', () => {
+    overlay.remove();
+    if (onRecover) onRecover();
+  });
+}
+
+// ── Close app dialog ───────────────────────────────────────
+function showCloseAppDialog(onConfirm) {
+  const dirtyTabs = getAllTabs().filter((t) => t.dirty);
+  const names = dirtyTabs.map((t) => (t.path ? t.path.split('/').pop() : 'Untitled')).join(', ');
+  const overlay = document.createElement('div');
+  overlay.className = 'settings-overlay';
+  overlay.innerHTML = `
+    <div class="settings-panel" style="width:400px">
+      <div class="settings-body" style="padding:20px">
+        <p style="margin-bottom:8px;color:var(--fg-primary);font-weight:600">未保存のファイルがあります</p>
+        <p style="margin-bottom:16px;color:var(--fg-secondary);font-size:13px">${names}</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn-cancel" style="padding:6px 16px;background:var(--bg-tertiary);color:var(--fg-primary);border:1px solid var(--border);border-radius:4px;cursor:pointer">キャンセル</button>
+          <button class="btn-confirm" style="padding:6px 16px;background:#d32f2f;color:#fff;border:none;border-radius:4px;cursor:pointer">保存せず終了</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('.btn-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('.btn-confirm').addEventListener('click', () => {
+    overlay.remove();
+    onConfirm();
+  });
+}
+
 // ── Session save ───────────────────────────────────────────
 function scheduleSessionSave() {
   scheduleSave(() => ({
@@ -316,7 +435,7 @@ function handleGlobalKeys(e) {
   if (!mod) return;
 
   // Let these keys pass through to CodeMirror (vim mode needs them)
-  const passthroughKeys = ['u', 'd', 'f', 'r', 'b', 'c', 'v', 'x', 'z', 'a'];
+  const passthroughKeys = ['u', 'd', 'f', 'b', 'c', 'v', 'x', 'z', 'a'];
   if (passthroughKeys.includes(e.key) && !e.shiftKey) return;
 
   // Help: Ctrl+? (Ctrl+Shift+/)

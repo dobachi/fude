@@ -127,7 +127,7 @@ export function createEditor(container, content = '', onChange = null, onScroll 
     highlightSelectionMatches(),
     markdown({ base: markdownLanguage, codeLanguages: languages }),
     keymap.of([
-      { key: 'Ctrl-r', run: openSearchPanel },
+      // Ctrl+R removed - search/replace is unified under Ctrl+F
       {
         key: 'Ctrl-d',
         run(view) {

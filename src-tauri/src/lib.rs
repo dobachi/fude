@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use tauri::Emitter;
 use tauri_plugin_cli::CliExt;
@@ -81,6 +83,28 @@ fn ensure_config_dir() -> Result<PathBuf, String> {
             .map_err(|e| format!("Failed to create config directory: {}", e))?;
     }
     Ok(dir)
+}
+
+fn temp_dir() -> Result<PathBuf, String> {
+    let dir = config_dir()?.join("tmp");
+    if !dir.exists() {
+        fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+    }
+    Ok(dir)
+}
+
+fn temp_file_path(original_path: &str) -> Result<PathBuf, String> {
+    let dir = temp_dir()?;
+    let mut hasher = DefaultHasher::new();
+    original_path.hash(&mut hasher);
+    let hash = hasher.finish();
+    let file_name = Path::new(original_path)
+        .file_name()
+        .ok_or_else(|| "Invalid file path".to_string())?
+        .to_string_lossy();
+    let temp_name = format!("{:x}_{}", hash, file_name);
+    Ok(dir.join(temp_name))
 }
 
 impl Default for Config {
@@ -239,34 +263,14 @@ fn save_config(config: Config) -> Result<(), String> {
 
 #[tauri::command]
 fn write_temp_file(path: String, content: String) -> Result<(), String> {
-    let file_path = Path::new(&path);
-    let file_name = file_path
-        .file_name()
-        .ok_or_else(|| "Invalid file path".to_string())?
-        .to_string_lossy();
-    let temp_name = format!(".~{}.tmp", file_name);
-    let temp_path = file_path
-        .parent()
-        .ok_or_else(|| "Invalid file path: no parent directory".to_string())?
-        .join(&temp_name);
-
+    let temp_path = temp_file_path(&path)?;
     fs::write(&temp_path, content)
         .map_err(|e| format!("Failed to write temp file '{}': {}", temp_path.display(), e))
 }
 
 #[tauri::command]
 fn delete_temp_file(path: String) -> Result<(), String> {
-    let file_path = Path::new(&path);
-    let file_name = file_path
-        .file_name()
-        .ok_or_else(|| "Invalid file path".to_string())?
-        .to_string_lossy();
-    let temp_name = format!(".~{}.tmp", file_name);
-    let temp_path = file_path
-        .parent()
-        .ok_or_else(|| "Invalid file path: no parent directory".to_string())?
-        .join(&temp_name);
-
+    let temp_path = temp_file_path(&path)?;
     if temp_path.exists() {
         fs::remove_file(&temp_path).map_err(|e| {
             format!(
@@ -284,15 +288,9 @@ fn check_temp_files(paths: Vec<String>) -> Result<Vec<TempFileInfo>, String> {
     let mut results = Vec::new();
 
     for path in paths {
-        let file_path = Path::new(&path);
-        let file_name = match file_path.file_name() {
-            Some(name) => name.to_string_lossy().to_string(),
-            None => continue,
-        };
-        let temp_name = format!(".~{}.tmp", file_name);
-        let temp_path = match file_path.parent() {
-            Some(parent) => parent.join(&temp_name),
-            None => continue,
+        let temp_path = match temp_file_path(&path) {
+            Ok(p) => p,
+            Err(_) => continue,
         };
 
         if temp_path.exists() {
