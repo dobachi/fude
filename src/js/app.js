@@ -241,6 +241,12 @@ function handleTabChange(tab) {
   }
 
   if (tab.path) highlightFile(tab.path);
+
+  // Focus editor after tab switch
+  if (currentView) currentView.focus();
+
+  // Save session on tab change
+  scheduleSessionSave();
 }
 
 // ── View mode ──────────────────────────────────────────────
@@ -308,6 +314,10 @@ async function handleOpenFolder() {
 function handleGlobalKeys(e) {
   const mod = e.ctrlKey || e.metaKey;
   if (!mod) return;
+
+  // Let these keys pass through to CodeMirror (vim mode needs them)
+  const passthroughKeys = ['u', 'd', 'f', 'r', 'b', 'c', 'v', 'x', 'z', 'a'];
+  if (passthroughKeys.includes(e.key) && !e.shiftKey) return;
 
   // Help: Ctrl+? (Ctrl+Shift+/)
   if ((e.key === '?' || (e.key === '/' && e.shiftKey)) && !e.altKey) {

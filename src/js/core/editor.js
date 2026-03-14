@@ -10,7 +10,7 @@ import { EditorState, Compartment } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
-import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
 import { oneDark } from '@codemirror/theme-one-dark';
 
@@ -126,7 +126,29 @@ export function createEditor(container, content = '', onChange = null, onScroll 
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     highlightSelectionMatches(),
     markdown({ base: markdownLanguage, codeLanguages: languages }),
-    keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+    keymap.of([
+      { key: 'Ctrl-r', run: openSearchPanel },
+      {
+        key: 'Ctrl-d',
+        run(view) {
+          const amount = view.dom.clientHeight / 2;
+          view.scrollDOM.scrollTop += amount;
+          return true;
+        },
+      },
+      {
+        key: 'Ctrl-u',
+        run(view) {
+          const amount = view.dom.clientHeight / 2;
+          view.scrollDOM.scrollTop -= amount;
+          return true;
+        },
+      },
+      ...defaultKeymap,
+      ...historyKeymap,
+      ...searchKeymap,
+      indentWithTab,
+    ]),
     autoListExtension(),
     boldKeymap(),
     baseTheme,
