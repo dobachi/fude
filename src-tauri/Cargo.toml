@@ -1,12 +1,12 @@
 [package]
-name = "markdown-editor"
+name = "fude"
 version = "0.1.0"
 description = "Fude - A lightweight cross-platform Markdown editor built with Tauri"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "markdown_editor_lib"
+name = "fude_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

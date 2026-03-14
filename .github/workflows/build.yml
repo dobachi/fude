@@ -78,6 +78,6 @@ jobs:
           name: fude-${{ matrix.target }}
           path: |
             src-tauri/target/release/bundle/**/*
-            src-tauri/target/release/markdown-editor*
+            src-tauri/target/release/fude*
             !src-tauri/target/release/bundle/**/deps
           retention-days: 7
