@@ -529,22 +529,27 @@ mod tests {
     // --- Temp file naming convention ---
 
     #[test]
-    fn temp_file_naming_convention() {
-        // Verify the temp file naming pattern: .~filename.md.tmp
-        let original = Path::new("/home/user/docs/notes.md");
-        let file_name = original.file_name().unwrap().to_string_lossy();
-        let temp_name = format!(".~{}.tmp", file_name);
+    fn temp_file_path_is_in_config_dir() {
+        // Temp files should be stored in ~/.config/fude/tmp/
+        let path = temp_file_path("/home/user/docs/notes.md").unwrap();
+        let path_str = path.to_string_lossy();
+        assert!(path_str.contains("fude"));
+        assert!(path_str.contains("tmp"));
+        assert!(path_str.contains("notes.md"));
+    }
 
-        assert_eq!(temp_name, ".~notes.md.tmp");
+    #[test]
+    fn temp_file_path_is_deterministic() {
+        let path1 = temp_file_path("/home/user/docs/notes.md").unwrap();
+        let path2 = temp_file_path("/home/user/docs/notes.md").unwrap();
+        assert_eq!(path1, path2);
+    }
 
-        let temp_path = original.parent().unwrap().join(&temp_name);
-        assert_eq!(
-            temp_path.to_string_lossy(),
-            "/home/user/docs/.~notes.md.tmp"
-        );
-
-        // Temp files start with '.' so scan_dir_tree should skip them
-        assert!(temp_name.starts_with('.'));
+    #[test]
+    fn temp_file_path_differs_for_different_files() {
+        let path1 = temp_file_path("/home/user/docs/notes.md").unwrap();
+        let path2 = temp_file_path("/home/user/docs/other.md").unwrap();
+        assert_ne!(path1, path2);
     }
 
     #[test]
