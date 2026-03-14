@@ -101,6 +101,20 @@ async function init() {
   // Global keyboard shortcuts - capture at window level to override browser defaults
   window.addEventListener('keydown', handleGlobalKeys, true);
 
+  // TODO: Vim ESC/Ctrl+[ handling for browser mode - pending research
+
+  // When editor loses focus, re-focus it
+  document.addEventListener('focusout', (e) => {
+    // Only re-focus if nothing else meaningful got focus
+    setTimeout(() => {
+      const active = document.activeElement;
+      if (!active || active === document.body || active.tagName === 'HTML') {
+        const view = currentView();
+        if (view) view.focus();
+      }
+    }, 10);
+  });
+
   // Ctrl+mouse wheel zoom (debounced to prevent freezing)
   let zoomTimeout = null;
   window.addEventListener(

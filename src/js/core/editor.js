@@ -118,6 +118,8 @@ export function createEditor(container, content = '', onChange = null, onScroll 
   const keymodeCompartment = new Compartment();
 
   const extensions = [
+    // Vim mode FIRST - highest priority for key handling (ESC, Ctrl+[, etc.)
+    keymodeCompartment.of([]),
     lineNumbers(),
     highlightActiveLine(),
     drawSelection(),
@@ -154,14 +156,16 @@ export function createEditor(container, content = '', onChange = null, onScroll 
     themeCompartment.of(
       document.documentElement.getAttribute('data-theme') === 'light' ? lightTheme : darkTheme,
     ),
-    keymodeCompartment.of([]),
     EditorView.lineWrapping,
   ];
+
+  // Track IME composition state to avoid RangeError during Japanese input
+  let composing = false;
 
   if (onChange) {
     extensions.push(
       EditorView.updateListener.of((update) => {
-        if (update.docChanged) {
+        if (update.docChanged && !composing) {
           onChange(update.state.doc.toString());
         }
       }),
@@ -176,6 +180,14 @@ export function createEditor(container, content = '', onChange = null, onScroll 
   // Store compartment references on the view for later reconfiguration
   view._themeCompartment = themeCompartment;
   view._keymodeCompartment = keymodeCompartment;
+
+  // Track IME composition to suppress onChange during input
+  view.contentDOM.addEventListener('compositionstart', () => { composing = true; });
+  view.contentDOM.addEventListener('compositionend', () => {
+    composing = false;
+    // Fire onChange after composition completes
+    if (onChange) onChange(view.state.doc.toString());
+  });
 
   if (onScroll) {
     view.scrollDOM.addEventListener('scroll', () => {
@@ -267,8 +279,13 @@ export async function toggleVim(view, enable) {
   if (!view._keymodeCompartment) return;
   if (enable) {
     try {
-      const { vim } = await import('@replit/codemirror-vim');
+      const { vim, Vim } = await import('@replit/codemirror-vim');
       view.dispatch({ effects: view._keymodeCompartment.reconfigure(vim()) });
+      // ESC alternatives for browser compatibility
+      Vim.map('<C-[>', '<Esc>', 'insert');
+      Vim.map('<C-[>', '<Esc>', 'visual');
+      Vim.map('jj', '<Esc>', 'insert');
+      Vim.map('jk', '<Esc>', 'insert');
     } catch (e) {
       console.warn('Vim extension not available:', e);
     }
