@@ -1,6 +1,6 @@
 [package]
 name = "fude"
-version = "0.1.4"
+version = "0.1.5"
 description = "Fude - A lightweight cross-platform Markdown editor built with Tauri"
 authors = ["you"]
 edition = "2021"
