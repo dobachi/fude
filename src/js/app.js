@@ -510,6 +510,31 @@ function saveActivePaneTabState() {
 
 // ── Global keyboard shortcuts ──────────────────────────────
 function handleGlobalKeys(e) {
+  // Alt+key shortcuts (browser-friendly alternatives for Ctrl+N/T/W)
+  if (e.altKey && !e.ctrlKey) {
+    switch (e.key) {
+      case 'n':
+        e.preventDefault();
+        openTab(null, '');
+        return;
+      case 't':
+        e.preventDefault();
+        openTab(null, '');
+        return;
+      case 'w': {
+        e.preventDefault();
+        const active = getActiveTab();
+        if (active) closeTab(active.id);
+        return;
+      }
+      case 'o':
+        e.preventDefault();
+        handleOpenFolder();
+        return;
+    }
+    return;
+  }
+
   const mod = e.ctrlKey || e.metaKey;
   if (!mod) return;
 

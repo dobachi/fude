@@ -27,6 +27,10 @@ const shortcuts = [
   ['jj / jk', 'Vimインサートモード解除（ESC代替）'],
   ['Ctrl+,', '設定'],
   ['Ctrl+?', 'このヘルプ'],
+  ['', ''],
+  ['Alt+N / Alt+T', '新規ファイル（ブラウザモード用）'],
+  ['Alt+W', 'タブを閉じる（ブラウザモード用）'],
+  ['Alt+O', 'フォルダを開く（ブラウザモード用）'],
 ];
 
 export function openHelp() {
