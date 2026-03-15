@@ -1,18 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
+// Mock @tauri-apps/api/core - the mock invoke is hoisted before backend.js import
+const mockInvoke = vi.fn().mockResolvedValue('mock-result');
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: mockInvoke,
+  isTauri: () => !!globalThis.isTauri,
+}));
+
 describe('backend module (Tauri mode)', () => {
-  let mockInvoke;
   let originalLocation;
 
   beforeEach(() => {
     vi.resetModules();
+    mockInvoke.mockClear();
+    mockInvoke.mockResolvedValue('mock-result');
 
-    mockInvoke = vi.fn().mockResolvedValue('mock-result');
-    window.__TAURI__ = {
-      core: {
-        invoke: mockInvoke,
-      },
-    };
+    // Set the isTauri flag
+    globalThis.isTauri = true;
 
     // Save original location and mock it for Tauri detection
     originalLocation = window.location;
@@ -25,7 +29,7 @@ describe('backend module (Tauri mode)', () => {
   });
 
   afterEach(() => {
-    delete window.__TAURI__;
+    delete globalThis.isTauri;
     window.location = originalLocation;
   });
 
@@ -149,8 +153,8 @@ describe('backend module (HTTP fallback mode)', () => {
   beforeEach(() => {
     vi.resetModules();
 
-    // No __TAURI__ global, so it falls back to fetch
-    delete window.__TAURI__;
+    // isTauri returns false (no globalThis.isTauri)
+    delete globalThis.isTauri;
 
     originalLocation = window.location;
     delete window.location;
@@ -209,9 +213,8 @@ describe('backend module (HTTP fallback mode)', () => {
   it('uses https://tauri.localhost as Tauri mode', async () => {
     vi.resetModules();
 
-    // Simulate Tauri via https + tauri.localhost
-    const mockInvoke = vi.fn().mockResolvedValue('tauri-result');
-    window.__TAURI__ = { core: { invoke: mockInvoke } };
+    // Simulate Tauri via isTauri + https://tauri.localhost
+    globalThis.isTauri = true;
     delete window.location;
     window.location = {
       protocol: 'https:',
@@ -223,6 +226,6 @@ describe('backend module (HTTP fallback mode)', () => {
     await mod.readFile('/via-https.md');
     expect(mockInvoke).toHaveBeenCalledWith('read_file', { path: '/via-https.md' });
 
-    delete window.__TAURI__;
+    delete globalThis.isTauri;
   });
 });

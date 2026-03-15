@@ -1,35 +1,26 @@
 // backend.js - Abstraction layer for Tauri commands
+//
+// Detection strategy:
+// - Use @tauri-apps/api/core's isTauri() (checks globalThis.isTauri) as the official detection
+// - Additionally check URL protocol to distinguish local Tauri from remote mode
+// - Use @tauri-apps/api/core's invoke() (resolves __TAURI_INTERNALS__.invoke at call time)
+//   instead of window.__TAURI__.core.invoke which has timing issues on Windows (tauri#12990)
 
-// Detect Tauri environment reliably.
-// __TAURI_INTERNALS__ is always injected by Tauri v2 runtime, regardless of withGlobalTauri.
-// Also check that we're not in remote mode (connecting to a remote Fude server via Tauri shell).
+import { invoke as tauriInvoke, isTauri } from '@tauri-apps/api/core';
+
+// Check that we're running inside the Tauri webview with local content
+// (not in remote mode connecting to a Fude server via Tauri shell)
 function isLocalTauri() {
   return (
-    ('__TAURI_INTERNALS__' in window || !!window.__TAURI__) &&
+    isTauri() &&
     (window.location.protocol === 'tauri:' ||
       (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost'))
   );
 }
 
-// Cache the resolved invoke function
-let _cachedInvoke = null;
-
-async function getTauriInvoke() {
-  if (_cachedInvoke) return _cachedInvoke;
-  // Try the global first (withGlobalTauri), then fall back to dynamic import
-  if (window.__TAURI__?.core?.invoke) {
-    _cachedInvoke = window.__TAURI__.core.invoke;
-  } else {
-    const { invoke } = await import('@tauri-apps/api/core');
-    _cachedInvoke = invoke;
-  }
-  return _cachedInvoke;
-}
-
 async function doInvoke(cmd, args) {
   if (isLocalTauri()) {
-    const invoke = await getTauriInvoke();
-    return args !== undefined ? invoke(cmd, args) : invoke(cmd);
+    return args !== undefined ? tauriInvoke(cmd, args) : tauriInvoke(cmd);
   }
   // HTTP fallback for browser mode
   const base = window.location.origin || 'http://localhost:3000';
@@ -112,7 +103,6 @@ export async function aiChatStream(messages, model, onChunk, onDone, onError, si
   if (isLocalTauri()) {
     try {
       const { listen } = await import('@tauri-apps/api/event');
-      const invoke = await getTauriInvoke();
       const requestId = `ai_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
       const unlisten = await listen(`ai-stream-${requestId}`, (event) => {
@@ -126,7 +116,7 @@ export async function aiChatStream(messages, model, onChunk, onDone, onError, si
         signal.addEventListener('abort', () => { unlisten(); });
       }
 
-      await invoke('ai_chat_stream', { messages, model, requestId });
+      await tauriInvoke('ai_chat_stream', { messages, model, requestId });
     } catch (err) {
       onError(err);
     }

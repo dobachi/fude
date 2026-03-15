@@ -51,9 +51,11 @@ import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
 
+import { isTauri } from '@tauri-apps/api/core';
+
 function isLocalTauri() {
   return (
-    window.__TAURI__ &&
+    isTauri() &&
     (window.location.protocol === 'tauri:' ||
       (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost'))
   );
