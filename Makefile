@@ -37,10 +37,10 @@ browser:
 build-frontend:
 	npm run build:frontend
 
-# プロダクションビルド
+# プロダクションビルド（AppImage失敗はWSL環境では正常）
 build:
 	npm run build:frontend
-	npx tauri build
+	npx tauri build || echo "Note: Some bundle targets may have failed (e.g., AppImage on WSL). Check output above."
 
 # テスト
 test: test-js test-rust

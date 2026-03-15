@@ -362,7 +362,7 @@ pub fn run() {
 
                 if let Some(remote_url) = cli_remote {
                     let window = app.get_webview_window("main").unwrap();
-                    window.navigate(remote_url.parse().unwrap());
+                    let _ = window.navigate(remote_url.parse().unwrap());
                 } else if let Some(path) = cli_path {
                     let payload = serde_json::json!({ "path": path });
                     std::thread::spawn(move || {
