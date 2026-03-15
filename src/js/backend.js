@@ -1,14 +1,20 @@
 // backend.js - Abstraction layer for Tauri commands
-let invoke;
 
-// Use Tauri invoke only when running from local Tauri frontend (not remote mode)
-const isLocalTauri =
-  window.__TAURI__ && (window.location.protocol === 'tauri:' || window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost');
+// Lazy detection: window.__TAURI__ may not be available at module evaluation time
+// (Tauri injects it via a script that may run after ES module evaluation)
+function isLocalTauri() {
+  return (
+    window.__TAURI__ &&
+    (window.location.protocol === 'tauri:' ||
+      (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost'))
+  );
+}
 
-if (isLocalTauri) {
-  invoke = window.__TAURI__.core.invoke;
-} else {
-  invoke = async (cmd, args = {}) => {
+function getInvoke() {
+  if (isLocalTauri()) {
+    return window.__TAURI__.core.invoke;
+  }
+  return async (cmd, args = {}) => {
     const base = window.location.origin || 'http://localhost:3000';
     const res = await fetch(`${base}/api/${cmd}`, {
       method: 'POST',
@@ -21,59 +27,59 @@ if (isLocalTauri) {
 }
 
 export async function readFile(path) {
-  return invoke('read_file', { path });
+  return getInvoke()('read_file', { path });
 }
 
 export async function writeFile(path, content) {
-  return invoke('write_file', { path, content });
+  return getInvoke()('write_file', { path, content });
 }
 
 export async function writeTempFile(path, content) {
-  return invoke('write_temp_file', { path, content });
+  return getInvoke()('write_temp_file', { path, content });
 }
 
 export async function deleteTempFile(path) {
-  return invoke('delete_temp_file', { path });
+  return getInvoke()('delete_temp_file', { path });
 }
 
 export async function checkTempFiles(paths) {
-  return invoke('check_temp_files', { paths });
+  return getInvoke()('check_temp_files', { paths });
 }
 
 export async function readDirTree(path) {
-  return invoke('read_dir_tree', { path });
+  return getInvoke()('read_dir_tree', { path });
 }
 
 export async function saveSession(session) {
-  return invoke('save_session', { session });
+  return getInvoke()('save_session', { session });
 }
 
 export async function loadSession() {
-  return invoke('load_session');
+  return getInvoke()('load_session');
 }
 
 export async function getConfig() {
-  return invoke('get_config');
+  return getInvoke()('get_config');
 }
 
 export async function saveConfig(config) {
-  return invoke('save_config', { config });
+  return getInvoke()('save_config', { config });
 }
 
 export async function getOpenDir() {
-  return invoke('get_open_dir');
+  return getInvoke()('get_open_dir');
 }
 
 export async function browseDir(path) {
-  return invoke('browse_dir', { path: path || '' });
+  return getInvoke()('browse_dir', { path: path || '' });
 }
 
 export async function aiChat(messages, model) {
-  return invoke('ai_chat', { messages, model });
+  return getInvoke()('ai_chat', { messages, model });
 }
 
 export async function aiModels() {
-  return invoke('ai_models');
+  return getInvoke()('ai_models');
 }
 
 /**
@@ -87,7 +93,7 @@ export async function aiModels() {
  * @param {AbortSignal} [signal]
  */
 export async function aiChatStream(messages, model, onChunk, onDone, onError, signal) {
-  if (isLocalTauri) {
+  if (isLocalTauri()) {
     try {
       const { listen } = await import('@tauri-apps/api/event');
       const requestId = `ai_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -103,7 +109,7 @@ export async function aiChatStream(messages, model, onChunk, onDone, onError, si
         signal.addEventListener('abort', () => { unlisten(); });
       }
 
-      await invoke('ai_chat_stream', { messages, model, requestId });
+      await getInvoke()('ai_chat_stream', { messages, model, requestId });
     } catch (err) {
       onError(err);
     }

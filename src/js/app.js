@@ -51,10 +51,13 @@ import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
 
-const isLocalTauri =
-  window.__TAURI__ &&
-  (window.location.protocol === 'tauri:' ||
-    (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost'));
+function isLocalTauri() {
+  return (
+    window.__TAURI__ &&
+    (window.location.protocol === 'tauri:' ||
+      (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost'))
+  );
+}
 import { openHelp } from './help.js';
 import { checkForUpdates } from './core/updater.js';
 import {
@@ -231,7 +234,7 @@ async function init() {
     }
   } else {
     // Check if server specified an initial directory
-    if (!isLocalTauri) {
+    if (!isLocalTauri()) {
       try {
         const openDir = await backend.getOpenDir();
         if (openDir) {
@@ -251,7 +254,7 @@ async function init() {
   }
 
   // Listen for CLI args event from Tauri
-  if (isLocalTauri) {
+  if (isLocalTauri()) {
     const { listen } = await import('@tauri-apps/api/event');
     listen('cli-args', async (event) => {
       const path = event.payload?.path;
@@ -266,7 +269,7 @@ async function init() {
   });
 
   // Warn on window close if unsaved changes (Tauri)
-  if (isLocalTauri) {
+  if (isLocalTauri()) {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
     const appWindow = getCurrentWindow();
     appWindow.onCloseRequested(async (event) => {
@@ -555,7 +558,7 @@ async function refreshSidebar() {
 // ── Open folder dialog ─────────────────────────────────────
 async function handleOpenFolder() {
   try {
-    if (isLocalTauri) {
+    if (isLocalTauri()) {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const folder = await open({ directory: true, multiple: false });
       if (folder) {
@@ -694,7 +697,7 @@ function handleGlobalKeys(e) {
       const content = getContent(view);
       try {
         let filePath;
-        if (isLocalTauri) {
+        if (isLocalTauri()) {
           const { save } = await import('@tauri-apps/plugin-dialog');
           filePath = await save({
             filters: [{ name: 'Markdown', extensions: ['md'] }],
@@ -788,7 +791,7 @@ function handleGlobalKeys(e) {
           // Save As dialog for untitled tabs
           try {
             let filePath;
-            if (isLocalTauri) {
+            if (isLocalTauri()) {
               const { save } = await import('@tauri-apps/plugin-dialog');
               filePath = await save({
                 filters: [{ name: 'Markdown', extensions: ['md'] }],
