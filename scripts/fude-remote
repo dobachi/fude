@@ -170,19 +170,15 @@ check_update() {
   return 1  # up to date
 }
 
-# Find exe or download portable version
+# Always check for updates, then find or download
+if check_update; then
+  download_fude_exe || echo "Warning: Update check failed"
+fi
+
 FUDE_EXE_PATH="$(find_fude_exe)" || true
 if [ -z "$FUDE_EXE_PATH" ]; then
-  download_fude_exe || {
-    echo "Error: Could not obtain Fude.exe"
-    exit 1
-  }
-  FUDE_EXE_PATH="$FUDE_EXE_CACHED"
-elif [ "$FUDE_EXE_PATH" = "$FUDE_EXE_CACHED" ]; then
-  if check_update; then
-    download_fude_exe || echo "Warning: Update failed, using cached version"
-  fi
-  FUDE_EXE_PATH="$FUDE_EXE_CACHED"
+  echo "Error: Could not obtain Fude.exe"
+  exit 1
 fi
 
 # --- Launch Fude.exe ---
