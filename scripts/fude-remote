@@ -12,10 +12,8 @@ fi
 
 FUDE_PORT="${FUDE_PORT:-3000}"
 FUDE_URL="http://localhost:$FUDE_PORT"
-# Cache exe on Windows side so it can be launched directly
-WIN_USERPROFILE="$(cmd.exe /C "echo %USERPROFILE%" 2>/dev/null | tr -d '\r')"
-WIN_CACHE_DIR="$(wslpath "$WIN_USERPROFILE")/.cache/fude"
-FUDE_EXE_CACHED="$WIN_CACHE_DIR/Fude.exe"
+FUDE_CACHE_DIR="$HOME/.cache/fude"
+FUDE_EXE_CACHED="$FUDE_CACHE_DIR/Fude.exe"
 REPO="dobachi/fude"
 
 # --- Start fude-browser server in background ---
@@ -104,7 +102,7 @@ find_fude_exe() {
 
 download_fude_exe() {
   echo "Fude.exe not found. Downloading from GitHub Releases..."
-  mkdir -p "$WIN_CACHE_DIR"
+  mkdir -p "$FUDE_CACHE_DIR"
 
   # Get latest release download URL for Windows exe
   DOWNLOAD_URL=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" \
@@ -157,16 +155,15 @@ else
 fi
 
 echo "Launching Fude: $WIN_EXE --remote $FUDE_URL"
-# Use cmd.exe /C to launch Windows exe properly
-cmd.exe /C "start \"\" \"$WIN_EXE\" --remote $FUDE_URL" 2>/dev/null
+# Launch Windows exe via cmd.exe with proper path escaping
+cmd.exe /C "\"$WIN_EXE\" --remote $FUDE_URL" 2>/dev/null &
+EXE_PID=$!
 
-if [ $? -ne 0 ]; then
-  echo ""
-  echo "Could not launch Fude.exe automatically."
-  echo "Please open $FUDE_URL in your browser."
-  echo "Press Ctrl+C to stop the server."
-  wait "$SERVER_PID"
+if wait "$EXE_PID" 2>/dev/null; then
+  echo "Fude closed. Shutting down."
 else
-  echo "Fude launched. Press Ctrl+C to stop the server."
-  wait "$SERVER_PID"
+  echo ""
+  echo "Fude.exe launched. Press Ctrl+C to stop the server."
+  echo "Or open $FUDE_URL in your browser."
+  wait "$SERVER_PID" 2>/dev/null
 fi
