@@ -169,8 +169,8 @@ check_update() {
 }
 
 # Find exe or download/update
-FUDE_EXE_PATH="$(find_fude_exe)"
-if [ $? -ne 0 ]; then
+FUDE_EXE_PATH="$(find_fude_exe)" || true
+if [ -z "$FUDE_EXE_PATH" ]; then
   # Not found anywhere, download
   download_fude_exe || {
     echo "Error: Could not obtain Fude.exe"
