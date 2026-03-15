@@ -117,9 +117,11 @@ download_fude_exe() {
 
   LATEST_TAG=$(echo "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/"tag_name": *"//' | sed 's/"$//')
 
-  # Get download URL for Windows exe (setup.exe)
+  # Get download URL for portable exe (fude.exe, not setup.exe or nsis)
   DOWNLOAD_URL=$(echo "$RELEASE_JSON" \
     | grep -o '"browser_download_url": *"[^"]*\.exe"' \
+    | grep -v "setup" \
+    | grep -v "nsis" \
     | head -1 \
     | sed 's/"browser_download_url": *"//' \
     | sed 's/"$//')
@@ -168,17 +170,15 @@ check_update() {
   return 1  # up to date
 }
 
-# Find exe or download/update
+# Find exe or download portable version
 FUDE_EXE_PATH="$(find_fude_exe)" || true
 if [ -z "$FUDE_EXE_PATH" ]; then
-  # Not found anywhere, download
   download_fude_exe || {
     echo "Error: Could not obtain Fude.exe"
     exit 1
   }
   FUDE_EXE_PATH="$FUDE_EXE_CACHED"
 elif [ "$FUDE_EXE_PATH" = "$FUDE_EXE_CACHED" ]; then
-  # Using cached version, check for updates
   if check_update; then
     download_fude_exe || echo "Warning: Update failed, using cached version"
   fi
