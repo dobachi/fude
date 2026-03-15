@@ -54,6 +54,15 @@ export async function openSettings() {
           <input type="password" id="setting-api-key" value="${config.openrouter_api_key || ''}" placeholder="sk-or-..." />
         </div>
       </div>
+      <div class="setting-group" style="margin-top:12px;padding:8px;background:var(--bg-tertiary);border-radius:4px;font-size:11px;font-family:var(--font-mono);color:var(--fg-secondary)">
+        <div><b>Debug Info</b></div>
+        <div>location.href: ${window.location.href}</div>
+        <div>location.protocol: ${window.location.protocol}</div>
+        <div>location.hostname: ${window.location.hostname}</div>
+        <div>__TAURI_INTERNALS__: ${typeof window.__TAURI_INTERNALS__}</div>
+        <div>__TAURI__: ${typeof window.__TAURI__}</div>
+        <div>globalThis.isTauri: ${String((globalThis || window).isTauri)}</div>
+      </div>
       <div class="settings-footer">
         <button class="btn-save-settings">Save</button>
       </div>
