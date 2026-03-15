@@ -8,6 +8,8 @@
 
 ![Fude Screenshot](docs/screenshot.png)
 
+[English README](README.en.md)
+
 ## 特徴
 
 - **超軽量** - バイナリサイズ約3MB。Electron不使用、Tauri v2で高速起動
