@@ -60,6 +60,7 @@ import {
   initChatPanel,
   toggleAIPanel,
   updateSelectedContext,
+  updateDocContext,
 } from './features/ai-copilot.js';
 import { initContextMenu } from './features/ai/context-menu.js';
 
@@ -285,10 +286,15 @@ async function init() {
   if (config.features?.ai_copilot && config.openrouter_api_key) {
     const aiPanelContent = document.getElementById('ai-panel-content');
     if (aiPanelContent) {
-      initChatPanel(aiPanelContent, {
+      await initChatPanel(aiPanelContent, {
         getVaultPath: () => vaultPath,
         getActiveView: () => currentView(),
       });
+      // Set initial doc context from current tab
+      const activeTab = getActiveTab();
+      if (activeTab) {
+        updateDocContext(activeTab.path, activeTab.content);
+      }
     }
   }
 
@@ -328,6 +334,38 @@ async function init() {
     aiPanelClose.addEventListener('click', toggleAIPanel);
   }
 
+  // AI panel resize handle
+  const aiPanel = document.getElementById('ai-panel');
+  if (aiPanel) {
+    const resizeHandle = document.createElement('div');
+    resizeHandle.className = 'ai-panel-resize-handle';
+    aiPanel.prepend(resizeHandle);
+
+    let startX = 0;
+    let startWidth = 0;
+
+    resizeHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      startX = e.clientX;
+      startWidth = aiPanel.getBoundingClientRect().width;
+      const onMouseMove = (e) => {
+        const delta = startX - e.clientX;
+        const newWidth = Math.min(600, Math.max(200, startWidth + delta));
+        document.documentElement.style.setProperty('--ai-panel-width', newWidth + 'px');
+      };
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
+  }
+
   // Check for updates (non-blocking)
   checkForUpdates();
 }
@@ -342,6 +380,9 @@ function handlePaneContentChange(pane, newContent) {
   updateTabContent(tab.id, newContent);
   markDirty(tab.id);
   onContentChange(tab.path, newContent);
+
+  // Update AI doc context with latest content
+  updateDocContext(tab.path, newContent);
 
   if (viewMode === 'split' || viewMode === 'preview') {
     const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : '';
@@ -437,6 +478,9 @@ function handleTabChange(tab) {
   }
 
   if (tab.path) highlightFile(tab.path);
+
+  // Update AI doc context
+  updateDocContext(tab.path, tab.content);
 
   // Focus editor after tab switch
   if (view) view.focus();
@@ -646,11 +690,16 @@ function handleGlobalKeys(e) {
       initChatPanel(aiPanelContent, {
         getVaultPath: () => vaultPath,
         getActiveView: () => currentView(),
+      }).then(() => {
+        // After init, set the selected context and doc context
+        if (selectedText) {
+          updateSelectedContext(selectedText);
+        }
+        const activeTab = getActiveTab();
+        if (activeTab) {
+          updateDocContext(activeTab.path, activeTab.content);
+        }
       });
-      // After init, set the selected context
-      if (selectedText) {
-        updateSelectedContext(selectedText);
-      }
     }
     return;
   }

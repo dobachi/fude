@@ -4,6 +4,9 @@ import { buildMessages, DEFAULT_MODEL } from './openrouter-client.js';
 import { createModelPicker } from './model-picker.js';
 import { saveChatHistory } from './chat-history.js';
 import { getEditorContext } from './context.js';
+import markdownit from 'markdown-it';
+
+const md = markdownit({ html: false, linkify: true, breaks: true });
 
 let chatMessages = [];
 let currentModel = DEFAULT_MODEL;
@@ -13,6 +16,8 @@ let getVaultPath = null;
 let getActiveView = null;
 let currentSelectedText = '';
 let includeDocContext = true;
+let currentDocPath = '';
+let currentDocContent = '';
 
 /**
  * Initialize the chat panel.
@@ -52,11 +57,36 @@ export function updateSelectedContext(text) {
   }
 }
 
+/**
+ * Update the document context (file path and content).
+ * Called externally when tabs change or content is edited.
+ * @param {string} filePath
+ * @param {string} content
+ */
+export function updateDocContext(filePath, content) {
+  currentDocPath = filePath || '';
+  currentDocContent = content || '';
+  renderDocInfo();
+}
+
+function renderDocInfo() {
+  const info = panelContentEl?.querySelector('.ai-chat-doc-info');
+  if (!info) return;
+  if (includeDocContext && currentDocPath) {
+    const fileName = currentDocPath.split('/').pop();
+    info.textContent = '\u{1F4C4} ' + fileName;
+    info.classList.remove('hidden');
+  } else {
+    info.classList.add('hidden');
+  }
+}
+
 function renderChatUI() {
   if (!panelContentEl) return;
 
   panelContentEl.innerHTML = `
     <div class="ai-chat-model-bar"></div>
+    <div class="ai-chat-doc-info hidden"></div>
     <div class="ai-chat-context-bar hidden">
       <div class="ai-chat-context-label">Selection</div>
       <div class="ai-chat-context-text"></div>
@@ -104,6 +134,9 @@ function renderChatUI() {
     updateSelectedContext(currentSelectedText);
   }
 
+  // Restore doc info if already set
+  renderDocInfo();
+
   renderMessages(messagesEl);
 }
 
@@ -129,6 +162,7 @@ async function setupModelBar(container) {
   docToggle.addEventListener('click', () => {
     includeDocContext = !includeDocContext;
     docToggle.classList.toggle('active', includeDocContext);
+    renderDocInfo();
   });
   container.appendChild(docToggle);
 
@@ -144,16 +178,44 @@ async function setupModelBar(container) {
   container.appendChild(newChatBtn);
 }
 
+function createCopyButton(rawContent) {
+  const btn = document.createElement('button');
+  btn.className = 'ai-msg-copy';
+  btn.textContent = 'Copy';
+  btn.title = 'Copy to clipboard';
+  btn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(rawContent);
+    } catch {
+      // fallback
+      const ta = document.createElement('textarea');
+      ta.value = rawContent;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  });
+  return btn;
+}
+
 function renderMessages(container) {
   if (!container) return;
   container.innerHTML = '';
 
   for (const msg of chatMessages) {
     if (msg.role === 'system') continue;
-    const div = document.createElement('div');
-    div.className = `ai-msg ${msg.role}`;
-    div.textContent = msg.content;
-    container.appendChild(div);
+    const wrapper = document.createElement('div');
+    wrapper.className = `ai-msg ${msg.role}`;
+    if (msg.role === 'assistant') {
+      wrapper.innerHTML = md.render(msg.content);
+      wrapper.appendChild(createCopyButton(msg.content));
+    } else {
+      wrapper.textContent = msg.content;
+    }
+    container.appendChild(wrapper);
   }
 
   container.scrollTop = container.scrollHeight;
@@ -175,12 +237,8 @@ async function sendMessage(text, messagesEl) {
   }
 
   // Add full document context if enabled
-  const view = getActiveView?.();
-  if (view && includeDocContext) {
-    const ctx = getEditorContext(view);
-    if (ctx.fullContent) {
-      systemPrompt += `\n\nThe user is editing the following document:\n\`\`\`markdown\n${ctx.fullContent}\n\`\`\``;
-    }
+  if (includeDocContext && currentDocContent) {
+    systemPrompt += `\n\nThe user is editing the following document:\n\`\`\`markdown\n${currentDocContent}\n\`\`\``;
   }
 
   const messages = buildMessages(systemPrompt, chatMessages);
@@ -196,6 +254,12 @@ async function sendMessage(text, messagesEl) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 
   let result = '';
+  let renderTimer = null;
+
+  const renderStreaming = () => {
+    assistantDiv.innerHTML = md.render(result);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  };
 
   try {
     await aiChatStream(
@@ -203,10 +267,19 @@ async function sendMessage(text, messagesEl) {
       currentModel,
       (chunk) => {
         result += chunk;
-        assistantDiv.textContent = result;
-        messagesEl.scrollTop = messagesEl.scrollHeight;
+        // Debounced markdown rendering during streaming
+        if (!renderTimer) {
+          renderTimer = setTimeout(() => {
+            renderTimer = null;
+            renderStreaming();
+          }, 100);
+        }
       },
       () => {
+        // Final render
+        if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+        renderStreaming();
+        assistantDiv.appendChild(createCopyButton(result));
         chatMessages.push({ role: 'assistant', content: result });
         // Auto-save chat history
         const vault = getVaultPath?.();
@@ -216,6 +289,7 @@ async function sendMessage(text, messagesEl) {
       },
       (err) => {
         if (err.name === 'AbortError') return;
+        if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
         assistantDiv.textContent = `Error: ${err.message}`;
         assistantDiv.classList.add('ai-msg-error');
       },
@@ -223,6 +297,7 @@ async function sendMessage(text, messagesEl) {
     );
   } catch (err) {
     if (err.name !== 'AbortError') {
+      if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
       assistantDiv.textContent = `Error: ${err.message}`;
       assistantDiv.classList.add('ai-msg-error');
     }

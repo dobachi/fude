@@ -82,5 +82,16 @@ export function updateSelectedContext(selectedText) {
   }
 }
 
+/**
+ * Forward document context update to the chat module.
+ * @param {string} filePath
+ * @param {string} content
+ */
+export function updateDocContext(filePath, content) {
+  if (chatModule) {
+    chatModule.updateDocContext(filePath, content);
+  }
+}
+
 export function enableCopilot() {}
 export function disableCopilot() {}
