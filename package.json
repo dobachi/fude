@@ -1,6 +1,6 @@
 {
   "name": "markdown-editor",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "scripts": {
     "dev:frontend": "esbuild src/js/app.js --bundle --outfile=dist/bundle.js --format=esm --sourcemap --watch",
