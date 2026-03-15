@@ -4,7 +4,7 @@ An ultra-lightweight cross-platform Markdown editor
 
 [![GitHub release](https://img.shields.io/github/v/release/dobachi/fude)](https://github.com/dobachi/fude/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/dobachi/fude/build.yml?branch=master)](https://github.com/dobachi/fude/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/dobachi/fude/build.yml?branch=main)](https://github.com/dobachi/fude/actions)
 
 ![Fude Screenshot](docs/screenshot.png)
 
