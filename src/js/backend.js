@@ -11,7 +11,7 @@
 function isTauriWebview() {
   return (
     window.location.protocol === 'tauri:' ||
-    (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost')
+    window.location.hostname === 'tauri.localhost'
   );
 }
 
