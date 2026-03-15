@@ -51,15 +51,7 @@ import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
 
-import { isTauri } from '@tauri-apps/api/core';
-
-function isLocalTauri() {
-  return (
-    isTauri() &&
-    (window.location.protocol === 'tauri:' ||
-      (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost'))
-  );
-}
+import { isLocalTauri } from './backend.js';
 import { openHelp } from './help.js';
 import { checkForUpdates } from './core/updater.js';
 import {

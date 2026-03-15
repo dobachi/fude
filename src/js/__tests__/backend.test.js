@@ -1,24 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Mock @tauri-apps/api/core - the mock invoke is hoisted before backend.js import
-const mockInvoke = vi.fn().mockResolvedValue('mock-result');
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: mockInvoke,
-  isTauri: () => !!globalThis.isTauri,
-}));
-
 describe('backend module (Tauri mode)', () => {
+  let mockInvoke;
   let originalLocation;
 
   beforeEach(() => {
     vi.resetModules();
-    mockInvoke.mockClear();
-    mockInvoke.mockResolvedValue('mock-result');
 
-    // Set the isTauri flag
-    globalThis.isTauri = true;
+    // Mock __TAURI_INTERNALS__ (the low-level IPC bridge)
+    mockInvoke = vi.fn().mockResolvedValue('mock-result');
+    window.__TAURI_INTERNALS__ = {
+      invoke: mockInvoke,
+      transformCallback: vi.fn(),
+    };
 
-    // Save original location and mock it for Tauri detection
+    // Simulate Tauri URL
     originalLocation = window.location;
     delete window.location;
     window.location = {
@@ -29,7 +25,7 @@ describe('backend module (Tauri mode)', () => {
   });
 
   afterEach(() => {
-    delete globalThis.isTauri;
+    delete window.__TAURI_INTERNALS__;
     window.location = originalLocation;
   });
 
@@ -153,8 +149,8 @@ describe('backend module (HTTP fallback mode)', () => {
   beforeEach(() => {
     vi.resetModules();
 
-    // isTauri returns false (no globalThis.isTauri)
-    delete globalThis.isTauri;
+    // No Tauri internals
+    delete window.__TAURI_INTERNALS__;
 
     originalLocation = window.location;
     delete window.location;
@@ -213,8 +209,9 @@ describe('backend module (HTTP fallback mode)', () => {
   it('uses https://tauri.localhost as Tauri mode', async () => {
     vi.resetModules();
 
-    // Simulate Tauri via isTauri + https://tauri.localhost
-    globalThis.isTauri = true;
+    // Simulate Tauri via __TAURI_INTERNALS__ + https://tauri.localhost
+    const mockInvoke = vi.fn().mockResolvedValue('tauri-result');
+    window.__TAURI_INTERNALS__ = { invoke: mockInvoke, transformCallback: vi.fn() };
     delete window.location;
     window.location = {
       protocol: 'https:',
@@ -226,6 +223,6 @@ describe('backend module (HTTP fallback mode)', () => {
     await mod.readFile('/via-https.md');
     expect(mockInvoke).toHaveBeenCalledWith('read_file', { path: '/via-https.md' });
 
-    delete globalThis.isTauri;
+    delete window.__TAURI_INTERNALS__;
   });
 });

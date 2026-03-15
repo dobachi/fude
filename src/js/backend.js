@@ -1,26 +1,53 @@
 // backend.js - Abstraction layer for Tauri commands
 //
 // Detection strategy:
-// - Use @tauri-apps/api/core's isTauri() (checks globalThis.isTauri) as the official detection
-// - Additionally check URL protocol to distinguish local Tauri from remote mode
-// - Use @tauri-apps/api/core's invoke() (resolves __TAURI_INTERNALS__.invoke at call time)
-//   instead of window.__TAURI__.core.invoke which has timing issues on Windows (tauri#12990)
+// The URL protocol is the most reliable way to detect Tauri on all platforms:
+// - tauri: protocol (Linux/macOS) or https://tauri.localhost (Windows)
+// When in a Tauri webview, use __TAURI_INTERNALS__.invoke directly.
+// If __TAURI_INTERNALS__ is not yet available (Windows timing issue tauri#12990),
+// wait briefly for it to become available before falling back to HTTP.
 
-import { invoke as tauriInvoke, isTauri } from '@tauri-apps/api/core';
-
-// Check that we're running inside the Tauri webview with local content
-// (not in remote mode connecting to a Fude server via Tauri shell)
-function isLocalTauri() {
+// Detect Tauri webview by URL protocol (reliable, no runtime dependency)
+function isTauriWebview() {
   return (
-    isTauri() &&
-    (window.location.protocol === 'tauri:' ||
-      (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost'))
+    window.location.protocol === 'tauri:' ||
+    (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost')
   );
 }
 
+// Wait for __TAURI_INTERNALS__ to become available (handles Windows timing issue)
+let _internalsReady = null;
+function waitForInternals() {
+  if (_internalsReady) return _internalsReady;
+  _internalsReady = new Promise((resolve) => {
+    if (window.__TAURI_INTERNALS__) {
+      resolve(window.__TAURI_INTERNALS__);
+      return;
+    }
+    // Poll briefly for the runtime to inject __TAURI_INTERNALS__
+    let attempts = 0;
+    const interval = setInterval(() => {
+      attempts++;
+      if (window.__TAURI_INTERNALS__) {
+        clearInterval(interval);
+        resolve(window.__TAURI_INTERNALS__);
+      } else if (attempts >= 50) { // 500ms max
+        clearInterval(interval);
+        resolve(null);
+      }
+    }, 10);
+  });
+  return _internalsReady;
+}
+
 async function doInvoke(cmd, args) {
-  if (isLocalTauri()) {
-    return args !== undefined ? tauriInvoke(cmd, args) : tauriInvoke(cmd);
+  if (isTauriWebview()) {
+    const internals = await waitForInternals();
+    if (internals?.invoke) {
+      return args !== undefined ? internals.invoke(cmd, args) : internals.invoke(cmd);
+    }
+    // __TAURI_INTERNALS__ not available even after waiting — should not happen
+    console.error('Tauri webview detected but __TAURI_INTERNALS__ not available');
   }
   // HTTP fallback for browser mode
   const base = window.location.origin || 'http://localhost:3000';
@@ -32,6 +59,9 @@ async function doInvoke(cmd, args) {
   if (!res.ok) throw new Error(`Backend call failed: ${cmd}`);
   return res.json();
 }
+
+// Export isTauriWebview for use in app.js
+export { isTauriWebview as isLocalTauri };
 
 export async function readFile(path) {
   return doInvoke('read_file', { path });
@@ -92,16 +122,13 @@ export async function aiModels() {
 /**
  * Stream AI chat response.
  * Browser mode: SSE via fetch. Tauri mode: invoke + event listener.
- * @param {Array} messages
- * @param {string} model
- * @param {(chunk: string) => void} onChunk
- * @param {() => void} onDone
- * @param {(err: Error) => void} onError
- * @param {AbortSignal} [signal]
  */
 export async function aiChatStream(messages, model, onChunk, onDone, onError, signal) {
-  if (isLocalTauri()) {
+  if (isTauriWebview()) {
     try {
+      const internals = await waitForInternals();
+      if (!internals?.invoke) throw new Error('Tauri IPC not available');
+
       const { listen } = await import('@tauri-apps/api/event');
       const requestId = `ai_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
@@ -116,7 +143,7 @@ export async function aiChatStream(messages, model, onChunk, onDone, onError, si
         signal.addEventListener('abort', () => { unlisten(); });
       }
 
-      await tauriInvoke('ai_chat_stream', { messages, model, requestId });
+      await internals.invoke('ai_chat_stream', { messages, model, requestId });
     } catch (err) {
       onError(err);
     }
@@ -147,7 +174,7 @@ export async function aiChatStream(messages, model, onChunk, onDone, onError, si
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop(); // Keep incomplete line in buffer
+        buffer = lines.pop();
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
@@ -161,7 +188,6 @@ export async function aiChatStream(messages, model, onChunk, onDone, onError, si
               const content = parsed.choices?.[0]?.delta?.content;
               if (content) onChunk(content);
             } catch {
-              // Not JSON, treat as raw text chunk
               if (data) onChunk(data);
             }
           }
