@@ -48,6 +48,7 @@ import { initTheme } from './core/theme.js';
 import { onContentChange, triggerSave, checkRecovery } from './core/autosave.js';
 import { reapplyMode, cycleMode } from './core/keymode.js';
 import { openSettings } from './settings.js';
+import { openFolderPicker } from './folder-picker.js';
 
 const isLocalTauri =
   window.__TAURI__ &&
@@ -473,18 +474,22 @@ async function refreshSidebar() {
 // ── Open folder dialog ─────────────────────────────────────
 async function handleOpenFolder() {
   try {
-    let folder;
     if (isLocalTauri) {
       const { open } = await import('@tauri-apps/plugin-dialog');
-      folder = await open({ directory: true, multiple: false });
+      const folder = await open({ directory: true, multiple: false });
+      if (folder) {
+        vaultPath = folder;
+        const tree = await backend.readDirTree(folder);
+        loadDirectory(tree);
+        scheduleSessionSave();
+      }
     } else {
-      folder = prompt('フォルダのパスを入力してください:');
-    }
-    if (folder) {
-      vaultPath = folder;
-      const tree = await backend.readDirTree(folder);
-      loadDirectory(tree);
-      scheduleSessionSave();
+      openFolderPicker(async (folder) => {
+        vaultPath = folder;
+        const tree = await backend.readDirTree(folder);
+        loadDirectory(tree);
+        scheduleSessionSave();
+      });
     }
   } catch (e) {
     console.error('Failed to open folder:', e);

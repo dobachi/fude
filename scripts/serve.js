@@ -100,6 +100,29 @@ const api = {
     return scan(dirPath);
   },
 
+  // Browse directory (shallow, for folder picker dialog)
+  browse_dir({ path: dirPath }) {
+    const target = dirPath || os.homedir();
+    const entries = [];
+    try {
+      const items = fs.readdirSync(target, { withFileTypes: true });
+      items.sort((a, b) => {
+        if (a.isDirectory() && !b.isDirectory()) return -1;
+        if (!a.isDirectory() && b.isDirectory()) return 1;
+        return a.name.localeCompare(b.name);
+      });
+      for (const item of items) {
+        if (item.name.startsWith('.')) continue;
+        entries.push({
+          name: item.name,
+          path: path.join(target, item.name),
+          is_dir: item.isDirectory(),
+        });
+      }
+    } catch { /* ignore */ }
+    return { current: target, parent: path.dirname(target), entries };
+  },
+
   load_session() {
     const sessionPath = path.join(CONFIG_DIR, 'session.json');
     if (!fs.existsSync(sessionPath)) return null;

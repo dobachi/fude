@@ -58,3 +58,7 @@ export async function getConfig() {
 export async function saveConfig(config) {
   return invoke('save_config', { config });
 }
+
+export async function browseDir(path) {
+  return invoke('browse_dir', { path: path || '' });
+}
