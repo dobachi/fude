@@ -240,6 +240,52 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;');
 }
 
+/**
+ * Execute a composer action directly without showing the action menu.
+ * Used by context-menu to skip the redundant menu.
+ * @param {import('@codemirror/view').EditorView} view
+ * @param {string} action - Action id (rewrite, summarize, expand, fix_grammar)
+ */
+export function executeActionDirect(view, action) {
+  if (composerEl) closeComposer();
+
+  const ctx = getEditorContext(view);
+  if (!ctx.selectedText) return;
+
+  // Get selection screen coordinates for positioning
+  const coords = view.coordsAtPos(ctx.selectionFrom);
+  if (!coords) return;
+
+  composerEl = document.createElement('div');
+  composerEl.className = 'ai-composer';
+  document.body.appendChild(composerEl);
+
+  // Position near selection
+  let top = coords.bottom + 8;
+  let left = coords.left;
+  composerEl.style.top = `${top}px`;
+  composerEl.style.left = `${left}px`;
+
+  // Close on Escape or click outside
+  const closeHandler = (e) => {
+    if (e.key === 'Escape') {
+      closeComposer();
+      document.removeEventListener('keydown', closeHandler);
+    }
+  };
+  document.addEventListener('keydown', closeHandler);
+
+  const clickOutside = (e) => {
+    if (composerEl && !composerEl.contains(e.target)) {
+      closeComposer();
+      document.removeEventListener('mousedown', clickOutside);
+    }
+  };
+  setTimeout(() => document.addEventListener('mousedown', clickOutside), 0);
+
+  executeAction(view, ctx, action);
+}
+
 export function closeComposer() {
   if (activeAbort) {
     activeAbort.abort();

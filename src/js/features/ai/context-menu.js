@@ -1,5 +1,6 @@
 // context-menu.js - Custom right-click context menu with AI actions
 // Shows AI-related options when text is selected in the editor.
+import { executeActionDirect } from './composer.js';
 
 let menuEl = null;
 
@@ -160,9 +161,11 @@ function handleAction(actionId, view) {
       callbacks.onAskAI(selectedText);
       break;
     }
-    default:
-      // Composer actions: rewrite, summarize, expand, fix_grammar
-      if (callbacks) callbacks.onComposer(view);
+    case 'rewrite':
+    case 'summarize':
+    case 'expand':
+    case 'fix_grammar':
+      executeActionDirect(view, actionId);
       break;
   }
 }
