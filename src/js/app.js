@@ -49,6 +49,7 @@ import { onContentChange, triggerSave, checkRecovery } from './core/autosave.js'
 import { reapplyMode, cycleMode } from './core/keymode.js';
 import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
+import { openSavePicker } from './file-save-picker.js';
 
 const isLocalTauri =
   window.__TAURI__ &&
@@ -584,7 +585,15 @@ function handleGlobalKeys(e) {
             defaultPath: tab.path || vaultPath || undefined,
           });
         } else {
-          filePath = prompt('保存先のパスを入力してください:', tab.path || '');
+          openSavePicker(tab.path || '', async (filePath) => {
+            const ok = await triggerSave(filePath, content);
+            if (ok) {
+              updateTabPath(tab.id, filePath);
+              markClean(tab.id);
+              refreshSidebar();
+            }
+          });
+          return;
         }
         if (filePath) {
           const ok = await triggerSave(filePath, content);
@@ -670,7 +679,15 @@ function handleGlobalKeys(e) {
                 defaultPath: vaultPath || undefined,
               });
             } else {
-              filePath = prompt('保存先のパスを入力してください:');
+              openSavePicker(vaultPath || '', async (filePath) => {
+                const ok = await triggerSave(filePath, content);
+                if (ok) {
+                  updateTabPath(tab.id, filePath);
+                  markClean(tab.id);
+                  refreshSidebar();
+                }
+              });
+              return;
             }
             if (filePath) {
               const ok = await triggerSave(filePath, content);
