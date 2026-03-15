@@ -1,19 +1,22 @@
 #!/bin/sh
 # fude-browser - Launch Fude in browser mode
 
-# Find resource directory
-if [ -d "/usr/lib/Fude/browser" ]; then
-  RES="/usr/lib/Fude/browser"
-elif [ -d "/usr/lib/fude/browser" ]; then
-  RES="/usr/lib/fude/browser"
-else
-  # Development mode
-  SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+
+# Prefer local development files over installed version
+if [ -f "$SCRIPT_DIR/serve.js" ] && [ -d "$SCRIPT_DIR/../dist" ]; then
   RES="$SCRIPT_DIR/../dist"
   SERVE="$SCRIPT_DIR/serve.js"
+elif [ -d "/usr/lib/Fude/browser" ]; then
+  RES="/usr/lib/Fude/browser"
+  SERVE="/usr/lib/Fude/browser/serve.js"
+elif [ -d "/usr/lib/fude/browser" ]; then
+  RES="/usr/lib/fude/browser"
+  SERVE="/usr/lib/fude/browser/serve.js"
+else
+  echo "Error: Fude resources not found"
+  exit 1
 fi
-
-SERVE="${SERVE:-$RES/serve.js}"
 
 if [ ! -f "$SERVE" ]; then
   echo "Error: serve.js not found"
