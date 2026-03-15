@@ -18,15 +18,15 @@ REPO="dobachi/fude"
 
 # --- Start fude-browser server in background ---
 
-if command -v fude-browser >/dev/null 2>&1; then
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+# Prefer local script over installed version (local has latest code)
+if [ -f "$SCRIPT_DIR/fude-browser" ]; then
+  FUDE_BROWSER="$SCRIPT_DIR/fude-browser"
+elif command -v fude-browser >/dev/null 2>&1; then
   FUDE_BROWSER="fude-browser"
 else
-  SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
-  FUDE_BROWSER="$SCRIPT_DIR/fude-browser"
-  if [ ! -f "$FUDE_BROWSER" ]; then
-    echo "Error: fude-browser not found"
-    exit 1
-  fi
+  echo "Error: fude-browser not found"
+  exit 1
 fi
 
 echo "Starting Fude server on $FUDE_URL ..."
