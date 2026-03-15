@@ -11,6 +11,7 @@ const PORT = parseInt(process.env.FUDE_PORT || '3000', 10);
 const DIST_DIR = process.env.FUDE_DIST_DIR || path.join(__dirname, '..', 'dist');
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'fude');
 const TMP_DIR = path.join(CONFIG_DIR, 'tmp');
+const OPEN_DIR = process.env.FUDE_OPEN_DIR || '';
 
 // Ensure directories exist
 fs.mkdirSync(CONFIG_DIR, { recursive: true });
@@ -121,6 +122,11 @@ const api = {
       }
     } catch { /* ignore */ }
     return { current: target, parent: path.dirname(target), entries };
+  },
+
+  // Get initial directory (set via FUDE_OPEN_DIR env)
+  get_open_dir() {
+    return OPEN_DIR || null;
   },
 
   load_session() {

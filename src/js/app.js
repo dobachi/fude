@@ -221,6 +221,19 @@ async function init() {
       });
     }
   } else {
+    // Check if server specified an initial directory
+    if (!isLocalTauri) {
+      try {
+        const openDir = await backend.getOpenDir();
+        if (openDir) {
+          vaultPath = openDir;
+          const tree = await backend.readDirTree(openDir);
+          loadDirectory(tree);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
     openTab(
       null,
       '# Welcome to Fude\n\nOpen a folder with **Ctrl+O** or create a new file with **Ctrl+N**.\n',

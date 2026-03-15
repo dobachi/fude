@@ -9,7 +9,8 @@ if (isLocalTauri) {
   invoke = window.__TAURI__.core.invoke;
 } else {
   invoke = async (cmd, args = {}) => {
-    const res = await fetch(`/api/${cmd}`, {
+    const base = window.location.origin || 'http://localhost:3000';
+    const res = await fetch(`${base}/api/${cmd}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(args),
@@ -57,6 +58,10 @@ export async function getConfig() {
 
 export async function saveConfig(config) {
   return invoke('save_config', { config });
+}
+
+export async function getOpenDir() {
+  return invoke('get_open_dir');
 }
 
 export async function browseDir(path) {

@@ -32,7 +32,7 @@ dev:
 # ブラウザモード（WSL向け、日本語IME対応）
 browser:
 	npm run build:frontend
-	node scripts/serve.js
+	FUDE_OPEN_DIR="$(PWD)" node scripts/serve.js
 
 # フロントエンドのみビルド
 build-frontend:
