@@ -1,4 +1,4 @@
-.PHONY: setup dev build test check lint format clean help remote
+.PHONY: setup dev build test check lint format clean help remote release
 
 # デフォルト
 help:
@@ -13,6 +13,7 @@ help:
 	@echo "  make format    全フォーマット実行"
 	@echo "  make check     lint + format + test + build"
 	@echo "  make remote    WSLからWindows版Fudeを起動"
+	@echo "  make release   全OS向けリリースビルド（CIでビルド）"
 	@echo "  make clean     ビルド成果物を削除"
 
 # 依存関係インストール
@@ -78,7 +79,7 @@ check: format-check lint test build-frontend
 
 # インストール（dpkg + ブラウザモード）
 install: build
-	sudo dpkg -i src-tauri/target/release/bundle/deb/Fude_0.1.0_amd64.deb
+	sudo dpkg -i src-tauri/target/release/bundle/deb/Fude_*_amd64.deb
 	sudo mkdir -p /usr/lib/fude
 	sudo cp dist/* /usr/lib/fude/
 	sudo cp scripts/serve.js /usr/lib/fude/
@@ -94,6 +95,16 @@ uninstall:
 remote:
 	npm run build:frontend
 	bash scripts/fude-remote
+
+# リリース（バージョン更新 + タグ + CIビルド）
+release:
+	@read -p "New version (e.g., 0.2.0): " ver; \
+	sed -i "s/\"version\": \".*\"/\"version\": \"$$ver\"/" src-tauri/tauri.conf.json; \
+	sed -i "s/^version = \".*\"/version = \"$$ver\"/" src-tauri/Cargo.toml; \
+	sed -i "s/\"version\": \".*\"/\"version\": \"$$ver\"/" package.json; \
+	git add -A && git commit -m "release: v$$ver" && git push; \
+	git tag "v$$ver" && git push origin "v$$ver"; \
+	echo "==> v$$ver tagged and pushed. CI will build all platforms."
 
 # クリーン
 clean:
