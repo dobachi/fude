@@ -4,7 +4,7 @@
 
 [![GitHub release](https://img.shields.io/github/v/release/dobachi/fude)](https://github.com/dobachi/fude/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/dobachi/fude/ci.yml?branch=main)](https://github.com/dobachi/fude/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/dobachi/fude/build.yml?branch=master)](https://github.com/dobachi/fude/actions)
 
 ![Fude Screenshot](docs/screenshot.png)
 
@@ -99,7 +99,7 @@ fude /path/to/file.md  # ファイルを指定して起動
 - 機能トグル (AIコパイロット、変更点強調表示)
 - OpenRouter APIキー
 
-設定は `~/.config/markdown-editor/config.json` に保存されます。
+設定は `~/.config/fude/config.json` に保存されます。
 
 ## キーボードショートカット
 
