@@ -190,17 +190,12 @@ else
   WIN_EXE="$FUDE_EXE_PATH"
 fi
 
-echo "Launching Fude: $WIN_EXE --remote $FUDE_URL"
-# Launch Windows exe via powershell for reliable UNC path handling
-powershell.exe -Command "Start-Process '$WIN_EXE' -ArgumentList '--remote','$FUDE_URL'" 2>/dev/null
-
-if [ $? -eq 0 ]; then
-  echo ""
-  echo "Fude launched. Press Ctrl+C to stop the server."
-  wait "$SERVER_PID" 2>/dev/null
-else
-  echo ""
-  echo "Could not launch Fude.exe automatically."
+# Open in Windows default browser (most reliable for remote mode)
+echo "Opening Fude in browser: $FUDE_URL"
+powershell.exe -Command "Start-Process '$FUDE_URL'" 2>/dev/null || \
+  cmd.exe /C "start $FUDE_URL" 2>/dev/null || \
   echo "Please open $FUDE_URL in your browser."
-  wait "$SERVER_PID" 2>/dev/null
-fi
+
+echo ""
+echo "Fude server running. Press Ctrl+C to stop."
+wait "$SERVER_PID" 2>/dev/null
