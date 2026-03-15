@@ -4,6 +4,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use tauri::Emitter;
+use tauri::Manager;
 use tauri_plugin_cli::CliExt;
 
 // ─── Structs ───────────────────────────────────────────────
@@ -339,6 +340,7 @@ pub fn run() {
             let handle = app.handle().clone();
             if let Ok(matches) = app.cli().matches() {
                 let mut cli_path: Option<String> = None;
+                let mut cli_remote: Option<String> = None;
 
                 if let Some(arg) = matches.args.get("path") {
                     if let Some(val) = arg.value.as_str() {
@@ -349,7 +351,19 @@ pub fn run() {
                     }
                 }
 
-                if let Some(path) = cli_path {
+                if let Some(arg) = matches.args.get("remote") {
+                    if let Some(val) = arg.value.as_str() {
+                        let s = val.to_string();
+                        if !s.is_empty() {
+                            cli_remote = Some(s);
+                        }
+                    }
+                }
+
+                if let Some(remote_url) = cli_remote {
+                    let window = app.get_webview_window("main").unwrap();
+                    window.navigate(remote_url.parse().unwrap());
+                } else if let Some(path) = cli_path {
                     let payload = serde_json::json!({ "path": path });
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_millis(500));

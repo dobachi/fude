@@ -1,0 +1,155 @@
+#!/bin/sh
+# fude-remote - Start Fude browser server on WSL and open Windows Tauri app
+# Automatically downloads Fude.exe from GitHub Releases if not found
+set -e
+
+FUDE_PORT="${FUDE_PORT:-3000}"
+FUDE_URL="http://localhost:$FUDE_PORT"
+FUDE_CACHE_DIR="$HOME/.cache/fude"
+FUDE_EXE_CACHED="$FUDE_CACHE_DIR/Fude.exe"
+REPO="dobachi/fude"
+
+# --- Start fude-browser server in background ---
+
+if command -v fude-browser >/dev/null 2>&1; then
+  FUDE_BROWSER="fude-browser"
+else
+  SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+  FUDE_BROWSER="$SCRIPT_DIR/fude-browser"
+  if [ ! -f "$FUDE_BROWSER" ]; then
+    echo "Error: fude-browser not found"
+    exit 1
+  fi
+fi
+
+echo "Starting Fude server on $FUDE_URL ..."
+FUDE_PORT="$FUDE_PORT" $FUDE_BROWSER &
+SERVER_PID=$!
+
+cleanup() {
+  if kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "Stopping Fude server..."
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+# --- Wait for server to be ready ---
+
+MAX_WAIT=30
+WAITED=0
+while [ "$WAITED" -lt "$MAX_WAIT" ]; do
+  if curl -s -o /dev/null "$FUDE_URL" 2>/dev/null; then
+    break
+  fi
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "Error: Fude server exited unexpectedly"
+    exit 1
+  fi
+  sleep 1
+  WAITED=$((WAITED + 1))
+done
+
+if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+  echo "Error: Fude server did not start within ${MAX_WAIT}s"
+  exit 1
+fi
+
+echo "Fude server is ready."
+
+# --- Find or download Fude.exe ---
+
+find_fude_exe() {
+  # 1. Environment variable
+  if [ -n "$FUDE_EXE" ] && [ -f "$FUDE_EXE" ]; then
+    echo "$FUDE_EXE"
+    return 0
+  fi
+
+  # 2. Cached download
+  if [ -f "$FUDE_EXE_CACHED" ]; then
+    echo "$FUDE_EXE_CACHED"
+    return 0
+  fi
+
+  # 3. Search Windows install locations
+  for userdir in /mnt/c/Users/*/; do
+    for candidate in \
+      "${userdir}AppData/Local/Fude/Fude.exe" \
+      "${userdir}AppData/Local/Programs/Fude/Fude.exe"; do
+      if [ -f "$candidate" ]; then
+        echo "$candidate"
+        return 0
+      fi
+    done
+  done
+
+  if [ -f "/mnt/c/Program Files/Fude/Fude.exe" ]; then
+    echo "/mnt/c/Program Files/Fude/Fude.exe"
+    return 0
+  fi
+
+  return 1
+}
+
+download_fude_exe() {
+  echo "Fude.exe not found. Downloading from GitHub Releases..."
+  mkdir -p "$FUDE_CACHE_DIR"
+
+  # Get latest release download URL for Windows exe
+  DOWNLOAD_URL=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" \
+    | grep -o '"browser_download_url": *"[^"]*\.exe"' \
+    | head -1 \
+    | sed 's/"browser_download_url": *"//' \
+    | sed 's/"$//')
+
+  if [ -z "$DOWNLOAD_URL" ]; then
+    # Try nsis installer as fallback
+    DOWNLOAD_URL=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" \
+      | grep -o '"browser_download_url": *"[^"]*nsis[^"]*\.exe"' \
+      | head -1 \
+      | sed 's/"browser_download_url": *"//' \
+      | sed 's/"$//')
+  fi
+
+  if [ -z "$DOWNLOAD_URL" ]; then
+    echo "Error: Could not find Windows binary in GitHub Releases."
+    echo "Please download Fude.exe manually and set FUDE_EXE=/path/to/Fude.exe"
+    return 1
+  fi
+
+  echo "Downloading: $DOWNLOAD_URL"
+  curl -L -o "$FUDE_EXE_CACHED" "$DOWNLOAD_URL"
+
+  if [ -f "$FUDE_EXE_CACHED" ]; then
+    echo "Downloaded to $FUDE_EXE_CACHED"
+    return 0
+  fi
+
+  return 1
+}
+
+FUDE_EXE_PATH="$(find_fude_exe)" || {
+  download_fude_exe || {
+    echo "Error: Could not obtain Fude.exe"
+    exit 1
+  }
+  FUDE_EXE_PATH="$FUDE_EXE_CACHED"
+}
+
+# --- Launch Fude.exe ---
+
+# Convert WSL path to Windows path for exe execution
+if command -v wslpath >/dev/null 2>&1; then
+  WIN_EXE="$(wslpath -w "$FUDE_EXE_PATH")"
+else
+  WIN_EXE="$FUDE_EXE_PATH"
+fi
+
+echo "Launching Fude: $WIN_EXE --remote $FUDE_URL"
+cmd.exe /C "\"$WIN_EXE\" --remote $FUDE_URL" 2>/dev/null || \
+  "$FUDE_EXE_PATH" --remote "$FUDE_URL" 2>/dev/null || \
+  echo "Warning: Could not launch Fude.exe. Open $FUDE_URL in a browser instead."
+
+echo "Fude closed. Shutting down."

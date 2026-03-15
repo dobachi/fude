@@ -25,17 +25,27 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": [
-      "../dist/*",
-      "../scripts/serve.js"
-    ],
+    "resources": {
+      "../dist/index.html": "browser/index.html",
+      "../dist/style.css": "browser/style.css",
+      "../dist/bundle.js": "browser/bundle.js",
+      "../scripts/serve.js": "browser/serve.js",
+      "../scripts/fude-browser": "browser/fude-browser",
+      "../scripts/fude-remote": "browser/fude-remote"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "postInstallScript": "scripts/postinst.sh",
+        "preRemoveScript": "scripts/prerm.sh"
+      }
+    }
   },
   "plugins": {
     "updater": {
@@ -52,6 +62,13 @@
           "takesValue": true,
           "required": false,
           "description": "Path to a file or directory to open"
+        },
+        {
+          "name": "remote",
+          "short": "r",
+          "takesValue": true,
+          "required": false,
+          "description": "Connect to a remote Fude server URL (e.g., http://localhost:3000)"
         }
       ]
     }

@@ -1,4 +1,4 @@
-.PHONY: setup dev build test check lint format clean help
+.PHONY: setup dev build test check lint format clean help remote
 
 # デフォルト
 help:
@@ -12,6 +12,7 @@ help:
 	@echo "  make lint      全lint実行"
 	@echo "  make format    全フォーマット実行"
 	@echo "  make check     lint + format + test + build"
+	@echo "  make remote    WSLからWindows版Fudeを起動"
 	@echo "  make clean     ビルド成果物を削除"
 
 # 依存関係インストール
@@ -88,6 +89,11 @@ uninstall:
 	sudo dpkg -r fude
 	sudo rm -rf /usr/lib/fude
 	sudo rm -f /usr/bin/fude-browser
+
+# リモートモード（WSLからWindows版Fudeを起動）
+remote:
+	npm run build:frontend
+	bash scripts/fude-remote
 
 # クリーン
 clean:
