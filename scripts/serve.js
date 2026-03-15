@@ -196,6 +196,115 @@ const api = {
   },
 };
 
+// SSE handler for AI chat streaming
+function handleAiChatStream(req, res) {
+  let body = '';
+  req.on('data', (chunk) => (body += chunk));
+  req.on('end', async () => {
+    let args;
+    try {
+      args = JSON.parse(body);
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      return;
+    }
+
+    const { messages, model } = args;
+
+    // Read API key from config
+    const configPath = path.join(CONFIG_DIR, 'config.json');
+    let apiKey = '';
+    try {
+      const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      apiKey = cfg.openrouter_api_key || '';
+    } catch { /* ignore */ }
+
+    if (!apiKey) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'OpenRouter API key not configured' }));
+      return;
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    });
+
+    const abortController = new AbortController();
+    let clientDisconnected = false;
+    res.on('close', () => {
+      clientDisconnected = true;
+      abortController.abort();
+    });
+
+    try {
+      const apiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: model || 'openai/gpt-4o-mini',
+          messages,
+          stream: true,
+        }),
+        signal: abortController.signal,
+      });
+
+      if (!apiRes.ok) {
+        const errBody = await apiRes.text();
+        res.write(`data: ${JSON.stringify({ error: errBody })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+
+      try {
+        for await (const chunk of apiRes.body) {
+          if (clientDisconnected) break;
+          res.write(Buffer.from(chunk));
+        }
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+          res.write('data: [DONE]\n\n');
+        }
+      }
+      if (!clientDisconnected) res.end();
+    } catch (err) {
+      if (err.name !== 'AbortError' && !clientDisconnected) {
+        res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+      }
+    }
+  });
+}
+
+// Non-streaming AI chat
+api.ai_chat = function ({ messages, model }) {
+  return { error: 'Use ai_chat_stream for AI requests' };
+};
+
+// Fetch available models from OpenRouter
+api.ai_models = function () {
+  const configPath = path.join(CONFIG_DIR, 'config.json');
+  let apiKey = '';
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    apiKey = cfg.openrouter_api_key || '';
+  } catch { /* ignore */ }
+
+  if (!apiKey) return { data: [] };
+
+  // Synchronous HTTP not practical; return fallback list
+  // The model-picker.js handles this gracefully with its fallback
+  return { data: [] };
+};
+
 // HTTP Server
 const server = http.createServer((req, res) => {
   // CORS
@@ -206,6 +315,12 @@ const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
+    return;
+  }
+
+  // SSE endpoint for AI streaming
+  if (req.method === 'POST' && req.url === '/api/ai_chat_stream') {
+    handleAiChatStream(req, res);
     return;
   }
 

@@ -57,6 +57,12 @@ const isLocalTauri =
     (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost'));
 import { openHelp } from './help.js';
 import { checkForUpdates } from './core/updater.js';
+import {
+  initAICopilot,
+  openComposerForView,
+  initChatPanel,
+  toggleAIPanel,
+} from './features/ai-copilot.js';
 
 let viewMode = 'split';
 let vaultPath = '';
@@ -270,6 +276,26 @@ async function init() {
         });
       }
     });
+  }
+
+  // Initialize AI Copilot
+  initAICopilot(config);
+
+  // Initialize AI Chat panel if copilot is enabled
+  if (config.features?.ai_copilot && config.openrouter_api_key) {
+    const aiPanelContent = document.getElementById('ai-panel-content');
+    if (aiPanelContent) {
+      initChatPanel(aiPanelContent, {
+        getVaultPath: () => vaultPath,
+        getActiveView: () => currentView(),
+      });
+    }
+  }
+
+  // AI panel close button
+  const aiPanelClose = document.getElementById('ai-panel-close');
+  if (aiPanelClose) {
+    aiPanelClose.addEventListener('click', toggleAIPanel);
   }
 
   // Check for updates (non-blocking)
@@ -561,6 +587,31 @@ function handleGlobalKeys(e) {
     e.preventDefault();
     e.stopPropagation();
     openHelp();
+    return;
+  }
+
+  // AI Chat panel toggle: Ctrl+I
+  if (e.key === 'i' && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleAIPanel();
+    // Lazy-init chat panel on first open
+    const aiPanelContent = document.getElementById('ai-panel-content');
+    if (aiPanelContent && !aiPanelContent.hasChildNodes()) {
+      initChatPanel(aiPanelContent, {
+        getVaultPath: () => vaultPath,
+        getActiveView: () => currentView(),
+      });
+    }
+    return;
+  }
+
+  // AI Composer: Ctrl+Shift+I
+  if (e.key === 'I' && e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    const view = currentView();
+    if (view) openComposerForView(view);
     return;
   }
 

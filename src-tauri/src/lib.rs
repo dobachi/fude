@@ -1,3 +1,4 @@
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -384,6 +385,183 @@ fn browse_dir(path: String) -> Result<BrowseResult, String> {
     })
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AiStreamEvent {
+    #[serde(rename = "type")]
+    event_type: String,
+    data: String,
+}
+
+#[tauri::command]
+async fn ai_chat(messages: Vec<ChatMessage>, model: String) -> Result<String, String> {
+    let config = get_config()?;
+    let api_key = config
+        .openrouter_api_key
+        .ok_or_else(|| "OpenRouter API key not configured".to_string())?;
+
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({
+        "model": if model.is_empty() { "openai/gpt-4o-mini".to_string() } else { model },
+        "messages": messages,
+    });
+
+    let resp = client
+        .post("https://openrouter.ai/api/v1/chat/completions")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    Ok(text)
+}
+
+#[tauri::command]
+async fn ai_chat_stream(
+    app: tauri::AppHandle,
+    messages: Vec<ChatMessage>,
+    model: String,
+    request_id: String,
+) -> Result<(), String> {
+    let config = get_config()?;
+    let api_key = config
+        .openrouter_api_key
+        .ok_or_else(|| "OpenRouter API key not configured".to_string())?;
+
+    let event_name = format!("ai-stream-{}", request_id);
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({
+        "model": if model.is_empty() { "openai/gpt-4o-mini".to_string() } else { model },
+        "messages": messages,
+        "stream": true,
+    });
+
+    let resp = client
+        .post("https://openrouter.ai/api/v1/chat/completions")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let error_text = resp
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        let _ = app.emit(
+            &event_name,
+            AiStreamEvent {
+                event_type: "error".to_string(),
+                data: error_text,
+            },
+        );
+        return Ok(());
+    }
+
+    let mut stream = resp.bytes_stream();
+    let mut buffer = String::new();
+
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(bytes) => {
+                buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                // Process complete SSE lines
+                while let Some(newline_pos) = buffer.find('\n') {
+                    let line = buffer[..newline_pos].trim().to_string();
+                    buffer = buffer[newline_pos + 1..].to_string();
+
+                    if line.starts_with("data: ") {
+                        let data = &line[6..];
+                        if data == "[DONE]" {
+                            let _ = app.emit(
+                                &event_name,
+                                AiStreamEvent {
+                                    event_type: "done".to_string(),
+                                    data: String::new(),
+                                },
+                            );
+                            return Ok(());
+                        }
+
+                        if let Ok(parsed) =
+                            serde_json::from_str::<serde_json::Value>(data)
+                        {
+                            if let Some(content) = parsed["choices"][0]["delta"]["content"]
+                                .as_str()
+                            {
+                                let _ = app.emit(
+                                    &event_name,
+                                    AiStreamEvent {
+                                        event_type: "chunk".to_string(),
+                                        data: content.to_string(),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = app.emit(
+                    &event_name,
+                    AiStreamEvent {
+                        event_type: "error".to_string(),
+                        data: format!("Stream error: {}", e),
+                    },
+                );
+                return Ok(());
+            }
+        }
+    }
+
+    let _ = app.emit(
+        &event_name,
+        AiStreamEvent {
+            event_type: "done".to_string(),
+            data: String::new(),
+        },
+    );
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn ai_models() -> Result<serde_json::Value, String> {
+    let config = get_config()?;
+    let api_key = match config.openrouter_api_key {
+        Some(key) if !key.is_empty() => key,
+        _ => return Ok(serde_json::json!({ "data": [] })),
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get("https://openrouter.ai/api/v1/models")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch models: {}", e))?;
+
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    serde_json::from_str(&body).map_err(|e| format!("Failed to parse models: {}", e))
+}
+
 #[tauri::command]
 fn get_open_dir() -> Result<String, String> {
     let home = dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
@@ -411,6 +589,9 @@ pub fn run() {
             check_temp_files,
             browse_dir,
             get_open_dir,
+            ai_chat,
+            ai_chat_stream,
+            ai_models,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
