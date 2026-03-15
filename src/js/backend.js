@@ -1,7 +1,11 @@
 // backend.js - Abstraction layer for Tauri commands
 let invoke;
 
-if (window.__TAURI__) {
+// Use Tauri invoke only when running from local Tauri frontend (not remote mode)
+const isLocalTauri =
+  window.__TAURI__ && (window.location.protocol === 'tauri:' || window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost');
+
+if (isLocalTauri) {
   invoke = window.__TAURI__.core.invoke;
 } else {
   invoke = async (cmd, args = {}) => {

@@ -48,6 +48,11 @@ import { initTheme } from './core/theme.js';
 import { onContentChange, triggerSave, checkRecovery } from './core/autosave.js';
 import { reapplyMode, cycleMode } from './core/keymode.js';
 import { openSettings } from './settings.js';
+
+const isLocalTauri =
+  window.__TAURI__ &&
+  (window.location.protocol === 'tauri:' ||
+    (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost'));
 import { openHelp } from './help.js';
 import { checkForUpdates } from './core/updater.js';
 
@@ -222,7 +227,7 @@ async function init() {
   }
 
   // Listen for CLI args event from Tauri
-  if (window.__TAURI__) {
+  if (isLocalTauri) {
     const { listen } = await import('@tauri-apps/api/event');
     listen('cli-args', async (event) => {
       const path = event.payload?.path;
@@ -237,7 +242,7 @@ async function init() {
   });
 
   // Warn on window close if unsaved changes (Tauri)
-  if (window.__TAURI__) {
+  if (isLocalTauri) {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
     const appWindow = getCurrentWindow();
     appWindow.onCloseRequested(async (event) => {
@@ -468,8 +473,13 @@ async function refreshSidebar() {
 // ── Open folder dialog ─────────────────────────────────────
 async function handleOpenFolder() {
   try {
-    const { open } = await import('@tauri-apps/plugin-dialog');
-    const folder = await open({ directory: true, multiple: false });
+    let folder;
+    if (isLocalTauri) {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      folder = await open({ directory: true, multiple: false });
+    } else {
+      folder = prompt('フォルダのパスを入力してください:');
+    }
     if (folder) {
       vaultPath = folder;
       const tree = await backend.readDirTree(folder);
@@ -536,11 +546,16 @@ function handleGlobalKeys(e) {
       if (!tab || !view) return;
       const content = getContent(view);
       try {
-        const { save } = await import('@tauri-apps/plugin-dialog');
-        const filePath = await save({
-          filters: [{ name: 'Markdown', extensions: ['md'] }],
-          defaultPath: tab.path || vaultPath || undefined,
-        });
+        let filePath;
+        if (isLocalTauri) {
+          const { save } = await import('@tauri-apps/plugin-dialog');
+          filePath = await save({
+            filters: [{ name: 'Markdown', extensions: ['md'] }],
+            defaultPath: tab.path || vaultPath || undefined,
+          });
+        } else {
+          filePath = prompt('保存先のパスを入力してください:', tab.path || '');
+        }
         if (filePath) {
           const ok = await triggerSave(filePath, content);
           if (ok) {
@@ -617,11 +632,16 @@ function handleGlobalKeys(e) {
         } else {
           // Save As dialog for untitled tabs
           try {
-            const { save } = await import('@tauri-apps/plugin-dialog');
-            const filePath = await save({
-              filters: [{ name: 'Markdown', extensions: ['md'] }],
-              defaultPath: vaultPath || undefined,
-            });
+            let filePath;
+            if (isLocalTauri) {
+              const { save } = await import('@tauri-apps/plugin-dialog');
+              filePath = await save({
+                filters: [{ name: 'Markdown', extensions: ['md'] }],
+                defaultPath: vaultPath || undefined,
+              });
+            } else {
+              filePath = prompt('保存先のパスを入力してください:');
+            }
             if (filePath) {
               const ok = await triggerSave(filePath, content);
               if (ok) {
