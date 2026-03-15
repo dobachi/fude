@@ -49,18 +49,21 @@ pub struct Session {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Features {
     pub ai_copilot: bool,
     pub diff_highlight: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub theme: String,
     pub features: Features,
     pub font_size: u32,
     pub vim_mode: bool,
     pub openrouter_api_key: Option<String>,
+    pub ai_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,6 +123,16 @@ impl Default for Config {
             font_size: 14,
             vim_mode: false,
             openrouter_api_key: None,
+            ai_model: None,
+        }
+    }
+}
+
+impl Default for Features {
+    fn default() -> Self {
+        Features {
+            ai_copilot: false,
+            diff_highlight: true,
         }
     }
 }
@@ -719,6 +732,7 @@ mod tests {
         assert!(!config.features.ai_copilot);
         assert!(config.features.diff_highlight);
         assert!(config.openrouter_api_key.is_none());
+        assert!(config.ai_model.is_none());
     }
 
     // --- Session default values ---
@@ -784,6 +798,7 @@ mod tests {
             font_size: 18,
             vim_mode: true,
             openrouter_api_key: Some("sk-test-key".to_string()),
+            ai_model: Some("openai/gpt-4o".to_string()),
         };
 
         let json = serde_json::to_string(&config).unwrap();
@@ -795,6 +810,19 @@ mod tests {
         assert_eq!(restored.font_size, 18);
         assert!(restored.vim_mode);
         assert_eq!(restored.openrouter_api_key.as_deref(), Some("sk-test-key"));
+        assert_eq!(restored.ai_model.as_deref(), Some("openai/gpt-4o"));
+    }
+
+    #[test]
+    fn config_deserializes_with_missing_fields() {
+        // Old config files may lack newer fields like ai_model
+        let json = r#"{"theme":"dark","font_size":14,"vim_mode":false}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.theme, "dark");
+        assert!(!config.features.ai_copilot); // default
+        assert!(config.features.diff_highlight); // default
+        assert!(config.openrouter_api_key.is_none()); // default
+        assert!(config.ai_model.is_none()); // default
     }
 
     // --- Temp file naming convention ---

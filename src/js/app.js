@@ -62,7 +62,9 @@ import {
   openComposerForView,
   initChatPanel,
   toggleAIPanel,
+  updateSelectedContext,
 } from './features/ai-copilot.js';
+import { initContextMenu } from './features/ai/context-menu.js';
 
 let viewMode = 'split';
 let vaultPath = '';
@@ -98,10 +100,11 @@ async function init() {
 
   initPanes();
 
-  // Wire up pane callbacks for editor changes and scroll sync
+  // Wire up pane callbacks for editor changes, scroll sync, and selection changes
   setCallbacks({
     onChange: handlePaneContentChange,
     onScroll: handlePaneScroll,
+    onSelectionChange: handleSelectionChange,
   });
 
   // Init sidebar
@@ -292,6 +295,36 @@ async function init() {
     }
   }
 
+  // Initialize AI context menu (right-click on selected text)
+  initContextMenu({
+    getActiveView: () => currentView(),
+    onAskAI: (selectedText) => {
+      const app = document.getElementById('app');
+      if (!app?.classList.contains('ai-panel-open')) {
+        toggleAIPanel(selectedText);
+      } else {
+        updateSelectedContext(selectedText);
+      }
+      // Lazy-init chat panel if needed
+      const aiPanelContent = document.getElementById('ai-panel-content');
+      if (aiPanelContent && !aiPanelContent.hasChildNodes()) {
+        initChatPanel(aiPanelContent, {
+          getVaultPath: () => vaultPath,
+          getActiveView: () => currentView(),
+        });
+        if (selectedText) updateSelectedContext(selectedText);
+      }
+      // Focus the chat textarea
+      setTimeout(() => {
+        const textarea = document.querySelector('.ai-chat-textarea');
+        if (textarea) textarea.focus();
+      }, 100);
+    },
+    onComposer: (view) => {
+      openComposerForView(view);
+    },
+  });
+
   // AI panel close button
   const aiPanelClose = document.getElementById('ai-panel-close');
   if (aiPanelClose) {
@@ -325,6 +358,14 @@ function handlePaneScroll(pane, ratio) {
   if (viewMode === 'split' && pane.previewContainer) {
     const maxScroll = pane.previewContainer.scrollHeight - pane.previewContainer.clientHeight;
     pane.previewContainer.scrollTop = maxScroll * ratio;
+  }
+}
+
+function handleSelectionChange(selectedText) {
+  // Only forward to chat when AI panel is open
+  const app = document.getElementById('app');
+  if (app?.classList.contains('ai-panel-open')) {
+    updateSelectedContext(selectedText);
   }
 }
 
@@ -594,7 +635,14 @@ function handleGlobalKeys(e) {
   if (e.key === 'i' && !e.shiftKey) {
     e.preventDefault();
     e.stopPropagation();
-    toggleAIPanel();
+    // Get current selection before toggling
+    const view = currentView();
+    let selectedText = '';
+    if (view) {
+      const { from, to } = view.state.selection.main;
+      if (from !== to) selectedText = view.state.sliceDoc(from, to);
+    }
+    toggleAIPanel(selectedText);
     // Lazy-init chat panel on first open
     const aiPanelContent = document.getElementById('ai-panel-content');
     if (aiPanelContent && !aiPanelContent.hasChildNodes()) {
@@ -602,6 +650,10 @@ function handleGlobalKeys(e) {
         getVaultPath: () => vaultPath,
         getActiveView: () => currentView(),
       });
+      // After init, set the selected context
+      if (selectedText) {
+        updateSelectedContext(selectedText);
+      }
     }
     return;
   }

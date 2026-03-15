@@ -23,10 +23,12 @@ let activePaneId = null;
 // Callbacks set by app.js
 let onChangeCallback = null;   // (pane, newContent) => void
 let onScrollCallback = null;   // (pane, ratio) => void
+let onSelectionChangeCallback = null; // (selectedText) => void
 
-export function setCallbacks({ onChange, onScroll }) {
+export function setCallbacks({ onChange, onScroll, onSelectionChange }) {
   onChangeCallback = onChange;
   onScrollCallback = onScroll;
+  onSelectionChangeCallback = onSelectionChange;
 }
 
 // ── Initialisation ────────────────────────────────────────
@@ -185,6 +187,9 @@ export function createEditorInPane(pane, content) {
     },
     (ratio) => {
       if (onScrollCallback) onScrollCallback(pane, ratio);
+    },
+    (selectedText) => {
+      if (onSelectionChangeCallback) onSelectionChangeCallback(selectedText);
     },
   );
 

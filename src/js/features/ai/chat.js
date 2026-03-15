@@ -11,6 +11,8 @@ let activeAbort = null;
 let panelContentEl = null;
 let getVaultPath = null;
 let getActiveView = null;
+let currentSelectedText = '';
+let includeDocContext = true;
 
 /**
  * Initialize the chat panel.
@@ -33,11 +35,32 @@ export async function initChat(containerEl, opts) {
   renderChatUI();
 }
 
+/**
+ * Update the selected text context shown in the chat panel.
+ * Called externally when the editor selection changes.
+ * @param {string} text - The currently selected text (empty string if no selection)
+ */
+export function updateSelectedContext(text) {
+  currentSelectedText = text;
+  const bar = panelContentEl?.querySelector('.ai-chat-context-bar');
+  if (!bar) return;
+  if (text) {
+    bar.querySelector('.ai-chat-context-text').textContent = text;
+    bar.classList.remove('hidden');
+  } else {
+    bar.classList.add('hidden');
+  }
+}
+
 function renderChatUI() {
   if (!panelContentEl) return;
 
   panelContentEl.innerHTML = `
     <div class="ai-chat-model-bar"></div>
+    <div class="ai-chat-context-bar hidden">
+      <div class="ai-chat-context-label">Selection</div>
+      <div class="ai-chat-context-text"></div>
+    </div>
     <div class="ai-chat-messages"></div>
     <div class="ai-chat-input-bar">
       <textarea class="ai-chat-textarea" placeholder="Ask about your document..." rows="2"></textarea>
@@ -76,6 +99,11 @@ function renderChatUI() {
     textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
   });
 
+  // Restore selected context if already set
+  if (currentSelectedText) {
+    updateSelectedContext(currentSelectedText);
+  }
+
   renderMessages(messagesEl);
 }
 
@@ -92,6 +120,17 @@ async function setupModelBar(container) {
     } catch { /* ignore */ }
   });
   container.appendChild(picker);
+
+  // Doc context toggle button
+  const docToggle = document.createElement('button');
+  docToggle.className = 'ai-chat-doc-toggle active';
+  docToggle.textContent = 'Doc';
+  docToggle.title = 'Include full document as context';
+  docToggle.addEventListener('click', () => {
+    includeDocContext = !includeDocContext;
+    docToggle.classList.toggle('active', includeDocContext);
+  });
+  container.appendChild(docToggle);
 
   const newChatBtn = document.createElement('button');
   newChatBtn.className = 'ai-chat-new';
@@ -129,11 +168,18 @@ async function sendMessage(text, messagesEl) {
 
   // Build context from current editor
   let systemPrompt = 'You are a helpful writing assistant for a Markdown editor called Fude.';
+
+  // Add selected text context
+  if (currentSelectedText) {
+    systemPrompt += `\n\nThe user has selected the following text in the editor:\n\`\`\`\n${currentSelectedText}\n\`\`\``;
+  }
+
+  // Add full document context if enabled
   const view = getActiveView?.();
-  if (view) {
+  if (view && includeDocContext) {
     const ctx = getEditorContext(view);
     if (ctx.fullContent) {
-      systemPrompt += `\n\nThe user is editing the following document:\n\`\`\`markdown\n${ctx.fullContent.slice(0, 4000)}\n\`\`\``;
+      systemPrompt += `\n\nThe user is editing the following document:\n\`\`\`markdown\n${ctx.fullContent}\n\`\`\``;
     }
   }
 

@@ -1128,6 +1128,101 @@ body {
   color: var(--fg-secondary);
 }
 
+/* ===== AI Chat Context Bar ===== */
+.ai-chat-context-bar {
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  border-left: 3px solid var(--fg-accent);
+  background: var(--bg-tertiary);
+  border-radius: 0 4px 4px 0;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.ai-chat-context-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-secondary);
+  margin-bottom: 2px;
+}
+
+.ai-chat-context-text {
+  font-size: 12px;
+  color: var(--fg-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+  font-family: var(--font-mono);
+}
+
+/* ===== AI Doc Toggle ===== */
+.ai-chat-doc-toggle {
+  padding: 4px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ai-chat-doc-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.ai-chat-doc-toggle.active {
+  background: var(--fg-accent);
+  color: #fff;
+  border-color: var(--fg-accent);
+}
+
+/* ===== AI Context Menu (Right-click) ===== */
+.ai-context-menu {
+  position: fixed;
+  z-index: 3000;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  min-width: 180px;
+}
+
+.ai-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: var(--fg-primary);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border-radius: 4px;
+  text-align: left;
+}
+
+.ai-context-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.ai-context-menu-icon {
+  width: 18px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.ai-context-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 8px;
+}
+
 /* ===== AI Ghost Text (Inline Completion) ===== */
 .ai-ghost-text {
   opacity: 0.4;

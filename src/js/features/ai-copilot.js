@@ -59,11 +59,27 @@ export async function getInlineCompletionExtension() {
 
 /**
  * Toggle the AI panel visibility.
+ * @param {string} [selectedText] - Optional selected text to set as context
  */
-export function toggleAIPanel() {
+export function toggleAIPanel(selectedText) {
   const app = document.getElementById('app');
   if (!app) return;
   app.classList.toggle('ai-panel-open');
+
+  // If opening and we have selected text, update context
+  if (app.classList.contains('ai-panel-open') && selectedText && chatModule) {
+    chatModule.updateSelectedContext(selectedText);
+  }
+}
+
+/**
+ * Forward selection change to the chat module.
+ * @param {string} selectedText
+ */
+export function updateSelectedContext(selectedText) {
+  if (chatModule) {
+    chatModule.updateSelectedContext(selectedText);
+  }
 }
 
 export function enableCopilot() {}

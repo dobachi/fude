@@ -94,7 +94,14 @@ export async function openSettings() {
 }
 
 async function saveSettings() {
+  // Read existing config first to preserve fields not shown in the UI (e.g. ai_model)
+  let existing = {};
+  try {
+    existing = await backend.getConfig();
+  } catch { /* ignore */ }
+
   const config = {
+    ...existing,
     theme: document.querySelector('#setting-theme')?.value || 'dark',
     features: {
       ai_copilot: document.querySelector('#setting-ai-copilot')?.checked || false,
@@ -109,6 +116,15 @@ async function saveSettings() {
     await backend.saveConfig(config);
   } catch (e) {
     console.error('Failed to save config:', e);
+    // Show user-visible error
+    const footer = settingsPanel?.querySelector('.settings-footer');
+    if (footer) {
+      const err = document.createElement('span');
+      err.style.cssText = 'color:#f44336;font-size:12px;margin-right:8px';
+      err.textContent = 'Save failed: ' + (e.message || e);
+      footer.prepend(err);
+    }
+    return; // Don't close on failure
   }
   closeSettings();
 }

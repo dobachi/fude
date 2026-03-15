@@ -111,7 +111,7 @@ function boldKeymap() {
  * Each call creates an independent view; previous views are NOT destroyed.
  * The caller is responsible for destroying old views when needed.
  */
-export function createEditor(container, content = '', onChange = null, onScroll = null) {
+export function createEditor(container, content = '', onChange = null, onScroll = null, onSelectionChange = null) {
   container.innerHTML = '';
 
   const themeCompartment = new Compartment();
@@ -162,11 +162,16 @@ export function createEditor(container, content = '', onChange = null, onScroll 
   // Track IME composition state to avoid RangeError during Japanese input
   let composing = false;
 
-  if (onChange) {
+  if (onChange || onSelectionChange) {
     extensions.push(
       EditorView.updateListener.of((update) => {
-        if (update.docChanged && !composing) {
+        if (onChange && update.docChanged && !composing) {
           onChange(update.state.doc.toString());
+        }
+        if (onSelectionChange && update.selectionSet) {
+          const { from, to } = update.state.selection.main;
+          const selectedText = from !== to ? update.state.sliceDoc(from, to) : '';
+          onSelectionChange(selectedText);
         }
       }),
     );
