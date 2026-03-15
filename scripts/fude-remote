@@ -100,25 +100,29 @@ find_fude_exe() {
   return 1
 }
 
+FUDE_VERSION_FILE="$FUDE_CACHE_DIR/version"
+
+get_latest_release() {
+  curl -s "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null
+}
+
 download_fude_exe() {
-  echo "Fude.exe not found. Downloading from GitHub Releases..."
   mkdir -p "$FUDE_CACHE_DIR"
 
-  # Get latest release download URL for Windows exe
-  DOWNLOAD_URL=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" \
+  RELEASE_JSON="$(get_latest_release)"
+  if [ -z "$RELEASE_JSON" ]; then
+    echo "Warning: Could not reach GitHub API"
+    return 1
+  fi
+
+  LATEST_TAG=$(echo "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/"tag_name": *"//' | sed 's/"$//')
+
+  # Get download URL for Windows exe (setup.exe)
+  DOWNLOAD_URL=$(echo "$RELEASE_JSON" \
     | grep -o '"browser_download_url": *"[^"]*\.exe"' \
     | head -1 \
     | sed 's/"browser_download_url": *"//' \
     | sed 's/"$//')
-
-  if [ -z "$DOWNLOAD_URL" ]; then
-    # Try nsis installer as fallback
-    DOWNLOAD_URL=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" \
-      | grep -o '"browser_download_url": *"[^"]*nsis[^"]*\.exe"' \
-      | head -1 \
-      | sed 's/"browser_download_url": *"//' \
-      | sed 's/"$//')
-  fi
 
   if [ -z "$DOWNLOAD_URL" ]; then
     echo "Error: Could not find Windows binary in GitHub Releases."
@@ -126,10 +130,12 @@ download_fude_exe() {
     return 1
   fi
 
-  echo "Downloading: $DOWNLOAD_URL"
+  echo "Downloading Fude $LATEST_TAG ..."
+  echo "  $DOWNLOAD_URL"
   curl -L -o "$FUDE_EXE_CACHED" "$DOWNLOAD_URL"
 
   if [ -f "$FUDE_EXE_CACHED" ]; then
+    echo "$LATEST_TAG" > "$FUDE_VERSION_FILE"
     echo "Downloaded to $FUDE_EXE_CACHED"
     return 0
   fi
@@ -137,13 +143,47 @@ download_fude_exe() {
   return 1
 }
 
-FUDE_EXE_PATH="$(find_fude_exe)" || {
+check_update() {
+  # Check if cached exe needs updating
+  if [ ! -f "$FUDE_EXE_CACHED" ]; then
+    return 0  # need download
+  fi
+
+  RELEASE_JSON="$(get_latest_release)"
+  if [ -z "$RELEASE_JSON" ]; then
+    return 1  # can't check, use cache
+  fi
+
+  LATEST_TAG=$(echo "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/"tag_name": *"//' | sed 's/"$//')
+  CACHED_TAG=""
+  if [ -f "$FUDE_VERSION_FILE" ]; then
+    CACHED_TAG="$(cat "$FUDE_VERSION_FILE")"
+  fi
+
+  if [ "$LATEST_TAG" != "$CACHED_TAG" ]; then
+    echo "New version available: $LATEST_TAG (cached: ${CACHED_TAG:-none})"
+    return 0  # need update
+  fi
+
+  return 1  # up to date
+}
+
+# Find exe or download/update
+FUDE_EXE_PATH="$(find_fude_exe)"
+if [ $? -ne 0 ]; then
+  # Not found anywhere, download
   download_fude_exe || {
     echo "Error: Could not obtain Fude.exe"
     exit 1
   }
   FUDE_EXE_PATH="$FUDE_EXE_CACHED"
-}
+elif [ "$FUDE_EXE_PATH" = "$FUDE_EXE_CACHED" ]; then
+  # Using cached version, check for updates
+  if check_update; then
+    download_fude_exe || echo "Warning: Update failed, using cached version"
+  fi
+  FUDE_EXE_PATH="$FUDE_EXE_CACHED"
+fi
 
 # --- Launch Fude.exe ---
 
