@@ -2,22 +2,31 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 describe('backend module (Tauri mode)', () => {
   let mockInvoke;
+  let originalLocation;
 
   beforeEach(() => {
-    // Reset module registry for fresh import
     vi.resetModules();
 
-    // Set up mock Tauri global
     mockInvoke = vi.fn().mockResolvedValue('mock-result');
     window.__TAURI__ = {
       core: {
         invoke: mockInvoke,
       },
     };
+
+    // Save original location and mock it for Tauri detection
+    originalLocation = window.location;
+    delete window.location;
+    window.location = {
+      protocol: 'tauri:',
+      hostname: 'localhost',
+      origin: 'tauri://localhost',
+    };
   });
 
   afterEach(() => {
     delete window.__TAURI__;
+    window.location = originalLocation;
   });
 
   it('readFile calls invoke with read_file command', async () => {
@@ -89,6 +98,24 @@ describe('backend module (Tauri mode)', () => {
     expect(mockInvoke).toHaveBeenCalledWith('save_config', { config });
   });
 
+  it('getOpenDir calls invoke with get_open_dir command', async () => {
+    const mod = await import('../backend.js');
+    await mod.getOpenDir();
+    expect(mockInvoke).toHaveBeenCalledWith('get_open_dir');
+  });
+
+  it('browseDir calls invoke with browse_dir command', async () => {
+    const mod = await import('../backend.js');
+    await mod.browseDir('/home');
+    expect(mockInvoke).toHaveBeenCalledWith('browse_dir', { path: '/home' });
+  });
+
+  it('browseDir with no argument sends empty string', async () => {
+    const mod = await import('../backend.js');
+    await mod.browseDir();
+    expect(mockInvoke).toHaveBeenCalledWith('browse_dir', { path: '' });
+  });
+
   it('function names map to correct Tauri command names', async () => {
     const mod = await import('../backend.js');
 
@@ -103,14 +130,99 @@ describe('backend module (Tauri mode)', () => {
       ['loadSession', 'load_session'],
       ['getConfig', 'get_config'],
       ['saveConfig', 'save_config'],
+      ['getOpenDir', 'get_open_dir'],
+      ['browseDir', 'browse_dir'],
     ];
 
     for (const [jsFn, tauriCmd] of mappings) {
       mockInvoke.mockClear();
-      // Call with minimal args to avoid errors
       await mod[jsFn]('arg1', 'arg2');
       expect(mockInvoke).toHaveBeenCalled();
       expect(mockInvoke.mock.calls[0][0]).toBe(tauriCmd);
     }
+  });
+});
+
+describe('backend module (HTTP fallback mode)', () => {
+  let originalLocation;
+
+  beforeEach(() => {
+    vi.resetModules();
+
+    // No __TAURI__ global, so it falls back to fetch
+    delete window.__TAURI__;
+
+    originalLocation = window.location;
+    delete window.location;
+    window.location = {
+      protocol: 'http:',
+      hostname: 'localhost',
+      origin: 'http://localhost:3000',
+    };
+
+    // Mock fetch
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ result: 'ok' }),
+    });
+  });
+
+  afterEach(() => {
+    window.location = originalLocation;
+    delete globalThis.fetch;
+  });
+
+  it('readFile calls fetch with correct URL', async () => {
+    const mod = await import('../backend.js');
+    await mod.readFile('/test.md');
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/read_file',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ path: '/test.md' }),
+      }),
+    );
+  });
+
+  it('writeFile calls fetch with correct URL and body', async () => {
+    const mod = await import('../backend.js');
+    await mod.writeFile('/test.md', '# Hello');
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/write_file',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ path: '/test.md', content: '# Hello' }),
+      }),
+    );
+  });
+
+  it('throws when fetch response is not ok', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    });
+
+    const mod = await import('../backend.js');
+    await expect(mod.readFile('/fail.md')).rejects.toThrow('Backend call failed: read_file');
+  });
+
+  it('uses https://tauri.localhost as Tauri mode', async () => {
+    vi.resetModules();
+
+    // Simulate Tauri via https + tauri.localhost
+    const mockInvoke = vi.fn().mockResolvedValue('tauri-result');
+    window.__TAURI__ = { core: { invoke: mockInvoke } };
+    delete window.location;
+    window.location = {
+      protocol: 'https:',
+      hostname: 'tauri.localhost',
+      origin: 'https://tauri.localhost',
+    };
+
+    const mod = await import('../backend.js');
+    await mod.readFile('/via-https.md');
+    expect(mockInvoke).toHaveBeenCalledWith('read_file', { path: '/via-https.md' });
+
+    delete window.__TAURI__;
   });
 });
