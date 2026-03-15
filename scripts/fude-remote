@@ -3,6 +3,13 @@
 # Automatically downloads Fude.exe from GitHub Releases if not found
 set -e
 
+# WSL detection
+if ! grep -qi "microsoft\|wsl" /proc/version 2>/dev/null; then
+  echo "Error: fude-remote is designed for WSL environments."
+  echo "On native Linux, use 'fude' (native app) or 'fude-browser' (browser mode)."
+  exit 1
+fi
+
 FUDE_PORT="${FUDE_PORT:-3000}"
 FUDE_URL="http://localhost:$FUDE_PORT"
 FUDE_CACHE_DIR="$HOME/.cache/fude"
