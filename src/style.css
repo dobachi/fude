@@ -237,6 +237,64 @@ body {
   color: var(--fg-muted);
 }
 
+/* ===== Sidebar Settings Popover ===== */
+#sidebar-header {
+  position: relative;
+}
+
+.sidebar-popover {
+  position: absolute;
+  top: 100%;
+  right: 4px;
+  z-index: 100;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  padding: 8px 0;
+  min-width: 200px;
+}
+
+.sidebar-popover-section {
+  padding: 4px 12px;
+}
+
+.sidebar-popover-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-secondary);
+  margin-bottom: 4px;
+}
+
+.sidebar-popover-radio,
+.sidebar-popover-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  color: var(--fg-primary);
+  cursor: pointer;
+}
+
+.sidebar-popover-radio:hover,
+.sidebar-popover-check:hover {
+  color: var(--fg-accent);
+}
+
+.sidebar-popover-radio input,
+.sidebar-popover-check input {
+  margin: 0;
+}
+
+.sidebar-popover-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 12px;
+}
+
 /* ===== Icon Button ===== */
 .icon-btn {
   background: none;

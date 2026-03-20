@@ -83,8 +83,8 @@ export async function checkTempFiles(paths) {
   return doInvoke('check_temp_files', { paths });
 }
 
-export async function readDirTree(path) {
-  return doInvoke('read_dir_tree', { path });
+export async function readDirTree(path, showAllFiles) {
+  return doInvoke('read_dir_tree', { path, show_all_files: showAllFiles || false });
 }
 
 export async function saveSession(session) {

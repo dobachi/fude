@@ -22,6 +22,9 @@ pub struct FileEntry {
     pub path: String,
     pub is_dir: bool,
     pub children: Option<Vec<FileEntry>>,
+    pub modified: Option<u64>,
+    pub created: Option<u64>,
+    pub size: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +73,8 @@ pub struct Config {
     pub vim_mode: bool,
     pub openrouter_api_key: Option<String>,
     pub ai_model: Option<String>,
+    pub sidebar_sort: Option<String>,
+    pub sidebar_show_all_files: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +86,8 @@ pub struct ConfigResponse {
     pub has_api_key: bool,
     pub api_key_storage: String,
     pub ai_model: Option<String>,
+    pub sidebar_sort: String,
+    pub sidebar_show_all_files: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +166,8 @@ impl Default for Config {
             vim_mode: false,
             openrouter_api_key: None,
             ai_model: None,
+            sidebar_sort: None,
+            sidebar_show_all_files: None,
         }
     }
 }
@@ -238,7 +247,30 @@ fn migrate_api_key() {
     }
 }
 
+fn get_file_metadata(path: &Path) -> (Option<u64>, Option<u64>, Option<u64>) {
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => return (None, None, None),
+    };
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
+    let created = meta
+        .created()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
+    let size = Some(meta.len());
+    (modified, created, size)
+}
+
 fn scan_dir_tree(dir: &Path) -> Result<Vec<FileEntry>, String> {
+    scan_dir_tree_filtered(dir, false)
+}
+
+fn scan_dir_tree_filtered(dir: &Path, show_all_files: bool) -> Result<Vec<FileEntry>, String> {
     let mut entries = Vec::new();
 
     let read_dir = fs::read_dir(dir)
@@ -268,22 +300,30 @@ fn scan_dir_tree(dir: &Path) -> Result<Vec<FileEntry>, String> {
         let is_dir = item.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
 
         if is_dir {
-            let children = scan_dir_tree(&path)?;
-            // Only include directories that contain .md files (directly or nested)
+            let children = scan_dir_tree_filtered(&path, show_all_files)?;
+            // Only include directories that contain files (directly or nested)
             if !children.is_empty() {
+                let (modified, created, size) = get_file_metadata(&path);
                 entries.push(FileEntry {
                     name,
                     path: path.to_string_lossy().to_string(),
                     is_dir: true,
                     children: Some(children),
+                    modified,
+                    created,
+                    size,
                 });
             }
-        } else if name.ends_with(".md") {
+        } else if show_all_files || name.ends_with(".md") {
+            let (modified, created, size) = get_file_metadata(&path);
             entries.push(FileEntry {
                 name,
                 path: path.to_string_lossy().to_string(),
                 is_dir: false,
                 children: None,
+                modified,
+                created,
+                size,
             });
         }
     }
@@ -312,12 +352,12 @@ fn write_file(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn read_dir_tree(path: String) -> Result<Vec<FileEntry>, String> {
+fn read_dir_tree(path: String, show_all_files: Option<bool>) -> Result<Vec<FileEntry>, String> {
     let dir = Path::new(&path);
     if !dir.is_dir() {
         return Err(format!("'{}' is not a directory", path));
     }
-    scan_dir_tree(dir)
+    scan_dir_tree_filtered(dir, show_all_files.unwrap_or(false))
 }
 
 #[tauri::command]
@@ -367,6 +407,8 @@ fn get_config() -> Result<ConfigResponse, String> {
         has_api_key,
         api_key_storage: storage.storage_type().to_string(),
         ai_model: config.ai_model,
+        sidebar_sort: config.sidebar_sort.unwrap_or_else(|| "name_asc".to_string()),
+        sidebar_show_all_files: config.sidebar_show_all_files.unwrap_or(false),
     })
 }
 
@@ -841,6 +883,24 @@ mod tests {
         assert_eq!(entries[0].name, "note.md");
         assert!(!entries[0].is_dir);
         assert!(entries[0].children.is_none());
+        assert!(entries[0].modified.is_some());
+        assert!(entries[0].size.is_some());
+    }
+
+    #[test]
+    fn scan_dir_tree_show_all_files() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("note.md"), "# Hello").unwrap();
+        fs::write(tmp.path().join("readme.txt"), "text").unwrap();
+        fs::write(tmp.path().join("data.json"), "{}").unwrap();
+
+        // Default: only .md files
+        let entries = scan_dir_tree(tmp.path()).unwrap();
+        assert_eq!(entries.len(), 1);
+
+        // show_all_files: all files
+        let entries = scan_dir_tree_filtered(tmp.path(), true).unwrap();
+        assert_eq!(entries.len(), 3);
     }
 
     #[test]
@@ -906,6 +966,8 @@ mod tests {
         assert!(config.features.diff_highlight);
         assert!(config.openrouter_api_key.is_none());
         assert!(config.ai_model.is_none());
+        assert!(config.sidebar_sort.is_none());
+        assert!(config.sidebar_show_all_files.is_none());
     }
 
     // --- Session default values ---
@@ -972,6 +1034,8 @@ mod tests {
             vim_mode: true,
             openrouter_api_key: Some("sk-test-key".to_string()),
             ai_model: Some("openai/gpt-4o".to_string()),
+            sidebar_sort: Some("modified_desc".to_string()),
+            sidebar_show_all_files: Some(true),
         };
 
         let json = serde_json::to_string(&config).unwrap();
@@ -984,6 +1048,8 @@ mod tests {
         assert!(restored.vim_mode);
         assert_eq!(restored.openrouter_api_key.as_deref(), Some("sk-test-key"));
         assert_eq!(restored.ai_model.as_deref(), Some("openai/gpt-4o"));
+        assert_eq!(restored.sidebar_sort.as_deref(), Some("modified_desc"));
+        assert_eq!(restored.sidebar_show_all_files, Some(true));
     }
 
     #[test]
@@ -996,6 +1062,8 @@ mod tests {
         assert!(config.features.diff_highlight); // default
         assert!(config.openrouter_api_key.is_none()); // default
         assert!(config.ai_model.is_none()); // default
+        assert!(config.sidebar_sort.is_none()); // default
+        assert!(config.sidebar_show_all_files.is_none()); // default
     }
 
     // --- Temp file naming convention ---

@@ -11,6 +11,25 @@
       <div id="sidebar">
         <div id="sidebar-header">
           <span class="sidebar-title">Files</span>
+          <button id="sidebar-settings-btn" class="icon-btn" aria-label="File settings">&#x2699;</button>
+          <div id="sidebar-settings-popover" class="sidebar-popover hidden">
+            <div class="sidebar-popover-section">
+              <div class="sidebar-popover-label">Sort by</div>
+              <label class="sidebar-popover-radio"><input type="radio" name="sidebar-sort" value="name_asc" checked /> Name (A-Z)</label>
+              <label class="sidebar-popover-radio"><input type="radio" name="sidebar-sort" value="name_desc" /> Name (Z-A)</label>
+              <label class="sidebar-popover-radio"><input type="radio" name="sidebar-sort" value="modified_desc" /> Modified (newest)</label>
+              <label class="sidebar-popover-radio"><input type="radio" name="sidebar-sort" value="modified_asc" /> Modified (oldest)</label>
+              <label class="sidebar-popover-radio"><input type="radio" name="sidebar-sort" value="created_desc" /> Created (newest)</label>
+              <label class="sidebar-popover-radio"><input type="radio" name="sidebar-sort" value="created_asc" /> Created (oldest)</label>
+              <label class="sidebar-popover-radio"><input type="radio" name="sidebar-sort" value="size_desc" /> Size (largest)</label>
+              <label class="sidebar-popover-radio"><input type="radio" name="sidebar-sort" value="size_asc" /> Size (smallest)</label>
+            </div>
+            <div class="sidebar-popover-divider"></div>
+            <div class="sidebar-popover-section">
+              <div class="sidebar-popover-label">Show files</div>
+              <label class="sidebar-popover-check"><input type="checkbox" id="sidebar-show-all" /> All files (not just .md)</label>
+            </div>
+          </div>
         </div>
         <div id="file-tree"></div>
       </div>

@@ -3,19 +3,128 @@
 let fileTreeContainer = null;
 let onFileSelect = null;
 let activeFilePath = null;
+let currentEntries = [];
+let currentSort = 'name_asc';
+let showAllFiles = false;
+let onSettingsChange = null;
 
-export function initSidebar(container, fileSelectCallback) {
+const SORT_OPTIONS = {
+  name_asc:      { key: 'name',     order: 'asc' },
+  name_desc:     { key: 'name',     order: 'desc' },
+  modified_desc: { key: 'modified', order: 'desc' },
+  modified_asc:  { key: 'modified', order: 'asc' },
+  created_desc:  { key: 'created',  order: 'desc' },
+  created_asc:   { key: 'created',  order: 'asc' },
+  size_desc:     { key: 'size',     order: 'desc' },
+  size_asc:      { key: 'size',     order: 'asc' },
+};
+
+export function initSidebar(container, fileSelectCallback, opts) {
   fileTreeContainer = container;
   onFileSelect = fileSelectCallback;
+
+  if (opts) {
+    if (opts.sort) currentSort = opts.sort;
+    if (opts.showAllFiles) showAllFiles = opts.showAllFiles;
+    if (opts.onSettingsChange) onSettingsChange = opts.onSettingsChange;
+  }
+
+  initPopover();
+}
+
+function initPopover() {
+  const btn = document.getElementById('sidebar-settings-btn');
+  const popover = document.getElementById('sidebar-settings-popover');
+  if (!btn || !popover) return;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    popover.classList.toggle('hidden');
+  });
+
+  // Close on outside click
+  document.addEventListener('click', (e) => {
+    if (!popover.contains(e.target) && e.target !== btn) {
+      popover.classList.add('hidden');
+    }
+  });
+
+  // Set initial state
+  const radio = popover.querySelector(`input[name="sidebar-sort"][value="${currentSort}"]`);
+  if (radio) radio.checked = true;
+
+  const allFilesCheck = document.getElementById('sidebar-show-all');
+  if (allFilesCheck) allFilesCheck.checked = showAllFiles;
+
+  // Sort change
+  popover.querySelectorAll('input[name="sidebar-sort"]').forEach((radio) => {
+    radio.addEventListener('change', (e) => {
+      currentSort = e.target.value;
+      renderSorted();
+      saveSettings();
+    });
+  });
+
+  // Show all files toggle
+  if (allFilesCheck) {
+    allFilesCheck.addEventListener('change', (e) => {
+      showAllFiles = e.target.checked;
+      saveSettings();
+      // Need to re-fetch directory tree since filter is server-side
+      if (onSettingsChange) onSettingsChange({ sort: currentSort, showAllFiles });
+    });
+  }
+}
+
+function saveSettings() {
+  if (onSettingsChange) {
+    onSettingsChange({ sort: currentSort, showAllFiles });
+  }
+}
+
+function sortEntries(entries) {
+  const opt = SORT_OPTIONS[currentSort];
+  if (!opt) return entries;
+
+  const sorted = [...entries].sort((a, b) => {
+    // Directories always first
+    if (a.is_dir && !b.is_dir) return -1;
+    if (!a.is_dir && b.is_dir) return 1;
+
+    let result;
+    if (opt.key === 'name') {
+      result = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    } else {
+      const aVal = a[opt.key] ?? 0;
+      const bVal = b[opt.key] ?? 0;
+      result = aVal - bVal;
+    }
+
+    return opt.order === 'desc' ? -result : result;
+  });
+
+  // Recursively sort children
+  return sorted.map((entry) => {
+    if (entry.is_dir && entry.children) {
+      return { ...entry, children: sortEntries(entry.children) };
+    }
+    return entry;
+  });
+}
+
+function renderSorted() {
+  if (!fileTreeContainer || !currentEntries.length) return;
+  const sorted = sortEntries(currentEntries);
+  fileTreeContainer.innerHTML = '';
+  for (const entry of sorted) {
+    fileTreeContainer.appendChild(buildTreeItem(entry));
+  }
 }
 
 export function loadDirectory(entries) {
   if (!fileTreeContainer) return;
-  fileTreeContainer.innerHTML = '';
-
-  for (const entry of entries) {
-    fileTreeContainer.appendChild(buildTreeItem(entry));
-  }
+  currentEntries = entries;
+  renderSorted();
 }
 
 function buildTreeItem(entry) {
@@ -95,4 +204,8 @@ export function highlightFile(path) {
       }
     }
   });
+}
+
+export function getShowAllFiles() {
+  return showAllFiles;
 }

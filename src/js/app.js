@@ -42,7 +42,7 @@ const {
   createEditorInPane,
   getPaneCount,
 } = panesModule;
-import { initSidebar, loadDirectory, toggleSidebar, highlightFile } from './core/sidebar.js';
+import { initSidebar, loadDirectory, toggleSidebar, highlightFile, getShowAllFiles } from './core/sidebar.js';
 import { scheduleSave, restoreSession } from './core/session.js';
 import { initTheme } from './core/theme.js';
 import { onContentChange, triggerSave, checkRecovery } from './core/autosave.js';
@@ -107,7 +107,11 @@ async function init() {
 
   // Init sidebar
   const fileTree = document.getElementById('file-tree');
-  if (fileTree) initSidebar(fileTree, handleFileSelect);
+  if (fileTree) initSidebar(fileTree, handleFileSelect, {
+    sort: config.sidebar_sort || 'name_asc',
+    showAllFiles: config.sidebar_show_all_files || false,
+    onSettingsChange: handleSidebarSettingsChange,
+  });
 
   // Tab change callback
   setTabChangeCallback(handleTabChange);
@@ -168,7 +172,7 @@ async function init() {
 
     if (vaultPath) {
       try {
-        const tree = await backend.readDirTree(vaultPath);
+        const tree = await backend.readDirTree(vaultPath, getShowAllFiles());
         loadDirectory(tree);
       } catch {
         /* ignore */
@@ -237,7 +241,7 @@ async function init() {
         const openDir = await backend.getOpenDir();
         if (openDir) {
           vaultPath = openDir;
-          const tree = await backend.readDirTree(openDir);
+          const tree = await backend.readDirTree(openDir, getShowAllFiles());
           loadDirectory(tree);
         }
       } catch {
@@ -423,7 +427,7 @@ async function handleFileSelect(path) {
 
 async function openPath(path) {
   try {
-    const tree = await backend.readDirTree(path);
+    const tree = await backend.readDirTree(path, getShowAllFiles());
     vaultPath = path;
     loadDirectory(tree);
   } catch {
@@ -591,9 +595,25 @@ function scheduleSessionSave() {
 async function refreshSidebar() {
   if (!vaultPath) return;
   try {
-    const tree = await backend.readDirTree(vaultPath);
+    const tree = await backend.readDirTree(vaultPath, getShowAllFiles());
     loadDirectory(tree);
   } catch { /* ignore */ }
+}
+
+// ── Sidebar settings change handler ────────────────────────
+async function handleSidebarSettingsChange({ sort, showAllFiles: allFiles }) {
+  // Save to config
+  try {
+    const existing = await backend.getConfig();
+    await backend.saveConfig({
+      ...existing,
+      sidebar_sort: sort,
+      sidebar_show_all_files: allFiles,
+    });
+  } catch { /* ignore */ }
+
+  // Refresh tree if showAllFiles changed (needs re-fetch)
+  await refreshSidebar();
 }
 
 // ── Open folder dialog ─────────────────────────────────────
@@ -604,14 +624,14 @@ async function handleOpenFolder() {
       const folder = await open({ directory: true, multiple: false });
       if (folder) {
         vaultPath = folder;
-        const tree = await backend.readDirTree(folder);
+        const tree = await backend.readDirTree(folder, getShowAllFiles());
         loadDirectory(tree);
         scheduleSessionSave();
       }
     } else {
       openFolderPicker(async (folder) => {
         vaultPath = folder;
-        const tree = await backend.readDirTree(folder);
+        const tree = await backend.readDirTree(folder, getShowAllFiles());
         loadDirectory(tree);
         scheduleSessionSave();
       });
