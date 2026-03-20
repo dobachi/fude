@@ -123,6 +123,9 @@ async function init() {
     setTimeout(() => {
       const active = document.activeElement;
       if (!active || active === document.body || active.tagName === 'HTML') {
+        // AIパネル内をクリック/選択中ならエディタに戻さない
+        const aiPanel = document.getElementById('ai-panel');
+        if (aiPanel && (aiPanel.contains(active) || aiPanel.matches(':hover'))) return;
         const view = currentView();
         if (view) view.focus();
       }
