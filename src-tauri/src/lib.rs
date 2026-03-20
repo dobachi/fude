@@ -1,12 +1,18 @@
+mod key_storage;
+
 use futures_util::StreamExt;
+use key_storage::{create_storage, set_dir_permissions, set_file_permissions, KeyStorage};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_cli::CliExt;
+
+static KEY_STORAGE: OnceLock<Box<dyn KeyStorage>> = OnceLock::new();
 
 // ─── Structs ───────────────────────────────────────────────
 
@@ -67,6 +73,17 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigResponse {
+    pub theme: String,
+    pub features: Features,
+    pub font_size: u32,
+    pub vim_mode: bool,
+    pub has_api_key: bool,
+    pub api_key_storage: String,
+    pub ai_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TempFileInfo {
     pub original_path: String,
     pub temp_path: String,
@@ -74,6 +91,24 @@ pub struct TempFileInfo {
 }
 
 // ─── Helpers ───────────────────────────────────────────────
+
+fn get_key_storage() -> &'static dyn KeyStorage {
+    KEY_STORAGE
+        .get()
+        .expect("Key storage not initialized")
+        .as_ref()
+}
+
+fn init_key_storage() {
+    let config_path = config_dir()
+        .map(|d| d.join("config.json"))
+        .unwrap_or_else(|_| PathBuf::from("config.json"));
+    let _ = KEY_STORAGE.set(create_storage(config_path));
+}
+
+fn get_api_key() -> Result<Option<String>, String> {
+    get_key_storage().get_key()
+}
 
 fn config_dir() -> Result<PathBuf, String> {
     let base =
@@ -147,6 +182,59 @@ impl Default for Session {
             sidebar_visible: true,
             pane_layout: None,
         }
+    }
+}
+
+fn migrate_api_key() {
+    let config_path = match config_dir() {
+        Ok(d) => d.join("config.json"),
+        Err(_) => return,
+    };
+    if !config_path.exists() {
+        return;
+    }
+
+    // Read config and check for plaintext key
+    let content = match fs::read_to_string(&config_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let config: Config = match serde_json::from_str(&content) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let key = match &config.openrouter_api_key {
+        Some(k) if !k.is_empty() => k.clone(),
+        _ => return,
+    };
+
+    let storage = get_key_storage();
+
+    // Only migrate if using keychain (no point migrating to itself)
+    if storage.storage_type() != "keychain" {
+        // Still strengthen permissions on the file
+        let _ = set_file_permissions(&config_path);
+        if let Some(parent) = config_path.parent() {
+            let _ = set_dir_permissions(parent);
+        }
+        return;
+    }
+
+    // Try to store in keyring
+    if storage.set_key(&key).is_ok() {
+        // Remove key from config.json
+        let mut config_clean = config;
+        config_clean.openrouter_api_key = None;
+        if let Ok(new_content) = serde_json::to_string_pretty(&config_clean) {
+            let _ = fs::write(&config_path, new_content);
+        }
+        eprintln!("Migrated API key from config.json to OS keychain");
+    }
+
+    let _ = set_file_permissions(&config_path);
+    if let Some(parent) = config_path.parent() {
+        let _ = set_dir_permissions(parent);
     }
 }
 
@@ -254,8 +342,7 @@ fn save_session(session: Session) -> Result<(), String> {
     fs::write(&path, content).map_err(|e| format!("Failed to write session file: {}", e))
 }
 
-#[tauri::command]
-fn get_config() -> Result<Config, String> {
+fn load_config() -> Result<Config, String> {
     let path = config_dir()?.join("config.json");
     if !path.exists() {
         return Ok(Config::default());
@@ -268,12 +355,48 @@ fn get_config() -> Result<Config, String> {
 }
 
 #[tauri::command]
+fn get_config() -> Result<ConfigResponse, String> {
+    let config = load_config()?;
+    let storage = get_key_storage();
+    let has_api_key = storage.get_key()?.is_some();
+    Ok(ConfigResponse {
+        theme: config.theme,
+        features: config.features,
+        font_size: config.font_size,
+        vim_mode: config.vim_mode,
+        has_api_key,
+        api_key_storage: storage.storage_type().to_string(),
+        ai_model: config.ai_model,
+    })
+}
+
+#[tauri::command]
 fn save_config(config: Config) -> Result<(), String> {
     let dir = ensure_config_dir()?;
     let path = dir.join("config.json");
-    let content = serde_json::to_string_pretty(&config)
+
+    // If an API key is provided, store it in key storage
+    let mut config_to_save = config;
+    if let Some(ref key) = config_to_save.openrouter_api_key {
+        if !key.is_empty() {
+            let storage = get_key_storage();
+            storage.set_key(key)?;
+            // If keyring succeeded, don't store in config file
+            if storage.storage_type() == "keychain" {
+                config_to_save.openrouter_api_key = None;
+            }
+        }
+    }
+
+    let content = serde_json::to_string_pretty(&config_to_save)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    fs::write(&path, content).map_err(|e| format!("Failed to write config file: {}", e))
+    fs::write(&path, &content).map_err(|e| format!("Failed to write config file: {}", e))?;
+
+    // Strengthen file permissions
+    let _ = set_file_permissions(&path);
+    let _ = set_dir_permissions(&dir);
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -398,6 +521,53 @@ fn browse_dir(path: String) -> Result<BrowseResult, String> {
     })
 }
 
+#[tauri::command]
+fn set_api_key(key: String) -> Result<String, String> {
+    let storage = get_key_storage();
+    storage.set_key(&key)?;
+
+    // If using keychain, clear the key from config.json
+    if storage.storage_type() == "keychain" {
+        let path = config_dir()?.join("config.json");
+        if path.exists() {
+            let content = fs::read_to_string(&path)
+                .map_err(|e| format!("Failed to read config: {}", e))?;
+            let mut value: serde_json::Value = serde_json::from_str(&content)
+                .map_err(|e| format!("Failed to parse config: {}", e))?;
+            value["openrouter_api_key"] = serde_json::Value::Null;
+            let content = serde_json::to_string_pretty(&value)
+                .map_err(|e| format!("Failed to serialize config: {}", e))?;
+            fs::write(&path, content)
+                .map_err(|e| format!("Failed to write config: {}", e))?;
+            let _ = set_file_permissions(&path);
+        }
+    }
+
+    Ok(storage.storage_type().to_string())
+}
+
+#[tauri::command]
+fn delete_api_key() -> Result<(), String> {
+    let storage = get_key_storage();
+    storage.delete_key()?;
+
+    // Also clear from config.json
+    let path = config_dir()?.join("config.json");
+    if path.exists() {
+        let content = fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read config: {}", e))?;
+        let mut value: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse config: {}", e))?;
+        value["openrouter_api_key"] = serde_json::Value::Null;
+        let content = serde_json::to_string_pretty(&value)
+            .map_err(|e| format!("Failed to serialize config: {}", e))?;
+        fs::write(&path, content)
+            .map_err(|e| format!("Failed to write config: {}", e))?;
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChatMessage {
     role: String,
@@ -413,9 +583,7 @@ struct AiStreamEvent {
 
 #[tauri::command]
 async fn ai_chat(messages: Vec<ChatMessage>, model: String) -> Result<String, String> {
-    let config = get_config()?;
-    let api_key = config
-        .openrouter_api_key
+    let api_key = get_api_key()?
         .ok_or_else(|| "OpenRouter API key not configured".to_string())?;
 
     let client = reqwest::Client::new();
@@ -447,9 +615,7 @@ async fn ai_chat_stream(
     model: String,
     request_id: String,
 ) -> Result<(), String> {
-    let config = get_config()?;
-    let api_key = config
-        .openrouter_api_key
+    let api_key = get_api_key()?
         .ok_or_else(|| "OpenRouter API key not configured".to_string())?;
 
     let event_name = format!("ai-stream-{}", request_id);
@@ -553,8 +719,7 @@ async fn ai_chat_stream(
 
 #[tauri::command]
 async fn ai_models() -> Result<serde_json::Value, String> {
-    let config = get_config()?;
-    let api_key = match config.openrouter_api_key {
+    let api_key = match get_api_key()? {
         Some(key) if !key.is_empty() => key,
         _ => return Ok(serde_json::json!({ "data": [] })),
     };
@@ -597,6 +762,8 @@ pub fn run() {
             save_session,
             get_config,
             save_config,
+            set_api_key,
+            delete_api_key,
             write_temp_file,
             delete_temp_file,
             check_temp_files,
@@ -607,6 +774,12 @@ pub fn run() {
             ai_models,
         ])
         .setup(|app| {
+            // Initialize key storage
+            init_key_storage();
+
+            // Migrate plaintext API key from config.json to keyring
+            migrate_api_key();
+
             let handle = app.handle().clone();
             if let Ok(matches) = app.cli().matches() {
                 let mut cli_path: Option<String> = None;

@@ -1,8 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 vi.mock('../backend.js', () => ({
-  getConfig: vi.fn().mockResolvedValue({ theme: 'dark', features: {}, font_size: 14 }),
+  getConfig: vi.fn().mockResolvedValue({
+    theme: 'dark',
+    features: {},
+    font_size: 14,
+    has_api_key: false,
+    api_key_storage: 'config_file',
+  }),
   saveConfig: vi.fn().mockResolvedValue(undefined),
+  setApiKey: vi.fn().mockResolvedValue('config_file'),
+  deleteApiKey: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../core/theme.js', () => ({
@@ -58,5 +66,34 @@ describe('settings module', () => {
 
   it('closeSettings is safe to call when not open', () => {
     expect(() => mod.closeSettings()).not.toThrow();
+  });
+
+  it('shows empty API key field with placeholder when no key is set', async () => {
+    await mod.openSettings();
+    const input = document.querySelector('#setting-api-key');
+    expect(input).not.toBeNull();
+    expect(input.value).toBe('');
+    expect(input.placeholder).toBe('sk-or-...');
+  });
+
+  it('shows saved placeholder when has_api_key is true', async () => {
+    const backend = await import('../backend.js');
+    backend.getConfig.mockResolvedValueOnce({
+      theme: 'dark',
+      features: {},
+      font_size: 14,
+      has_api_key: true,
+      api_key_storage: 'keychain',
+    });
+
+    mod.closeSettings();
+    await mod.openSettings();
+    const input = document.querySelector('#setting-api-key');
+    expect(input.value).toBe('');
+    expect(input.placeholder).toContain('saved');
+    // Should show storage type hint
+    const hint = document.querySelector('.setting-hint');
+    expect(hint).not.toBeNull();
+    expect(hint.textContent).toContain('OS Keychain');
   });
 });

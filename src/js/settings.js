@@ -51,7 +51,8 @@ export async function openSettings() {
         </div>
         <div class="setting-group">
           <label>OpenRouter API Key</label>
-          <input type="password" id="setting-api-key" value="${config.openrouter_api_key || ''}" placeholder="sk-or-..." />
+          <input type="password" id="setting-api-key" value="" placeholder="${config.has_api_key ? '••••••••  (saved)' : 'sk-or-...'}" />
+          ${config.has_api_key ? `<small class="setting-hint">Stored in: ${config.api_key_storage === 'keychain' ? 'OS Keychain' : 'Config file'}</small>` : ''}
         </div>
       </div>
       <div class="settings-footer">
@@ -100,6 +101,8 @@ async function saveSettings() {
     existing = await backend.getConfig();
   } catch { /* ignore */ }
 
+  const apiKeyValue = document.querySelector('#setting-api-key')?.value || '';
+
   const config = {
     ...existing,
     theme: document.querySelector('#setting-theme')?.value || 'dark',
@@ -109,10 +112,16 @@ async function saveSettings() {
     },
     font_size: parseInt(document.querySelector('#setting-fontsize')?.value || '14', 10),
     vim_mode: document.querySelector('#setting-keymode')?.value === 'vim',
-    openrouter_api_key: document.querySelector('#setting-api-key')?.value || null,
+    openrouter_api_key: apiKeyValue || null,
   };
 
   try {
+    // Save API key separately if provided
+    if (apiKeyValue) {
+      await backend.setApiKey(apiKeyValue);
+      // Don't include the key in the config save
+      config.openrouter_api_key = null;
+    }
     await backend.saveConfig(config);
   } catch (e) {
     console.error('Failed to save config:', e);

@@ -11,7 +11,7 @@ export async function initAICopilot(config) {
     return;
   }
 
-  if (!config.openrouter_api_key) {
+  if (!config.has_api_key) {
     console.info('AI Copilot: no API key configured');
     return;
   }

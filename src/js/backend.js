@@ -103,6 +103,14 @@ export async function saveConfig(config) {
   return doInvoke('save_config', { config });
 }
 
+export async function setApiKey(key) {
+  return doInvoke('set_api_key', { key });
+}
+
+export async function deleteApiKey() {
+  return doInvoke('delete_api_key');
+}
+
 export async function getOpenDir() {
   return doInvoke('get_open_dir');
 }

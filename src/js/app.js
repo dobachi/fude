@@ -283,7 +283,7 @@ async function init() {
   initAICopilot(config);
 
   // Initialize AI Chat panel if copilot is enabled
-  if (config.features?.ai_copilot && config.openrouter_api_key) {
+  if (config.features?.ai_copilot && config.has_api_key) {
     const aiPanelContent = document.getElementById('ai-panel-content');
     if (aiPanelContent) {
       await initChatPanel(aiPanelContent, {

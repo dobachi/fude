@@ -109,7 +109,7 @@ export function inlineCompletionExtension() {
           return;
         }
 
-        if (!config.features?.ai_copilot || !config.openrouter_api_key) return;
+        if (!config.features?.ai_copilot || !config.has_api_key) return;
 
         const model = config.ai_model || DEFAULT_MODEL;
         abortController = new AbortController();
