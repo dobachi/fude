@@ -55,7 +55,7 @@ const api = {
     return null;
   },
 
-  read_dir_tree({ path: dirPath }) {
+  read_dir_tree({ path: dirPath, show_all_files }) {
     function scan(dir) {
       const entries = [];
       let items;
@@ -79,19 +79,27 @@ const api = {
         if (item.isDirectory()) {
           const children = scan(fullPath);
           if (children.length > 0) {
+            const stat = fs.statSync(fullPath);
             entries.push({
               name: item.name,
               path: fullPath,
               is_dir: true,
               children,
+              modified: stat.mtimeMs / 1000,
+              created: stat.birthtimeMs / 1000,
+              size: stat.size,
             });
           }
-        } else if (item.name.endsWith('.md')) {
+        } else if (show_all_files || item.name.endsWith('.md')) {
+          const stat = fs.statSync(fullPath);
           entries.push({
             name: item.name,
             path: fullPath,
             is_dir: false,
             children: null,
+            modified: stat.mtimeMs / 1000,
+            created: stat.birthtimeMs / 1000,
+            size: stat.size,
           });
         }
       }
