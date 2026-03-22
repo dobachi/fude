@@ -70,8 +70,6 @@ function initPopover() {
     allFilesCheck.addEventListener('change', (e) => {
       showAllFiles = e.target.checked;
       saveSettings();
-      // Need to re-fetch directory tree since filter is server-side
-      if (onSettingsChange) onSettingsChange({ sort: currentSort, showAllFiles });
     });
   }
 }
