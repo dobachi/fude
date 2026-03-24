@@ -154,24 +154,70 @@ const api = {
 
   get_config() {
     const configPath = path.join(CONFIG_DIR, 'config.json');
-    if (!fs.existsSync(configPath)) {
-      return {
-        theme: 'dark',
-        features: { ai_copilot: false, diff_highlight: true },
-        font_size: 14,
-        vim_mode: false,
-        openrouter_api_key: null,
-      };
+    let config = {
+      theme: 'dark',
+      features: { ai_copilot: false, diff_highlight: true },
+      font_size: 14,
+      vim_mode: false,
+    };
+    if (fs.existsSync(configPath)) {
+      try {
+        config = { ...config, ...JSON.parse(fs.readFileSync(configPath, 'utf-8')) };
+      } catch { /* ignore */ }
     }
-    return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const hasApiKey = !!(config.openrouter_api_key);
+    // Return ConfigResponse format (matching Tauri backend)
+    return {
+      theme: config.theme,
+      features: config.features,
+      font_size: config.font_size,
+      vim_mode: config.vim_mode,
+      has_api_key: hasApiKey,
+      api_key_storage: 'config',
+      ai_model: config.ai_model || null,
+      sidebar_sort: config.sidebar_sort || 'name_asc',
+      sidebar_show_all_files: config.sidebar_show_all_files || false,
+    };
   },
 
   save_config({ config }) {
-    fs.writeFileSync(
-      path.join(CONFIG_DIR, 'config.json'),
-      JSON.stringify(config, null, 2),
-      'utf-8',
-    );
+    const configPath = path.join(CONFIG_DIR, 'config.json');
+    // Preserve API key from existing config (it's managed separately via set_api_key)
+    let existing = {};
+    try {
+      existing = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    } catch { /* ignore */ }
+    const toSave = { ...config };
+    // Keep existing API key if not explicitly provided
+    if (!toSave.openrouter_api_key && existing.openrouter_api_key) {
+      toSave.openrouter_api_key = existing.openrouter_api_key;
+    }
+    // Remove ConfigResponse-only fields that shouldn't be persisted
+    delete toSave.has_api_key;
+    delete toSave.api_key_storage;
+    fs.writeFileSync(configPath, JSON.stringify(toSave, null, 2), 'utf-8');
+    return null;
+  },
+
+  set_api_key({ key }) {
+    const configPath = path.join(CONFIG_DIR, 'config.json');
+    let config = {};
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    } catch { /* ignore */ }
+    config.openrouter_api_key = key;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    return 'config';
+  },
+
+  delete_api_key() {
+    const configPath = path.join(CONFIG_DIR, 'config.json');
+    let config = {};
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    } catch { /* ignore */ }
+    delete config.openrouter_api_key;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
     return null;
   },
 
