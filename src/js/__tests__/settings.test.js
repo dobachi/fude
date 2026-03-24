@@ -96,4 +96,39 @@ describe('settings module', () => {
     expect(hint).not.toBeNull();
     expect(hint.textContent).toContain('OS Keychain');
   });
+
+  it('save calls setApiKey when API key is provided', async () => {
+    const backend = await import('../backend.js');
+    await mod.openSettings();
+
+    const input = document.querySelector('#setting-api-key');
+    // Simulate user typing a key
+    Object.defineProperty(input, 'value', { value: 'sk-or-test-key', writable: true });
+
+    const saveBtn = document.querySelector('.btn-save-settings');
+    saveBtn.click();
+    // Wait for async save
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(backend.setApiKey).toHaveBeenCalledWith('sk-or-test-key');
+    expect(backend.saveConfig).toHaveBeenCalled();
+    // API key should not be in the config passed to saveConfig
+    const savedConfig = backend.saveConfig.mock.calls[0][0];
+    expect(savedConfig.openrouter_api_key).toBeNull();
+  });
+
+  it('save does not call setApiKey when API key is empty', async () => {
+    const backend = await import('../backend.js');
+    backend.setApiKey.mockClear();
+    backend.saveConfig.mockClear();
+    mod.closeSettings();
+    await mod.openSettings();
+
+    const saveBtn = document.querySelector('.btn-save-settings');
+    saveBtn.click();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(backend.setApiKey).not.toHaveBeenCalled();
+    expect(backend.saveConfig).toHaveBeenCalled();
+  });
 });
