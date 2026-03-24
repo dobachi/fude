@@ -98,6 +98,18 @@ describe('backend module (Tauri mode)', () => {
     expect(mockInvoke).toHaveBeenCalledWith('save_config', { config });
   });
 
+  it('setApiKey calls invoke with set_api_key command', async () => {
+    const mod = await import('../backend.js');
+    await mod.setApiKey('sk-test-123');
+    expect(mockInvoke).toHaveBeenCalledWith('set_api_key', { key: 'sk-test-123' });
+  });
+
+  it('deleteApiKey calls invoke with delete_api_key command', async () => {
+    const mod = await import('../backend.js');
+    await mod.deleteApiKey();
+    expect(mockInvoke).toHaveBeenCalledWith('delete_api_key');
+  });
+
   it('getOpenDir calls invoke with get_open_dir command', async () => {
     const mod = await import('../backend.js');
     await mod.getOpenDir();
@@ -130,6 +142,8 @@ describe('backend module (Tauri mode)', () => {
       ['loadSession', 'load_session'],
       ['getConfig', 'get_config'],
       ['saveConfig', 'save_config'],
+      ['setApiKey', 'set_api_key'],
+      ['deleteApiKey', 'delete_api_key'],
       ['getOpenDir', 'get_open_dir'],
       ['browseDir', 'browse_dir'],
     ];
