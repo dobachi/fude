@@ -255,14 +255,27 @@ async function init() {
     applyViewMode();
   }
 
-  // Listen for CLI args event from Tauri
+  // Listen for CLI args and drag-drop events from Tauri
   if (isLocalTauri()) {
     const { listen } = await import('@tauri-apps/api/event');
     listen('cli-args', async (event) => {
       const path = event.payload?.path;
       if (path) await openPath(path);
     });
+
+    // Open files dropped from file manager
+    listen('tauri://drag-drop', async (event) => {
+      const paths = event.payload?.paths;
+      if (!paths || paths.length === 0) return;
+      for (const filePath of paths.slice(0, 20)) {
+        await openPath(filePath);
+      }
+    });
   }
+
+  // Prevent browser default drag-drop behavior (opening the file)
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('drop', (e) => e.preventDefault());
 
   // Auto-focus editor when window gains focus
   window.addEventListener('focus', () => {
