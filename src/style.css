@@ -813,6 +813,10 @@ body {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
+.help-panel {
+  width: 560px;
+}
+
 .settings-header,
 .help-header {
   display: flex;
@@ -882,32 +886,53 @@ body {
   opacity: 0.9;
 }
 
-/* Help panel table */
-.help-body table {
-  width: 100%;
-  border-collapse: collapse;
+/* Help panel sections */
+.help-section {
+  margin-bottom: 18px;
 }
 
-.help-body th,
-.help-body td {
-  padding: 6px 10px;
-  text-align: left;
-  font-size: 13px;
+.help-section:last-child {
+  margin-bottom: 0;
+}
+
+.help-section h3 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-secondary);
+  margin: 0 0 6px;
+  padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
 }
 
-.help-body th {
-  color: var(--fg-secondary);
-  font-weight: 600;
+.help-body table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.help-body td {
+  padding: 4px 0;
+  font-size: 13px;
+  vertical-align: top;
+  color: var(--fg-primary);
+}
+
+.help-body td:first-child {
+  width: 200px;
+  white-space: nowrap;
 }
 
 .help-body kbd {
+  display: inline-block;
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
   border-radius: 3px;
-  padding: 1px 5px;
+  padding: 1px 6px;
   font-family: var(--font-mono);
   font-size: 12px;
+  color: var(--fg-primary);
 }
 
 /* ===== AI Chat Panel ===== */

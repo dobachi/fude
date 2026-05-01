@@ -72,6 +72,130 @@ function autoListExtension() {
   ]);
 }
 
+function selectedLines(state) {
+  const { from, to } = state.selection.main;
+  const startLine = state.doc.lineAt(from);
+  const endLine = state.doc.lineAt(to);
+  const lines = [];
+  for (let i = startLine.number; i <= endLine.number; i++) {
+    lines.push(state.doc.line(i));
+  }
+  return lines;
+}
+
+const BULLET_RE = /^(\s*)([-*+])\s/;
+const NUMBERED_RE = /^(\s*)(\d+)\.\s/;
+
+export function computeBulletToggle(state) {
+  const lines = selectedLines(state);
+  const nonEmpty = lines.filter((l) => l.text.trim() !== '');
+  if (nonEmpty.length === 0) return null;
+
+  const allBulleted = nonEmpty.every((l) => BULLET_RE.test(l.text));
+  const changes = [];
+
+  if (allBulleted) {
+    for (const line of nonEmpty) {
+      const match = line.text.match(BULLET_RE);
+      const indent = match[1];
+      changes.push({
+        from: line.from + indent.length,
+        to: line.from + indent.length + 2,
+        insert: '',
+      });
+    }
+  } else {
+    for (const line of nonEmpty) {
+      if (BULLET_RE.test(line.text)) continue;
+      const indent = line.text.match(/^(\s*)/)[1];
+      const numMatch = line.text.match(NUMBERED_RE);
+      if (numMatch) {
+        const markerLen = numMatch[0].length - indent.length;
+        changes.push({
+          from: line.from + indent.length,
+          to: line.from + indent.length + markerLen,
+          insert: '- ',
+        });
+      } else {
+        changes.push({ from: line.from + indent.length, insert: '- ' });
+      }
+    }
+  }
+  if (changes.length === 0) return null;
+  return { changes };
+}
+
+export function computeNumberedToggle(state) {
+  const lines = selectedLines(state);
+  const nonEmpty = lines.filter((l) => l.text.trim() !== '');
+  if (nonEmpty.length === 0) return null;
+
+  const allNumbered = nonEmpty.every((l) => NUMBERED_RE.test(l.text));
+  const changes = [];
+
+  if (allNumbered) {
+    for (const line of nonEmpty) {
+      const match = line.text.match(NUMBERED_RE);
+      const indent = match[1];
+      const markerLen = match[0].length - indent.length;
+      changes.push({
+        from: line.from + indent.length,
+        to: line.from + indent.length + markerLen,
+        insert: '',
+      });
+    }
+  } else {
+    let n = 1;
+    for (const line of nonEmpty) {
+      const indent = line.text.match(/^(\s*)/)[1];
+      const numMatch = line.text.match(NUMBERED_RE);
+      const bulletMatch = line.text.match(BULLET_RE);
+      if (numMatch) {
+        const markerLen = numMatch[0].length - indent.length;
+        changes.push({
+          from: line.from + indent.length,
+          to: line.from + indent.length + markerLen,
+          insert: `${n}. `,
+        });
+      } else if (bulletMatch) {
+        changes.push({
+          from: line.from + indent.length,
+          to: line.from + indent.length + 2,
+          insert: `${n}. `,
+        });
+      } else {
+        changes.push({ from: line.from + indent.length, insert: `${n}. ` });
+      }
+      n++;
+    }
+  }
+  if (changes.length === 0) return null;
+  return { changes };
+}
+
+function listKeymap() {
+  return keymap.of([
+    {
+      key: 'Ctrl-Shift-8',
+      run(view) {
+        const tr = computeBulletToggle(view.state);
+        if (!tr) return false;
+        view.dispatch(tr);
+        return true;
+      },
+    },
+    {
+      key: 'Ctrl-Shift-7',
+      run(view) {
+        const tr = computeNumberedToggle(view.state);
+        if (!tr) return false;
+        view.dispatch(tr);
+        return true;
+      },
+    },
+  ]);
+}
+
 function boldKeymap() {
   return keymap.of([
     {
@@ -152,6 +276,7 @@ export function createEditor(container, content = '', onChange = null, onScroll 
     ]),
     autoListExtension(),
     boldKeymap(),
+    listKeymap(),
     baseTheme,
     themeCompartment.of(
       document.documentElement.getAttribute('data-theme') === 'light' ? lightTheme : darkTheme,
