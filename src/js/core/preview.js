@@ -39,6 +39,46 @@ function ensureMd() {
     }
     return defaultImageRender(tokens, idx, options, env, self);
   };
+
+  // Tag block-level elements with their source line for scroll sync.
+  md.core.ruler.push('source_line', (state) => {
+    for (const token of state.tokens) {
+      if (!token.map) continue;
+      if (token.type.endsWith('_open') ||
+          token.type === 'code_block' ||
+          token.type === 'fence' ||
+          token.type === 'hr' ||
+          token.type === 'html_block') {
+        token.attrSet('data-source-line', String(token.map[0] + 1)); // 1-based
+      }
+    }
+  });
+
+  // The default fence/code_block renderers ignore token attrs on the
+  // outer <pre>; override so data-source-line lands on the scrollable element.
+  const renderFenceLike = (tokens, idx, options, env, slf) => {
+    const token = tokens[idx];
+    const line = token.attrGet('data-source-line');
+    const codeAttrs = token.tag === 'code' ? '' : '';
+    let body;
+    if (token.type === 'fence') {
+      const langClass = token.info ? ` class="language-${escapeHtml(token.info.trim().split(/\s+/)[0])}"` : '';
+      body = `<code${langClass}>${escapeHtml(token.content)}</code>`;
+    } else {
+      body = `<code${codeAttrs}>${escapeHtml(token.content)}</code>`;
+    }
+    return `<pre data-source-line="${line || ''}">${body}</pre>\n`;
+  };
+  md.renderer.rules.fence = renderFenceLike;
+  md.renderer.rules.code_block = renderFenceLike;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function handlePreviewKeys(e) {
@@ -123,4 +163,48 @@ export function setTheme(_theme) {
 
 export function setBasePath(path) {
   currentBasePath = path;
+}
+
+/**
+ * Scroll preview to the position corresponding to a source line in the editor.
+ * Uses data-source-line attributes added during rendering.
+ * @param {HTMLElement} container preview container
+ * @param {number} line 1-based source line (may be fractional for sub-line position)
+ */
+export function syncPreviewToLine(container, line) {
+  if (!container) return;
+  const elements = container.querySelectorAll('[data-source-line]');
+  if (elements.length === 0) return;
+
+  let prev = null;
+  let next = null;
+  for (const el of elements) {
+    const elLine = parseInt(el.dataset.sourceLine, 10);
+    if (elLine <= line) {
+      prev = el;
+    } else {
+      next = el;
+      break;
+    }
+  }
+
+  let target;
+  if (!prev) {
+    // Above the first tagged element
+    target = 0;
+  } else if (!next) {
+    // Past the last tagged element — interpolate to bottom
+    const prevLine = parseInt(prev.dataset.sourceLine, 10);
+    const remaining = Math.max(0, line - prevLine);
+    const remainingHeight = container.scrollHeight - prev.offsetTop;
+    // Heuristic: assume 1 line ≈ 24px in the remaining region
+    target = prev.offsetTop + Math.min(remaining * 24, remainingHeight);
+  } else {
+    const prevLine = parseInt(prev.dataset.sourceLine, 10);
+    const nextLine = parseInt(next.dataset.sourceLine, 10);
+    const ratio = (line - prevLine) / (nextLine - prevLine);
+    target = prev.offsetTop + (next.offsetTop - prev.offsetTop) * ratio;
+  }
+
+  container.scrollTop = target;
 }

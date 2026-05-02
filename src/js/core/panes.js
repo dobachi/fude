@@ -185,8 +185,8 @@ export function createEditorInPane(pane, content) {
       }
       if (onChangeCallback) onChangeCallback(pane, newContent);
     },
-    (ratio) => {
-      if (onScrollCallback) onScrollCallback(pane, ratio);
+    (info) => {
+      if (onScrollCallback) onScrollCallback(pane, info);
     },
     (selectedText) => {
       if (onSelectionChangeCallback) onSelectionChangeCallback(selectedText);

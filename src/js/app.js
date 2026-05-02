@@ -12,7 +12,7 @@ import {
   setContentFromDisk,
   registerPanesModule,
 } from './core/editor.js';
-import { initPreview, renderMarkdown } from './core/preview.js';
+import { initPreview, renderMarkdown, syncPreviewToLine } from './core/preview.js';
 import {
   openTab,
   closeTab,
@@ -424,8 +424,13 @@ function handlePaneContentChange(pane, newContent) {
   scheduleSessionSave();
 }
 
-function handlePaneScroll(pane, ratio) {
-  if (viewMode === 'split' && pane.previewContainer) {
+function handlePaneScroll(pane, info) {
+  if (viewMode !== 'split' || !pane.previewContainer) return;
+  const { topLine, ratio } = info || {};
+  if (typeof topLine === 'number') {
+    syncPreviewToLine(pane.previewContainer, topLine);
+  } else if (typeof ratio === 'number') {
+    // Fallback to proportional sync if line info unavailable
     const maxScroll = pane.previewContainer.scrollHeight - pane.previewContainer.clientHeight;
     pane.previewContainer.scrollTop = maxScroll * ratio;
   }

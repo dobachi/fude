@@ -329,7 +329,19 @@ export function createEditor(container, content = '', onChange = null, onScroll 
       const { scrollTop, scrollHeight, clientHeight } = view.scrollDOM;
       const maxScroll = scrollHeight - clientHeight;
       const ratio = maxScroll > 0 ? scrollTop / maxScroll : 0;
-      onScroll(ratio);
+      // Compute the visible top line for content-aware sync (fractional)
+      let topLine = 1;
+      try {
+        const block = view.lineBlockAtHeight(scrollTop);
+        const lineNum = view.state.doc.lineAt(block.from).number;
+        const blockHeight = block.bottom - block.top;
+        const offsetIntoBlock = scrollTop - block.top;
+        const fraction = blockHeight > 0 ? offsetIntoBlock / blockHeight : 0;
+        topLine = lineNum + fraction;
+      } catch {
+        /* best-effort; fall back to ratio */
+      }
+      onScroll({ ratio, topLine });
     });
   }
 
