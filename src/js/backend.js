@@ -119,6 +119,14 @@ export async function browseDir(path) {
   return doInvoke('browse_dir', { path: path || '' });
 }
 
+export async function watchFile(path) {
+  return doInvoke('watch_file', { path });
+}
+
+export async function unwatchFile(path) {
+  return doInvoke('unwatch_file', { path });
+}
+
 export async function aiChat(messages, model) {
   return doInvoke('ai_chat', { messages, model });
 }

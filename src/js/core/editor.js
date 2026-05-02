@@ -6,7 +6,11 @@ import {
   highlightActiveLine,
   lineNumbers,
 } from '@codemirror/view';
-import { EditorState, Compartment } from '@codemirror/state';
+import { EditorState, Compartment, Annotation } from '@codemirror/state';
+
+// Marks transactions that replace document content from disk (file reload).
+// Listeners use this to skip dirty-marking and autosave for these updates.
+export const reloadAnnotation = Annotation.define();
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
@@ -290,7 +294,8 @@ export function createEditor(container, content = '', onChange = null, onScroll 
   if (onChange || onSelectionChange) {
     extensions.push(
       EditorView.updateListener.of((update) => {
-        if (onChange && update.docChanged && !composing) {
+        const isReload = update.transactions.some((tr) => tr.annotation(reloadAnnotation));
+        if (onChange && update.docChanged && !composing && !isReload) {
           onChange(update.state.doc.toString());
         }
         if (onSelectionChange && update.selectionSet) {
@@ -333,6 +338,40 @@ export function createEditor(container, content = '', onChange = null, onScroll 
 
 export function setContent(view, content) {
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content } });
+}
+
+/**
+ * Replace document content from disk while preserving cursor (by line/column)
+ * and scroll position. The transaction is annotated so listeners (onChange,
+ * autosave) skip it.
+ */
+export function setContentFromDisk(view, content) {
+  const scrollTop = view.scrollDOM.scrollTop;
+  const scrollLeft = view.scrollDOM.scrollLeft;
+
+  const { from: oldPos } = view.state.selection.main;
+  const oldLine = view.state.doc.lineAt(oldPos);
+  const oldLineNum = oldLine.number;
+  const oldColumn = oldPos - oldLine.from;
+
+  view.dispatch({
+    changes: { from: 0, to: view.state.doc.length, insert: content },
+    annotations: reloadAnnotation.of(true),
+  });
+
+  const newDoc = view.state.doc;
+  const targetLineNum = Math.min(oldLineNum, newDoc.lines);
+  const targetLine = newDoc.line(targetLineNum);
+  const targetPos = Math.min(targetLine.from + oldColumn, targetLine.to);
+  view.dispatch({
+    selection: { anchor: targetPos },
+    annotations: reloadAnnotation.of(true),
+  });
+
+  requestAnimationFrame(() => {
+    view.scrollDOM.scrollTop = scrollTop;
+    view.scrollDOM.scrollLeft = scrollLeft;
+  });
 }
 
 export function getContent(view) {

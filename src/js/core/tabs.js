@@ -32,9 +32,18 @@ let tabs = [];
 let activeTabId = null;
 let nextTabId = 1;
 let onTabChange = null;
+let onTabPathChange = null;
 
 export function setTabChangeCallback(callback) {
   onTabChange = callback;
+}
+
+/**
+ * Notified when a tab gains, loses, or changes its file path.
+ * @param {(args: { tabId: string, oldPath: string|null, newPath: string|null }) => void} callback
+ */
+export function setTabPathChangeCallback(callback) {
+  onTabPathChange = callback;
 }
 
 function generateTabId() {
@@ -71,6 +80,9 @@ export function openTab(path, content = '') {
 
   renderTabBar();
   if (onTabChange) onTabChange(tab);
+  if (onTabPathChange && tab.path) {
+    onTabPathChange({ tabId: tab.id, oldPath: null, newPath: tab.path });
+  }
 
   return tab;
 }
@@ -103,6 +115,11 @@ function forceCloseTab(id) {
   }
 
   tabs.splice(index, 1);
+
+  // Notify after splice so listeners querying getAllTabs() don't see the closed tab
+  if (tab.path && onTabPathChange) {
+    onTabPathChange({ tabId: tab.id, oldPath: tab.path, newPath: null });
+  }
 
   if (activeTabId === id) {
     if (tabs.length > 0) {
@@ -169,9 +186,13 @@ export function markClean(id) {
 export function updateTabPath(id, path) {
   const tab = tabs.find((t) => t.id === id);
   if (tab) {
+    const oldPath = tab.path;
     tab.path = path;
     tab.name = getFilename(path);
     renderTabBar();
+    if (onTabPathChange && oldPath !== path) {
+      onTabPathChange({ tabId: tab.id, oldPath, newPath: path });
+    }
   }
 }
 

@@ -25,6 +25,7 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["rt"] }
 keyring = "3"
+notify = "8"
 
 [dev-dependencies]
 tempfile = "3"

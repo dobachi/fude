@@ -1,3 +1,4 @@
+mod file_watcher;
 mod key_storage;
 
 use futures_util::StreamExt;
@@ -348,6 +349,7 @@ fn write_file(path: String, content: String) -> Result<(), String> {
             })?;
         }
     }
+    file_watcher::mark_self_save(file_path);
     fs::write(&path, content).map_err(|e| format!("Failed to write file '{}': {}", path, e))
 }
 
@@ -814,6 +816,8 @@ pub fn run() {
             ai_chat,
             ai_chat_stream,
             ai_models,
+            file_watcher::watch_file,
+            file_watcher::unwatch_file,
         ])
         .setup(|app| {
             // Initialize key storage
@@ -821,6 +825,11 @@ pub fn run() {
 
             // Migrate plaintext API key from config.json to keyring
             migrate_api_key();
+
+            // Initialize file watcher (best-effort; failure logs but does not abort startup)
+            if let Err(e) = file_watcher::init_watcher(app.handle().clone()) {
+                eprintln!("File watcher init failed: {}", e);
+            }
 
             let handle = app.handle().clone();
             if let Ok(matches) = app.cli().matches() {

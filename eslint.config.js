@@ -13,6 +13,7 @@ export default [
         console: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
+        requestAnimationFrame: 'readonly',
         CSS: 'readonly',
         CustomEvent: 'readonly',
         fetch: 'readonly',

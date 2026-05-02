@@ -9,6 +9,7 @@ import {
   setFontSize,
   getFontSize,
   setContent,
+  setContentFromDisk,
   registerPanesModule,
 } from './core/editor.js';
 import { initPreview, renderMarkdown } from './core/preview.js';
@@ -25,6 +26,7 @@ import {
   updateTabScroll,
   updateTabPath,
   setTabChangeCallback,
+  setTabPathChangeCallback,
   getTabsForSession,
   getActiveTabIndex,
   getAllTabs,
@@ -46,6 +48,14 @@ import { initSidebar, loadDirectory, toggleSidebar, highlightFile, getShowAllFil
 import { scheduleSave, restoreSession } from './core/session.js';
 import { initTheme } from './core/theme.js';
 import { onContentChange, triggerSave, checkRecovery } from './core/autosave.js';
+import {
+  initFileWatcher,
+  watchFile,
+  unwatchFile,
+  reloadFromDisk,
+  showReloadBanner,
+  dismissReloadBanner,
+} from './core/file-watcher.js';
 import { reapplyMode, cycleMode } from './core/keymode.js';
 import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
@@ -115,6 +125,8 @@ async function init() {
 
   // Tab change callback
   setTabChangeCallback(handleTabChange);
+  setTabPathChangeCallback(handleTabPathChange);
+  initFileWatcher(handleExternalFileChange);
 
   // Global keyboard shortcuts - capture at window level to override browser defaults
   window.addEventListener('keydown', handleGlobalKeys, true);
@@ -509,6 +521,92 @@ function handleTabChange(tab) {
   scheduleSessionSave();
 }
 
+// ── File watching / reload ─────────────────────────────────
+
+function handleTabPathChange({ oldPath, newPath }) {
+  if (oldPath) {
+    // Only unwatch if no other tab still references this path.
+    const stillOpen = getAllTabs().some((t) => t.path === oldPath);
+    if (!stillOpen) unwatchFile(oldPath);
+  }
+  if (newPath) {
+    const others = getAllTabs().filter((t) => t.path === newPath);
+    if (others.length <= 1) watchFile(newPath);
+  }
+}
+
+function getFilename(p) {
+  return p.split('/').pop().split('\\').pop();
+}
+
+function applyReloadToAllPanes(path, content, tabId) {
+  // Update editor content in every pane displaying this path
+  const allPanes = panesModule.getAllPanes();
+  for (const p of allPanes) {
+    if (p.filePath === path && p.editorView) {
+      // setContentFromDisk also handles cursor + scroll restoration
+      setContentFromDisk(p.editorView, content);
+      p.content = content;
+      // Re-render preview if visible
+      if ((viewMode === 'split' || viewMode === 'preview') && p.previewContainer) {
+        const basePath = path.substring(0, path.lastIndexOf('/'));
+        renderMarkdown(content, basePath, p.previewContainer);
+      }
+    }
+  }
+  updateTabContent(tabId, content);
+  markClean(tabId);
+  updateDocContext(path, content);
+}
+
+async function handleExternalFileChange(path) {
+  const tab = getAllTabs().find((t) => t.path === path);
+  if (!tab) return;
+
+  if (tab.dirty) {
+    showReloadBanner(
+      `"${getFilename(path)}" が外部で変更されました。未保存の変更を破棄して再読込しますか？`,
+      async () => {
+        const content = await reloadFromDisk(path, null);
+        if (content !== null) applyReloadToAllPanes(path, content, tab.id);
+      },
+    );
+    return;
+  }
+
+  try {
+    const content = await backend.readFile(path);
+    applyReloadToAllPanes(path, content, tab.id);
+  } catch (e) {
+    console.error('Auto-reload failed:', e);
+  }
+}
+
+async function manualReload() {
+  const tab = getActiveTab();
+  if (!tab || !tab.path) return;
+
+  const doReload = async () => {
+    try {
+      const content = await backend.readFile(tab.path);
+      applyReloadToAllPanes(tab.path, content, tab.id);
+      dismissReloadBanner();
+    } catch (e) {
+      console.error('Manual reload failed:', e);
+    }
+  };
+
+  if (tab.dirty) {
+    showConfirmDialog(
+      `"${getFilename(tab.path)}" には未保存の変更があります。破棄して再読込しますか？`,
+      doReload,
+      '再読込',
+    );
+  } else {
+    await doReload();
+  }
+}
+
 // ── View mode ──────────────────────────────────────────────
 function applyViewMode() {
   // Apply to all panes
@@ -566,6 +664,34 @@ function showRecoveryDialog(fileNames, onRecover, onDiscard) {
 }
 
 // ── Close app dialog ───────────────────────────────────────
+function showConfirmDialog(message, onConfirm, confirmLabel = '実行') {
+  const overlay = document.createElement('div');
+  overlay.className = 'settings-overlay';
+  overlay.innerHTML = `
+    <div class="settings-panel" style="width:400px">
+      <div class="settings-body" style="padding:20px">
+        <p style="margin-bottom:16px;color:var(--fg-primary)"></p>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn-cancel" style="padding:6px 16px;background:var(--bg-tertiary);color:var(--fg-primary);border:1px solid var(--border);border-radius:4px;cursor:pointer">キャンセル</button>
+          <button class="btn-confirm" style="padding:6px 16px;background:#d32f2f;color:#fff;border:none;border-radius:4px;cursor:pointer"></button>
+        </div>
+      </div>
+    </div>
+  `;
+  overlay.querySelector('p').textContent = message;
+  overlay.querySelector('.btn-confirm').textContent = confirmLabel;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('.btn-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('.btn-confirm').addEventListener('click', () => {
+    overlay.remove();
+    onConfirm();
+  });
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+}
+
 function showCloseAppDialog(onConfirm) {
   const dirtyTabs = getAllTabs().filter((t) => t.dirty);
   const names = dirtyTabs.map((t) => (t.path ? t.path.split('/').pop() : 'Untitled')).join(', ');
@@ -705,6 +831,14 @@ function handleGlobalKeys(e) {
     e.preventDefault();
     e.stopPropagation();
     openHelp();
+    return;
+  }
+
+  // Reload from disk: Ctrl+R (also blocks browser reload in browser mode)
+  if ((e.key === 'r' || e.key === 'R') && !e.shiftKey && !e.altKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    manualReload();
     return;
   }
 
