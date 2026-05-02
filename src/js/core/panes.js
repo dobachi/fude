@@ -22,13 +22,22 @@ let activePaneId = null;
 
 // Callbacks set by app.js
 let onChangeCallback = null;   // (pane, newContent) => void
-let onScrollCallback = null;   // (pane, ratio) => void
+let onScrollCallback = null;   // (pane, info) => void
+let onPreviewScrollCallback = null; // (pane) => void
 let onSelectionChangeCallback = null; // (selectedText) => void
 
-export function setCallbacks({ onChange, onScroll, onSelectionChange }) {
+export function setCallbacks({ onChange, onScroll, onPreviewScroll, onSelectionChange }) {
   onChangeCallback = onChange;
   onScrollCallback = onScroll;
+  onPreviewScrollCallback = onPreviewScroll;
   onSelectionChangeCallback = onSelectionChange;
+}
+
+function attachPreviewScrollListener(pane) {
+  if (!pane.previewContainer) return;
+  pane.previewContainer.addEventListener('scroll', () => {
+    if (onPreviewScrollCallback) onPreviewScrollCallback(pane);
+  });
 }
 
 // ── Initialisation ────────────────────────────────────────
@@ -40,6 +49,7 @@ export function initPanes() {
   const pane = makePaneObject('default', el);
   panes = [pane];
   activePaneId = 'default';
+  attachPreviewScrollListener(pane);
 
   // Click-to-focus for default pane
   el.addEventListener('mousedown', () => {
@@ -150,6 +160,7 @@ function doSplit(cssClass) {
   }
 
   panes.push(pane);
+  attachPreviewScrollListener(pane);
   setActivePaneById(paneId);
 
   return pane;

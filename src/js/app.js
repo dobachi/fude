@@ -10,9 +10,10 @@ import {
   getFontSize,
   setContent,
   setContentFromDisk,
+  scrollEditorToLine,
   registerPanesModule,
 } from './core/editor.js';
-import { initPreview, renderMarkdown, syncPreviewToLine } from './core/preview.js';
+import { initPreview, renderMarkdown, syncPreviewToLine, getLineFromPreview } from './core/preview.js';
 import {
   openTab,
   closeTab,
@@ -112,6 +113,7 @@ async function init() {
   setCallbacks({
     onChange: handlePaneContentChange,
     onScroll: handlePaneScroll,
+    onPreviewScroll: handlePreviewScroll,
     onSelectionChange: handleSelectionChange,
   });
 
@@ -424,16 +426,45 @@ function handlePaneContentChange(pane, newContent) {
   scheduleSessionSave();
 }
 
+// Bidirectional scroll sync uses a short lockout: when one side drives a sync,
+// the other side ignores its own scroll events for SCROLL_LOCKOUT_MS so the
+// programmatic scrollTop assignment doesn't bounce back as a feedback loop.
+const SCROLL_LOCKOUT_MS = 100;
+let lastScrollSyncTime = 0;
+let lastScrollSyncSource = null;
+
+function shouldHandleScroll(source) {
+  if (lastScrollSyncSource && lastScrollSyncSource !== source) {
+    if (Date.now() - lastScrollSyncTime < SCROLL_LOCKOUT_MS) return false;
+  }
+  return true;
+}
+
+function recordScrollSync(source) {
+  lastScrollSyncTime = Date.now();
+  lastScrollSyncSource = source;
+}
+
 function handlePaneScroll(pane, info) {
   if (viewMode !== 'split' || !pane.previewContainer) return;
+  if (!shouldHandleScroll('editor')) return;
+  recordScrollSync('editor');
   const { topLine, ratio } = info || {};
   if (typeof topLine === 'number') {
     syncPreviewToLine(pane.previewContainer, topLine);
   } else if (typeof ratio === 'number') {
-    // Fallback to proportional sync if line info unavailable
     const maxScroll = pane.previewContainer.scrollHeight - pane.previewContainer.clientHeight;
     pane.previewContainer.scrollTop = maxScroll * ratio;
   }
+}
+
+function handlePreviewScroll(pane) {
+  if (viewMode !== 'split' || !pane.editorView) return;
+  if (!shouldHandleScroll('preview')) return;
+  const line = getLineFromPreview(pane.previewContainer);
+  if (line === null) return;
+  recordScrollSync('preview');
+  scrollEditorToLine(pane.editorView, line);
 }
 
 function handleSelectionChange(selectedText) {

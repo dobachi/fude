@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { renderMarkdown, syncPreviewToLine } from '../core/preview.js';
+import { renderMarkdown, syncPreviewToLine, getLineFromPreview } from '../core/preview.js';
 
 let container;
 
@@ -104,5 +104,48 @@ describe('syncPreviewToLine', () => {
 
   it('returns early on null container', () => {
     expect(() => syncPreviewToLine(null, 5)).not.toThrow();
+  });
+});
+
+describe('getLineFromPreview', () => {
+  function setupElements(linesAndOffsets, scrollTop = 0) {
+    container.innerHTML = '';
+    for (const [line, top] of linesAndOffsets) {
+      const div = document.createElement('div');
+      div.dataset.sourceLine = String(line);
+      Object.defineProperty(div, 'offsetTop', { value: top, configurable: true });
+      container.appendChild(div);
+    }
+    container.scrollTop = scrollTop;
+  }
+
+  it('returns the first line when scrolled to top', () => {
+    setupElements([[1, 0], [5, 100], [10, 200]], 0);
+    expect(getLineFromPreview(container)).toBe(1);
+  });
+
+  it('returns interpolated line when scrolled between elements', () => {
+    setupElements([[1, 0], [5, 100], [10, 200]], 50); // halfway between line 1 and line 5
+    expect(getLineFromPreview(container)).toBe(3);
+  });
+
+  it('snaps to a line when scrolled exactly to its element', () => {
+    setupElements([[1, 0], [5, 100], [10, 200]], 100);
+    expect(getLineFromPreview(container)).toBe(5);
+  });
+
+  it('returns last line when scrolled past the last element', () => {
+    setupElements([[1, 0], [5, 100], [10, 200]], 500);
+    expect(getLineFromPreview(container)).toBe(10);
+  });
+
+  it('returns null when no source-line elements exist', () => {
+    container.innerHTML = '<div>no tags</div>';
+    container.scrollTop = 50;
+    expect(getLineFromPreview(container)).toBeNull();
+  });
+
+  it('returns null on null container', () => {
+    expect(getLineFromPreview(null)).toBeNull();
   });
 });

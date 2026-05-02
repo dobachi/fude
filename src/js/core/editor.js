@@ -419,6 +419,23 @@ export function setScroll(view, scroll) {
   }
 }
 
+/**
+ * Scroll the editor so that the given (fractional, 1-based) line is at the top.
+ */
+export function scrollEditorToLine(view, line) {
+  if (!view) return;
+  const docLines = view.state.doc.lines;
+  const lineNum = Math.max(1, Math.min(Math.floor(line), docLines));
+  const fraction = Math.max(0, Math.min(1, line - lineNum));
+  try {
+    const block = view.lineBlockAt(view.state.doc.line(lineNum).from);
+    const blockHeight = block.bottom - block.top;
+    view.scrollDOM.scrollTop = block.top + blockHeight * fraction;
+  } catch {
+    /* no-op on layout race */
+  }
+}
+
 export function setFontSize(size) {
   currentFontSize = size;
   document.documentElement.style.setProperty('--font-size', `${size}px`);

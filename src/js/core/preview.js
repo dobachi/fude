@@ -56,7 +56,7 @@ function ensureMd() {
 
   // The default fence/code_block renderers ignore token attrs on the
   // outer <pre>; override so data-source-line lands on the scrollable element.
-  const renderFenceLike = (tokens, idx, options, env, slf) => {
+  const renderFenceLike = (tokens, idx, _options, _env, _slf) => {
     const token = tokens[idx];
     const line = token.attrGet('data-source-line');
     const codeAttrs = token.tag === 'code' ? '' : '';
@@ -163,6 +163,41 @@ export function setTheme(_theme) {
 
 export function setBasePath(path) {
   currentBasePath = path;
+}
+
+/**
+ * Inverse of syncPreviewToLine: given the current preview scroll position,
+ * return the corresponding source line (fractional, 1-based) or null if
+ * the preview has no tagged elements.
+ * @param {HTMLElement} container
+ * @returns {number|null}
+ */
+export function getLineFromPreview(container) {
+  if (!container) return null;
+  const elements = container.querySelectorAll('[data-source-line]');
+  if (elements.length === 0) return null;
+
+  const scrollTop = container.scrollTop;
+  let prev = null;
+  let next = null;
+  for (const el of elements) {
+    if (el.offsetTop <= scrollTop) {
+      prev = el;
+    } else {
+      next = el;
+      break;
+    }
+  }
+
+  if (!prev) return parseFloat(elements[0].dataset.sourceLine);
+  const prevLine = parseInt(prev.dataset.sourceLine, 10);
+  if (!next) return prevLine;
+
+  const nextLine = parseInt(next.dataset.sourceLine, 10);
+  const span = next.offsetTop - prev.offsetTop;
+  if (span <= 0) return prevLine;
+  const ratio = (scrollTop - prev.offsetTop) / span;
+  return prevLine + (nextLine - prevLine) * ratio;
 }
 
 /**
