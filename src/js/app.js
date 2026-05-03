@@ -934,6 +934,8 @@ function smartClose() {
 function handleGlobalKeys(e) {
   // Alt+key shortcuts (browser-friendly fallbacks; harmless in Tauri)
   if (e.altKey && !e.ctrlKey) {
+    // In Emacs mode, let Alt-* fall through to CodeMirror (M-b/f/v/d/w etc.)
+    if (getMode() === 'emacs') return;
     switch (e.key) {
       case 'n':
       case 't':

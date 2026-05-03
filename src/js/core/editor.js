@@ -531,6 +531,21 @@ const emacsAltKeymap = [
   { key: 'Alt-v', run: cursorPageUp, shift: selectPageUp },
   { key: 'Alt-d', run: deleteGroupForward },
   { key: 'Alt-Backspace', run: deleteGroupBackward },
+  {
+    // Emacs M-w: kill-ring-save = copy region without deleting
+    key: 'Alt-w',
+    run(view) {
+      const { from, to } = view.state.selection.main;
+      if (from === to) return false;
+      const text = view.state.sliceDoc(from, to);
+      try {
+        navigator.clipboard.writeText(text);
+      } catch {
+        /* clipboard may be unavailable */
+      }
+      return true;
+    },
+  },
 ];
 
 // Ctrl-S (isearch) and Ctrl-W (kill region) aren't in emacsStyleKeymap but
