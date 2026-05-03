@@ -96,14 +96,26 @@ remote:
 	npm run build:frontend
 	bash scripts/fude-remote
 
-# リリース（バージョン更新 + タグ + CIビルド）
+# リリース（事前チェック + バージョン更新 + lockfile 同期 + タグ + CIビルド）
+# 各ステップが失敗したら以降を実行しない（&& chain）
 release:
-	@read -p "New version (e.g., 0.2.0): " ver; \
-	sed -i "s/\"version\": \".*\"/\"version\": \"$$ver\"/" src-tauri/tauri.conf.json; \
-	sed -i "s/^version = \".*\"/version = \"$$ver\"/" src-tauri/Cargo.toml; \
-	sed -i "s/\"version\": \".*\"/\"version\": \"$$ver\"/" package.json; \
-	git add -A && git commit -m "release: v$$ver" && git push; \
-	git tag "v$$ver" && git push origin "v$$ver"; \
+	@read -p "New version (e.g., 0.2.0): " ver && \
+	echo "==> Pre-release check: make check" && \
+	$(MAKE) check && \
+	echo "==> Bumping version to v$$ver" && \
+	sed -i "s/\"version\": \".*\"/\"version\": \"$$ver\"/" src-tauri/tauri.conf.json && \
+	sed -i "s/^version = \".*\"/version = \"$$ver\"/" src-tauri/Cargo.toml && \
+	sed -i "s/\"version\": \".*\"/\"version\": \"$$ver\"/" package.json && \
+	echo "==> Syncing package-lock.json" && \
+	npm install --package-lock-only --silent && \
+	echo "==> Syncing Cargo.lock" && \
+	(cd src-tauri && cargo check --quiet) && \
+	echo "==> Committing release (only version + lock files)" && \
+	git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock package.json package-lock.json && \
+	git commit -m "release: v$$ver" && \
+	git push && \
+	git tag "v$$ver" && \
+	git push origin "v$$ver" && \
 	echo "==> v$$ver tagged and pushed. CI will build all platforms."
 
 # クリーン
