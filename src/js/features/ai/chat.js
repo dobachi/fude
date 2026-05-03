@@ -150,7 +150,9 @@ async function setupModelBar(container) {
       const config = await getConfig();
       config.ai_model = modelId;
       await saveConfig(config);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   });
   container.appendChild(picker);
 
@@ -196,7 +198,9 @@ function createCopyButton(rawContent) {
       document.body.removeChild(ta);
     }
     btn.textContent = 'Copied!';
-    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+    setTimeout(() => {
+      btn.textContent = 'Copy';
+    }, 1500);
   });
   return btn;
 }
@@ -277,7 +281,10 @@ async function sendMessage(text, messagesEl) {
       },
       () => {
         // Final render
-        if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+        if (renderTimer) {
+          clearTimeout(renderTimer);
+          renderTimer = null;
+        }
         renderStreaming();
         assistantDiv.appendChild(createCopyButton(result));
         chatMessages.push({ role: 'assistant', content: result });
@@ -289,7 +296,10 @@ async function sendMessage(text, messagesEl) {
       },
       (err) => {
         if (err.name === 'AbortError') return;
-        if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+        if (renderTimer) {
+          clearTimeout(renderTimer);
+          renderTimer = null;
+        }
         assistantDiv.textContent = `Error: ${err.message}`;
         assistantDiv.classList.add('ai-msg-error');
       },
@@ -297,7 +307,10 @@ async function sendMessage(text, messagesEl) {
     );
   } catch (err) {
     if (err.name !== 'AbortError') {
-      if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+      if (renderTimer) {
+        clearTimeout(renderTimer);
+        renderTimer = null;
+      }
       assistantDiv.textContent = `Error: ${err.message}`;
       assistantDiv.classList.add('ai-msg-error');
     }

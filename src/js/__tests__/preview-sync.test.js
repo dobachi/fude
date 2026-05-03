@@ -64,26 +64,41 @@ describe('syncPreviewToLine', () => {
   }
 
   it('scrolls to first element when line is at first source line', () => {
-    setupElements([[1, 0], [5, 100], [10, 200]]);
+    setupElements([
+      [1, 0],
+      [5, 100],
+      [10, 200],
+    ]);
     syncPreviewToLine(container, 1);
     expect(container.scrollTop).toBe(0);
   });
 
   it('interpolates between two source-line elements', () => {
-    setupElements([[1, 0], [5, 100], [10, 200]]);
+    setupElements([
+      [1, 0],
+      [5, 100],
+      [10, 200],
+    ]);
     // Line 3: between 1 and 5, halfway
     syncPreviewToLine(container, 3);
     expect(container.scrollTop).toBe(50);
   });
 
   it('snaps to a tagged line exactly', () => {
-    setupElements([[1, 0], [5, 100], [10, 200]]);
+    setupElements([
+      [1, 0],
+      [5, 100],
+      [10, 200],
+    ]);
     syncPreviewToLine(container, 5);
     expect(container.scrollTop).toBe(100);
   });
 
   it('handles fractional line values', () => {
-    setupElements([[1, 0], [5, 100]]);
+    setupElements([
+      [1, 0],
+      [5, 100],
+    ]);
     // Line 2.5: 1.5 / 4 = 0.375 of the way
     syncPreviewToLine(container, 2.5);
     expect(container.scrollTop).toBeCloseTo(37.5, 1);
@@ -97,7 +112,10 @@ describe('syncPreviewToLine', () => {
   });
 
   it('extrapolates past the last tagged element', () => {
-    setupElements([[1, 0], [5, 100]]);
+    setupElements([
+      [1, 0],
+      [5, 100],
+    ]);
     syncPreviewToLine(container, 10);
     expect(container.scrollTop).toBeGreaterThan(100);
   });
@@ -120,22 +138,50 @@ describe('getLineFromPreview', () => {
   }
 
   it('returns the first line when scrolled to top', () => {
-    setupElements([[1, 0], [5, 100], [10, 200]], 0);
+    setupElements(
+      [
+        [1, 0],
+        [5, 100],
+        [10, 200],
+      ],
+      0,
+    );
     expect(getLineFromPreview(container)).toBe(1);
   });
 
   it('returns interpolated line when scrolled between elements', () => {
-    setupElements([[1, 0], [5, 100], [10, 200]], 50); // halfway between line 1 and line 5
+    setupElements(
+      [
+        [1, 0],
+        [5, 100],
+        [10, 200],
+      ],
+      50,
+    ); // halfway between line 1 and line 5
     expect(getLineFromPreview(container)).toBe(3);
   });
 
   it('snaps to a line when scrolled exactly to its element', () => {
-    setupElements([[1, 0], [5, 100], [10, 200]], 100);
+    setupElements(
+      [
+        [1, 0],
+        [5, 100],
+        [10, 200],
+      ],
+      100,
+    );
     expect(getLineFromPreview(container)).toBe(5);
   });
 
   it('returns last line when scrolled past the last element', () => {
-    setupElements([[1, 0], [5, 100], [10, 200]], 500);
+    setupElements(
+      [
+        [1, 0],
+        [5, 100],
+        [10, 200],
+      ],
+      500,
+    );
     expect(getLineFromPreview(container)).toBe(10);
   });
 

@@ -21,13 +21,19 @@ let panes = [];
 let activePaneId = null;
 
 // Callbacks set by app.js
-let onChangeCallback = null;   // (pane, newContent) => void
-let onScrollCallback = null;   // (pane, info) => void
+let onChangeCallback = null; // (pane, newContent) => void
+let onScrollCallback = null; // (pane, info) => void
 let onPreviewScrollCallback = null; // (pane) => void
 let onSelectionChangeCallback = null; // (selectedText) => void
-let onEditorCreatedCallback = null;  // (pane) => void — invoked after createEditorInPane
+let onEditorCreatedCallback = null; // (pane) => void — invoked after createEditorInPane
 
-export function setCallbacks({ onChange, onScroll, onPreviewScroll, onSelectionChange, onEditorCreated }) {
+export function setCallbacks({
+  onChange,
+  onScroll,
+  onPreviewScroll,
+  onSelectionChange,
+  onEditorCreated,
+}) {
   onChangeCallback = onChange;
   onScrollCallback = onScroll;
   onPreviewScrollCallback = onPreviewScroll;
@@ -365,7 +371,9 @@ function initResizeHandle(handle, workspace, isVertical) {
 
     const onMouseMove = (ev) => {
       const delta = (isVertical ? ev.clientX : ev.clientY) - startPos;
-      const handleIndex = Array.from(workspace.querySelectorAll('.pane-resize-handle')).indexOf(handle);
+      const handleIndex = Array.from(workspace.querySelectorAll('.pane-resize-handle')).indexOf(
+        handle,
+      );
       const totalSize = isVertical ? workspace.clientWidth : workspace.clientHeight;
       const handleSize = isVertical ? handle.offsetWidth : handle.offsetHeight;
       const available = totalSize - handleSize * (paneEls.length - 1);

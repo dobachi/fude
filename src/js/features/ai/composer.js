@@ -84,7 +84,8 @@ export function openComposer(view) {
 
 function buildActionMenu() {
   const items = ACTIONS.map(
-    (a) => `<button class="ai-composer-action" data-action="${a.id}"><span class="ai-composer-icon">${a.icon}</span>${a.label}</button>`,
+    (a) =>
+      `<button class="ai-composer-action" data-action="${a.id}"><span class="ai-composer-icon">${a.icon}</span>${a.label}</button>`,
   ).join('');
   return `<div class="ai-composer-menu">${items}</div>`;
 }
@@ -106,7 +107,10 @@ function showCustomInput(view, ctx) {
   };
 
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); run(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      run();
+    }
   });
   goBtn.addEventListener('click', run);
   input.focus();
@@ -128,9 +132,7 @@ async function executeAction(view, ctx, action, customInstruction = '') {
 
   const model = config.ai_model || DEFAULT_MODEL;
   const systemPrompt = composerSystemPrompt(action, customInstruction);
-  const messages = buildMessages(systemPrompt, [
-    { role: 'user', content: ctx.selectedText },
-  ]);
+  const messages = buildMessages(systemPrompt, [{ role: 'user', content: ctx.selectedText }]);
 
   // Show streaming result
   composerEl.innerHTML = `

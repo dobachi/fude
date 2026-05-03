@@ -68,8 +68,8 @@ impl KeyStorage for ConfigFallbackStorage {
         }
         let content = fs::read_to_string(&self.config_path)
             .map_err(|e| format!("Failed to read config: {}", e))?;
-        let value: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse config: {}", e))?;
+        let value: serde_json::Value =
+            serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
         match value.get("openrouter_api_key").and_then(|v| v.as_str()) {
             Some(key) if !key.is_empty() => Ok(Some(key.to_string())),
             _ => Ok(None),
@@ -80,8 +80,7 @@ impl KeyStorage for ConfigFallbackStorage {
         let mut value: serde_json::Value = if self.config_path.exists() {
             let content = fs::read_to_string(&self.config_path)
                 .map_err(|e| format!("Failed to read config: {}", e))?;
-            serde_json::from_str(&content)
-                .map_err(|e| format!("Failed to parse config: {}", e))?
+            serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?
         } else {
             serde_json::json!({})
         };
@@ -100,13 +99,12 @@ impl KeyStorage for ConfigFallbackStorage {
         }
         let content = fs::read_to_string(&self.config_path)
             .map_err(|e| format!("Failed to read config: {}", e))?;
-        let mut value: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse config: {}", e))?;
+        let mut value: serde_json::Value =
+            serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
         value["openrouter_api_key"] = serde_json::Value::Null;
         let content = serde_json::to_string_pretty(&value)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
-        fs::write(&self.config_path, content)
-            .map_err(|e| format!("Failed to write config: {}", e))
+        fs::write(&self.config_path, content).map_err(|e| format!("Failed to write config: {}", e))
     }
 
     fn storage_type(&self) -> &'static str {
@@ -120,8 +118,7 @@ impl KeyStorage for ConfigFallbackStorage {
 pub fn set_file_permissions(path: &std::path::Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     let perms = fs::Permissions::from_mode(0o600);
-    fs::set_permissions(path, perms)
-        .map_err(|e| format!("Failed to set file permissions: {}", e))
+    fs::set_permissions(path, perms).map_err(|e| format!("Failed to set file permissions: {}", e))
 }
 
 #[cfg(not(unix))]

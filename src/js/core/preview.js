@@ -44,11 +44,13 @@ function ensureMd() {
   md.core.ruler.push('source_line', (state) => {
     for (const token of state.tokens) {
       if (!token.map) continue;
-      if (token.type.endsWith('_open') ||
-          token.type === 'code_block' ||
-          token.type === 'fence' ||
-          token.type === 'hr' ||
-          token.type === 'html_block') {
+      if (
+        token.type.endsWith('_open') ||
+        token.type === 'code_block' ||
+        token.type === 'fence' ||
+        token.type === 'hr' ||
+        token.type === 'html_block'
+      ) {
         token.attrSet('data-source-line', String(token.map[0] + 1)); // 1-based
       }
     }
@@ -62,7 +64,9 @@ function ensureMd() {
     const codeAttrs = token.tag === 'code' ? '' : '';
     let body;
     if (token.type === 'fence') {
-      const langClass = token.info ? ` class="language-${escapeHtml(token.info.trim().split(/\s+/)[0])}"` : '';
+      const langClass = token.info
+        ? ` class="language-${escapeHtml(token.info.trim().split(/\s+/)[0])}"`
+        : '';
       body = `<code${langClass}>${escapeHtml(token.content)}</code>`;
     } else {
       body = `<code${codeAttrs}>${escapeHtml(token.content)}</code>`;

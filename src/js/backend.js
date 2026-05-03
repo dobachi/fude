@@ -9,10 +9,7 @@
 
 // Detect Tauri webview by URL protocol (reliable, no runtime dependency)
 function isTauriWebview() {
-  return (
-    window.location.protocol === 'tauri:' ||
-    window.location.hostname === 'tauri.localhost'
-  );
+  return window.location.protocol === 'tauri:' || window.location.hostname === 'tauri.localhost';
 }
 
 // Wait for __TAURI_INTERNALS__ to become available (handles Windows timing issue)
@@ -31,7 +28,8 @@ function waitForInternals() {
       if (window.__TAURI_INTERNALS__) {
         clearInterval(interval);
         resolve(window.__TAURI_INTERNALS__);
-      } else if (attempts >= 50) { // 500ms max
+      } else if (attempts >= 50) {
+        // 500ms max
         clearInterval(interval);
         resolve(null);
       }
@@ -151,12 +149,19 @@ export async function aiChatStream(messages, model, onChunk, onDone, onError, si
       const unlisten = await listen(`ai-stream-${requestId}`, (event) => {
         const { type, data } = event.payload;
         if (type === 'chunk') onChunk(data);
-        else if (type === 'done') { unlisten(); onDone(); }
-        else if (type === 'error') { unlisten(); onError(new Error(data)); }
+        else if (type === 'done') {
+          unlisten();
+          onDone();
+        } else if (type === 'error') {
+          unlisten();
+          onError(new Error(data));
+        }
       });
 
       if (signal) {
-        signal.addEventListener('abort', () => { unlisten(); });
+        signal.addEventListener('abort', () => {
+          unlisten();
+        });
       }
 
       await internals.invoke('ai_chat_stream', { messages, model, requestId });

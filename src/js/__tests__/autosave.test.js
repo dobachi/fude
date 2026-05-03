@@ -15,7 +15,7 @@ describe('autosave module', () => {
     vi.resetModules();
     vi.useFakeTimers();
 
-    backend = (await import('../backend.js'));
+    backend = await import('../backend.js');
     mod = await import('../core/autosave.js');
   });
 

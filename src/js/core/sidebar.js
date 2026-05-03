@@ -9,14 +9,14 @@ let showAllFiles = false;
 let onSettingsChange = null;
 
 const SORT_OPTIONS = {
-  name_asc:      { key: 'name',     order: 'asc' },
-  name_desc:     { key: 'name',     order: 'desc' },
+  name_asc: { key: 'name', order: 'asc' },
+  name_desc: { key: 'name', order: 'desc' },
   modified_desc: { key: 'modified', order: 'desc' },
-  modified_asc:  { key: 'modified', order: 'asc' },
-  created_desc:  { key: 'created',  order: 'desc' },
-  created_asc:   { key: 'created',  order: 'asc' },
-  size_desc:     { key: 'size',     order: 'desc' },
-  size_asc:      { key: 'size',     order: 'asc' },
+  modified_asc: { key: 'modified', order: 'asc' },
+  created_desc: { key: 'created', order: 'desc' },
+  created_asc: { key: 'created', order: 'asc' },
+  size_desc: { key: 'size', order: 'desc' },
+  size_asc: { key: 'size', order: 'asc' },
 };
 
 export function initSidebar(container, fileSelectCallback, opts) {

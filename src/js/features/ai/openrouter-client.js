@@ -22,21 +22,35 @@ export function buildMessages(systemPrompt, messages) {
  * @returns {string}
  */
 export function composerSystemPrompt(action, customInstruction = '') {
-  const base = 'You are a helpful writing assistant. You will be given a text selection from a Markdown document. ';
+  const base =
+    'You are a helpful writing assistant. You will be given a text selection from a Markdown document. ';
 
   switch (action) {
     case 'rewrite':
-      return base + 'Rewrite the text to improve clarity and readability while preserving the meaning. Return ONLY the rewritten text, no explanations.';
+      return (
+        base +
+        'Rewrite the text to improve clarity and readability while preserving the meaning. Return ONLY the rewritten text, no explanations.'
+      );
     case 'summarize':
       return base + 'Summarize the text concisely. Return ONLY the summary, no explanations.';
     case 'expand':
-      return base + 'Expand the text with more detail and depth while maintaining the same style and tone. Return ONLY the expanded text, no explanations.';
+      return (
+        base +
+        'Expand the text with more detail and depth while maintaining the same style and tone. Return ONLY the expanded text, no explanations.'
+      );
     case 'fix_grammar':
-      return base + 'Fix all grammar, spelling, and punctuation errors in the text. Return ONLY the corrected text, no explanations.';
+      return (
+        base +
+        'Fix all grammar, spelling, and punctuation errors in the text. Return ONLY the corrected text, no explanations.'
+      );
     case 'custom':
-      return base + (customInstruction || 'Follow the user\'s instruction. Return ONLY the result, no explanations.');
+      return (
+        base +
+        (customInstruction ||
+          "Follow the user's instruction. Return ONLY the result, no explanations.")
+      );
     default:
-      return base + 'Follow the user\'s instruction. Return ONLY the result, no explanations.';
+      return base + "Follow the user's instruction. Return ONLY the result, no explanations.";
   }
 }
 

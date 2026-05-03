@@ -100,7 +100,9 @@ async function saveSettings() {
   let existing = {};
   try {
     existing = await backend.getConfig();
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   const apiKeyValue = document.querySelector('#setting-api-key')?.value || '';
 

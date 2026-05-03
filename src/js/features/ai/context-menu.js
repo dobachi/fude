@@ -134,13 +134,16 @@ function handleAction(actionId, view) {
       view.focus();
       break;
     case 'paste':
-      navigator.clipboard.readText().then((text) => {
-        view.dispatch(view.state.replaceSelection(text));
-        view.focus();
-      }).catch(() => {
-        document.execCommand('paste');
-        view.focus();
-      });
+      navigator.clipboard
+        .readText()
+        .then((text) => {
+          view.dispatch(view.state.replaceSelection(text));
+          view.focus();
+        })
+        .catch(() => {
+          document.execCommand('paste');
+          view.focus();
+        });
       break;
     case 'delete': {
       const { from, to } = view.state.selection.main;

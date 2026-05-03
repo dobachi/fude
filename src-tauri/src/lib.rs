@@ -139,8 +139,7 @@ fn ensure_config_dir() -> Result<PathBuf, String> {
 fn temp_dir() -> Result<PathBuf, String> {
     let dir = config_dir()?.join("tmp");
     if !dir.exists() {
-        fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+        fs::create_dir_all(&dir).map_err(|e| format!("Failed to create temp directory: {}", e))?;
     }
     Ok(dir)
 }
@@ -271,6 +270,7 @@ fn get_file_metadata(path: &Path) -> (Option<u64>, Option<u64>, Option<u64>) {
     (modified, created, size)
 }
 
+#[cfg(test)]
 fn scan_dir_tree(dir: &Path) -> Result<Vec<FileEntry>, String> {
     scan_dir_tree_filtered(dir, false)
 }
@@ -406,10 +406,13 @@ fn get_config() -> Result<ConfigResponse, String> {
     let storage = get_key_storage();
     let has_api_key = storage.get_key()?.is_some();
     // Migrate legacy `vim_mode: bool` to `key_mode: String` for the response
-    let key_mode = config
-        .key_mode
-        .clone()
-        .unwrap_or_else(|| if config.vim_mode { "vim".to_string() } else { "normal".to_string() });
+    let key_mode = config.key_mode.clone().unwrap_or_else(|| {
+        if config.vim_mode {
+            "vim".to_string()
+        } else {
+            "normal".to_string()
+        }
+    });
     Ok(ConfigResponse {
         theme: config.theme,
         features: config.features,
@@ -418,7 +421,9 @@ fn get_config() -> Result<ConfigResponse, String> {
         has_api_key,
         api_key_storage: storage.storage_type().to_string(),
         ai_model: config.ai_model,
-        sidebar_sort: config.sidebar_sort.unwrap_or_else(|| "name_asc".to_string()),
+        sidebar_sort: config
+            .sidebar_sort
+            .unwrap_or_else(|| "name_asc".to_string()),
         sidebar_show_all_files: config.sidebar_show_all_files.unwrap_or(false),
     })
 }
@@ -559,11 +564,7 @@ fn browse_dir(path: String) -> Result<BrowseResult, String> {
         return Err(format!("'{}' is not a directory", dir.display()));
     }
 
-    let parent = dir
-        .parent()
-        .unwrap_or(&dir)
-        .to_string_lossy()
-        .to_string();
+    let parent = dir.parent().unwrap_or(&dir).to_string_lossy().to_string();
 
     let entries = list_directory(&dir)?;
 
@@ -583,15 +584,14 @@ fn set_api_key(key: String) -> Result<String, String> {
     if storage.storage_type() == "keychain" {
         let path = config_dir()?.join("config.json");
         if path.exists() {
-            let content = fs::read_to_string(&path)
-                .map_err(|e| format!("Failed to read config: {}", e))?;
+            let content =
+                fs::read_to_string(&path).map_err(|e| format!("Failed to read config: {}", e))?;
             let mut value: serde_json::Value = serde_json::from_str(&content)
                 .map_err(|e| format!("Failed to parse config: {}", e))?;
             value["openrouter_api_key"] = serde_json::Value::Null;
             let content = serde_json::to_string_pretty(&value)
                 .map_err(|e| format!("Failed to serialize config: {}", e))?;
-            fs::write(&path, content)
-                .map_err(|e| format!("Failed to write config: {}", e))?;
+            fs::write(&path, content).map_err(|e| format!("Failed to write config: {}", e))?;
             let _ = set_file_permissions(&path);
         }
     }
@@ -607,15 +607,14 @@ fn delete_api_key() -> Result<(), String> {
     // Also clear from config.json
     let path = config_dir()?.join("config.json");
     if path.exists() {
-        let content = fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read config: {}", e))?;
-        let mut value: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse config: {}", e))?;
+        let content =
+            fs::read_to_string(&path).map_err(|e| format!("Failed to read config: {}", e))?;
+        let mut value: serde_json::Value =
+            serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
         value["openrouter_api_key"] = serde_json::Value::Null;
         let content = serde_json::to_string_pretty(&value)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
-        fs::write(&path, content)
-            .map_err(|e| format!("Failed to write config: {}", e))?;
+        fs::write(&path, content).map_err(|e| format!("Failed to write config: {}", e))?;
     }
 
     Ok(())
@@ -636,8 +635,7 @@ struct AiStreamEvent {
 
 #[tauri::command]
 async fn ai_chat(messages: Vec<ChatMessage>, model: String) -> Result<String, String> {
-    let api_key = get_api_key()?
-        .ok_or_else(|| "OpenRouter API key not configured".to_string())?;
+    let api_key = get_api_key()?.ok_or_else(|| "OpenRouter API key not configured".to_string())?;
 
     let client = reqwest::Client::new();
     let body = serde_json::json!({
@@ -668,8 +666,7 @@ async fn ai_chat_stream(
     model: String,
     request_id: String,
 ) -> Result<(), String> {
-    let api_key = get_api_key()?
-        .ok_or_else(|| "OpenRouter API key not configured".to_string())?;
+    let api_key = get_api_key()?.ok_or_else(|| "OpenRouter API key not configured".to_string())?;
 
     let event_name = format!("ai-stream-{}", request_id);
     let client = reqwest::Client::new();
@@ -715,8 +712,7 @@ async fn ai_chat_stream(
                     let line = buffer[..newline_pos].trim().to_string();
                     buffer = buffer[newline_pos + 1..].to_string();
 
-                    if line.starts_with("data: ") {
-                        let data = &line[6..];
+                    if let Some(data) = line.strip_prefix("data: ") {
                         if data == "[DONE]" {
                             let _ = app.emit(
                                 &event_name,
@@ -728,11 +724,8 @@ async fn ai_chat_stream(
                             return Ok(());
                         }
 
-                        if let Ok(parsed) =
-                            serde_json::from_str::<serde_json::Value>(data)
-                        {
-                            if let Some(content) = parsed["choices"][0]["delta"]["content"]
-                                .as_str()
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                            if let Some(content) = parsed["choices"][0]["delta"]["content"].as_str()
                             {
                                 let _ = app.emit(
                                     &event_name,

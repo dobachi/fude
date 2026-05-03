@@ -69,7 +69,10 @@ describe('backend module (Tauri mode)', () => {
   it('readDirTree calls invoke with read_dir_tree command', async () => {
     const mod = await import('../backend.js');
     await mod.readDirTree('/vault');
-    expect(mockInvoke).toHaveBeenCalledWith('read_dir_tree', { path: '/vault', show_all_files: false });
+    expect(mockInvoke).toHaveBeenCalledWith('read_dir_tree', {
+      path: '/vault',
+      show_all_files: false,
+    });
   });
 
   it('saveSession calls invoke with save_session command', async () => {

@@ -13,7 +13,12 @@ import {
   scrollEditorToLine,
   registerPanesModule,
 } from './core/editor.js';
-import { initPreview, renderMarkdown, syncPreviewToLine, getLineFromPreview } from './core/preview.js';
+import {
+  initPreview,
+  renderMarkdown,
+  syncPreviewToLine,
+  getLineFromPreview,
+} from './core/preview.js';
 import {
   openTab,
   closeTab,
@@ -45,7 +50,13 @@ const {
   createEditorInPane,
   getPaneCount,
 } = panesModule;
-import { initSidebar, loadDirectory, toggleSidebar, highlightFile, getShowAllFiles } from './core/sidebar.js';
+import {
+  initSidebar,
+  loadDirectory,
+  toggleSidebar,
+  highlightFile,
+  getShowAllFiles,
+} from './core/sidebar.js';
 import { scheduleSave, restoreSession } from './core/session.js';
 import { initTheme } from './core/theme.js';
 import { onContentChange, triggerSave, checkRecovery } from './core/autosave.js';
@@ -117,16 +128,19 @@ async function init() {
     onScroll: handlePaneScroll,
     onPreviewScroll: handlePreviewScroll,
     onSelectionChange: handleSelectionChange,
-    onEditorCreated: () => { reapplyMode(); },
+    onEditorCreated: () => {
+      reapplyMode();
+    },
   });
 
   // Init sidebar
   const fileTree = document.getElementById('file-tree');
-  if (fileTree) initSidebar(fileTree, handleFileSelect, {
-    sort: config.sidebar_sort || 'name_asc',
-    showAllFiles: config.sidebar_show_all_files || false,
-    onSettingsChange: handleSidebarSettingsChange,
-  });
+  if (fileTree)
+    initSidebar(fileTree, handleFileSelect, {
+      sort: config.sidebar_sort || 'name_asc',
+      showAllFiles: config.sidebar_show_all_files || false,
+      onSettingsChange: handleSidebarSettingsChange,
+    });
 
   // Tab change callback
   setTabChangeCallback(handleTabChange);
@@ -218,38 +232,42 @@ async function init() {
     // Then ask about recovery if temp files exist
     if (recoverablePaths.length > 0) {
       const names = recoverablePaths.map((p) => p.split('/').pop()).join(', ');
-      showRecoveryDialog(names, async () => {
-        // Recover: replace tab content with temp file content
-        for (const path of recoverablePaths) {
-          try {
-            const tempContent = await backend.readFile(recoverableMap[path]);
-            const tab = getAllTabs().find((t) => t.path === path);
-            if (tab) {
-              updateTabContent(tab.id, tempContent);
-              markDirty(tab.id);
-              // If this is the active tab, reload the editor
-              const active = getActiveTab();
-              if (active && active.id === tab.id) {
-                const view = currentView();
-                if (view) {
-                  setContent(view, tempContent);
+      showRecoveryDialog(
+        names,
+        async () => {
+          // Recover: replace tab content with temp file content
+          for (const path of recoverablePaths) {
+            try {
+              const tempContent = await backend.readFile(recoverableMap[path]);
+              const tab = getAllTabs().find((t) => t.path === path);
+              if (tab) {
+                updateTabContent(tab.id, tempContent);
+                markDirty(tab.id);
+                // If this is the active tab, reload the editor
+                const active = getActiveTab();
+                if (active && active.id === tab.id) {
+                  const view = currentView();
+                  if (view) {
+                    setContent(view, tempContent);
+                  }
                 }
               }
+            } catch {
+              /* ignore */
             }
-          } catch {
-            /* ignore */
           }
-        }
-      }, async () => {
-        // Decline: delete temp files
-        for (const path of recoverablePaths) {
-          try {
-            await backend.deleteTempFile(path);
-          } catch {
-            /* ignore */
+        },
+        async () => {
+          // Decline: delete temp files
+          for (const path of recoverablePaths) {
+            try {
+              await backend.deleteTempFile(path);
+            } catch {
+              /* ignore */
+            }
           }
-        }
-      });
+        },
+      );
     }
   } else {
     // Check if server specified an initial directory
@@ -300,10 +318,17 @@ async function init() {
     if (view) view.focus();
   });
 
-  // Warn on window close if unsaved changes (Tauri)
+  // Warn on window close if unsaved changes (Tauri); also stamp version into the title
   if (isLocalTauri()) {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
     const appWindow = getCurrentWindow();
+    try {
+      const { getVersion } = await import('@tauri-apps/api/app');
+      const ver = await getVersion();
+      await appWindow.setTitle(`Fude v${ver}`);
+    } catch (e) {
+      console.warn('Could not set version in title:', e);
+    }
     appWindow.onCloseRequested(async (event) => {
       const hasDirty = getAllTabs().some((t) => t.dirty);
       if (hasDirty) {
@@ -775,7 +800,9 @@ async function refreshSidebar() {
   try {
     const tree = await backend.readDirTree(vaultPath, getShowAllFiles());
     loadDirectory(tree);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 // ── Sidebar settings change handler ────────────────────────
@@ -788,7 +815,9 @@ async function handleSidebarSettingsChange({ sort, showAllFiles: allFiles }) {
       sidebar_sort: sort,
       sidebar_show_all_files: allFiles,
     });
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   // Refresh tree if showAllFiles changed (needs re-fetch)
   await refreshSidebar();

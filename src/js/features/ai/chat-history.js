@@ -22,11 +22,7 @@ export async function saveChatHistory(vaultPath, messages, model) {
   if (!vaultPath) return;
 
   const now = new Date();
-  const timestamp = now
-    .toISOString()
-    .replace(/[T]/g, '-')
-    .replace(/[:]/g, '')
-    .slice(0, 15);
+  const timestamp = now.toISOString().replace(/[T]/g, '-').replace(/[:]/g, '').slice(0, 15);
 
   const fileName = `${timestamp}.md`;
   const filePath = `${chatDir(vaultPath)}/${fileName}`;

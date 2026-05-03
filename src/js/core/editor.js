@@ -239,7 +239,13 @@ function boldKeymap() {
  * Each call creates an independent view; previous views are NOT destroyed.
  * The caller is responsible for destroying old views when needed.
  */
-export function createEditor(container, content = '', onChange = null, onScroll = null, onSelectionChange = null) {
+export function createEditor(
+  container,
+  content = '',
+  onChange = null,
+  onScroll = null,
+  onSelectionChange = null,
+) {
   container.innerHTML = '';
 
   const themeCompartment = new Compartment();
@@ -317,7 +323,9 @@ export function createEditor(container, content = '', onChange = null, onScroll 
   view._keymodeCompartment = keymodeCompartment;
 
   // Track IME composition to suppress onChange during input
-  view.contentDOM.addEventListener('compositionstart', () => { composing = true; });
+  view.contentDOM.addEventListener('compositionstart', () => {
+    composing = true;
+  });
   view.contentDOM.addEventListener('compositionend', () => {
     composing = false;
     // Fire onChange after composition completes
@@ -456,7 +464,9 @@ export function getCurrentView() {
       // eslint-disable-next-line no-eval
       const mod = _panesModule;
       if (mod) _getActivePaneView = mod.getActivePaneView;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   return _getActivePaneView ? _getActivePaneView() : null;
 }
@@ -473,34 +483,34 @@ export function registerPanesModule(mod) {
   _getActivePaneView = mod.getActivePaneView;
 }
 
-export async function toggleVim(view, enable) {
+// Statically import vim/emacs so they're always bundled and initialized at load.
+// Earlier dynamic imports occasionally failed silently in Windows WebView2 builds.
+import { vim, Vim } from '@replit/codemirror-vim';
+import { emacs } from '@replit/codemirror-emacs';
+
+let vimMapsRegistered = false;
+
+export function toggleVim(view, enable) {
   if (!view._keymodeCompartment) return;
   if (enable) {
-    try {
-      const { vim, Vim } = await import('@replit/codemirror-vim');
-      view.dispatch({ effects: view._keymodeCompartment.reconfigure(vim()) });
-      // ESC alternatives for browser compatibility
+    view.dispatch({ effects: view._keymodeCompartment.reconfigure(vim()) });
+    if (!vimMapsRegistered) {
+      // ESC alternatives for browser compatibility (global Vim state)
       Vim.map('<C-[>', '<Esc>', 'insert');
       Vim.map('<C-[>', '<Esc>', 'visual');
       Vim.map('jj', '<Esc>', 'insert');
       Vim.map('jk', '<Esc>', 'insert');
-    } catch (e) {
-      console.warn('Vim extension not available:', e);
+      vimMapsRegistered = true;
     }
   } else {
     view.dispatch({ effects: view._keymodeCompartment.reconfigure([]) });
   }
 }
 
-export async function toggleEmacs(view, enable) {
+export function toggleEmacs(view, enable) {
   if (!view._keymodeCompartment) return;
   if (enable) {
-    try {
-      const { emacs } = await import('@replit/codemirror-emacs');
-      view.dispatch({ effects: view._keymodeCompartment.reconfigure(emacs()) });
-    } catch (e) {
-      console.warn('Emacs extension not available:', e);
-    }
+    view.dispatch({ effects: view._keymodeCompartment.reconfigure(emacs()) });
   } else {
     view.dispatch({ effects: view._keymodeCompartment.reconfigure([]) });
   }
