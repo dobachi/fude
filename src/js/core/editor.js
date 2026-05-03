@@ -6,14 +6,20 @@ import {
   highlightActiveLine,
   lineNumbers,
 } from '@codemirror/view';
-import { EditorState, Compartment, Annotation } from '@codemirror/state';
+import { EditorState, Compartment, Annotation, Prec } from '@codemirror/state';
 
 // Marks transactions that replace document content from disk (file reload).
 // Listeners use this to skip dirty-marking and autosave for these updates.
 export const reloadAnnotation = Annotation.define();
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
+import {
+  defaultKeymap,
+  indentWithTab,
+  history,
+  historyKeymap,
+  emacsStyleKeymap,
+} from '@codemirror/commands';
 import { searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -493,7 +499,8 @@ let vimMapsRegistered = false;
 export function toggleVim(view, enable) {
   if (!view._keymodeCompartment) return;
   if (enable) {
-    view.dispatch({ effects: view._keymodeCompartment.reconfigure(vim()) });
+    // Prec.highest ensures vim's keymap takes precedence over defaultKeymap (selectAll, etc.)
+    view.dispatch({ effects: view._keymodeCompartment.reconfigure(Prec.highest(vim())) });
     if (!vimMapsRegistered) {
       // ESC alternatives for browser compatibility (global Vim state)
       Vim.map('<C-[>', '<Esc>', 'insert');
@@ -510,7 +517,16 @@ export function toggleVim(view, enable) {
 export function toggleEmacs(view, enable) {
   if (!view._keymodeCompartment) return;
   if (enable) {
-    view.dispatch({ effects: view._keymodeCompartment.reconfigure(emacs()) });
+    // Two layers at highest precedence:
+    //   1. emacs() ViewPlugin from @replit/codemirror-emacs (full Emacs experience)
+    //   2. emacsStyleKeymap from @codemirror/commands (Ctrl-A/B/E/F/N/P/D/H/K/T/V)
+    // The keymap is a defensive fallback in case the ViewPlugin's keydown handler
+    // is somehow inactive (observed on Windows WebView2 with v0.2.17 release).
+    view.dispatch({
+      effects: view._keymodeCompartment.reconfigure(
+        Prec.highest([emacs(), keymap.of(emacsStyleKeymap)]),
+      ),
+    });
   } else {
     view.dispatch({ effects: view._keymodeCompartment.reconfigure([]) });
   }

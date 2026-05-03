@@ -58,7 +58,20 @@ export async function cycleMode() {
 const MODE_LABELS = {
   vim: 'VIM',
   emacs: 'EMACS',
+  normal: 'NORMAL',
 };
+
+let appVersion = '';
+
+export function setAppVersion(v) {
+  appVersion = v || '';
+  // Re-render with current mode
+  updateModeIndicator(currentMode);
+}
+
+export function getAppVersion() {
+  return appVersion;
+}
 
 export function updateModeIndicator(mode) {
   let el = document.getElementById('mode-indicator');
@@ -67,12 +80,8 @@ export function updateModeIndicator(mode) {
     el.id = 'mode-indicator';
     document.body.appendChild(el);
   }
-  const label = MODE_LABELS[mode];
-  if (label) {
-    el.textContent = label;
-    el.hidden = false;
-  } else {
-    el.textContent = '';
-    el.hidden = true;
-  }
+  const label = MODE_LABELS[mode] || 'NORMAL';
+  const verPart = appVersion ? ` · v${appVersion}` : '';
+  el.textContent = `${label}${verPart}`;
+  el.hidden = false;
 }

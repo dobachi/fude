@@ -1,4 +1,5 @@
 // help.js - Keyboard shortcut help panel
+import { getAppVersion, getMode } from './core/keymode.js';
 
 let helpPanel = null;
 
@@ -108,6 +109,17 @@ export function openHelp() {
     })
     .join('');
 
+  const ver = getAppVersion();
+  const mode = getMode();
+  const aboutHtml = `
+    <section class="help-section help-about">
+      <h3>About</h3>
+      <table><tbody>
+        <tr><td>Version</td><td>${ver ? `Fude v${ver}` : 'Fude (unknown version)'}</td></tr>
+        <tr><td>Current key mode</td><td>${mode}</td></tr>
+      </tbody></table>
+    </section>`;
+
   helpPanel.innerHTML = `
     <div class="help-panel">
       <div class="help-header">
@@ -115,6 +127,7 @@ export function openHelp() {
         <button class="help-close icon-btn">\u00d7</button>
       </div>
       <div class="help-body">
+        ${aboutHtml}
         ${sectionsHtml}
       </div>
     </div>

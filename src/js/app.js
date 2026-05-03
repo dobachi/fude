@@ -68,7 +68,7 @@ import {
   showReloadBanner,
   dismissReloadBanner,
 } from './core/file-watcher.js';
-import { initKeymode, reapplyMode, cycleMode } from './core/keymode.js';
+import { initKeymode, reapplyMode, cycleMode, setAppVersion } from './core/keymode.js';
 import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
@@ -112,6 +112,22 @@ async function init() {
   }
 
   initTheme(config.theme || 'dark');
+
+  // Stamp app version into title and mode badge ASAP so it's visible even if
+  // a later init step throws. Tauri-only; browser mode just shows mode without version.
+  if (isLocalTauri()) {
+    try {
+      const { getVersion } = await import('@tauri-apps/api/app');
+      const ver = await getVersion();
+      setAppVersion(ver);
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().setTitle(`Fude v${ver}`);
+    } catch (e) {
+      console.warn('Could not read/set app version:', e);
+      setAppVersion('?');
+    }
+  }
+
   // Restore the keymode (normal / vim / emacs). Backward compat: legacy `vim_mode: true`.
   await initKeymode(config.key_mode || (config.vim_mode ? 'vim' : 'normal'));
   if (config.font_size) setFontSize(config.font_size);
@@ -318,17 +334,11 @@ async function init() {
     if (view) view.focus();
   });
 
-  // Warn on window close if unsaved changes (Tauri); also stamp version into the title
+  // Warn on window close if unsaved changes (Tauri).
+  // Title/version are set earlier in init() so they appear ASAP.
   if (isLocalTauri()) {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
     const appWindow = getCurrentWindow();
-    try {
-      const { getVersion } = await import('@tauri-apps/api/app');
-      const ver = await getVersion();
-      await appWindow.setTitle(`Fude v${ver}`);
-    } catch (e) {
-      console.warn('Could not set version in title:', e);
-    }
     appWindow.onCloseRequested(async (event) => {
       const hasDirty = getAllTabs().some((t) => t.dirty);
       if (hasDirty) {

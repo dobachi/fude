@@ -110,11 +110,12 @@ describe('keymode module', () => {
     }
   });
 
-  it('updateModeIndicator creates a hidden badge for normal', () => {
+  it('updateModeIndicator shows NORMAL badge (always visible)', () => {
     mod.updateModeIndicator('normal');
     const el = document.getElementById('mode-indicator');
     expect(el).not.toBeNull();
-    expect(el.hidden).toBe(true);
+    expect(el.hidden).toBe(false);
+    expect(el.textContent).toBe('NORMAL');
   });
 
   it('updateModeIndicator shows VIM badge', () => {
@@ -129,5 +130,17 @@ describe('keymode module', () => {
     const el = document.getElementById('mode-indicator');
     expect(el.textContent).toBe('EMACS');
     expect(el.hidden).toBe(false);
+  });
+
+  it('setAppVersion appends version to badge', () => {
+    mod.setAppVersion('0.2.18');
+    mod.updateModeIndicator('emacs');
+    const el = document.getElementById('mode-indicator');
+    expect(el.textContent).toBe('EMACS · v0.2.18');
+  });
+
+  it('getAppVersion returns the set version', () => {
+    mod.setAppVersion('1.2.3');
+    expect(mod.getAppVersion()).toBe('1.2.3');
   });
 });
