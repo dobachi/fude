@@ -68,7 +68,7 @@ import {
   showReloadBanner,
   dismissReloadBanner,
 } from './core/file-watcher.js';
-import { initKeymode, reapplyMode, cycleMode, setAppVersion } from './core/keymode.js';
+import { initKeymode, reapplyMode, cycleMode, setAppVersion, getMode } from './core/keymode.js';
 import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
@@ -977,7 +977,15 @@ function handleGlobalKeys(e) {
   if (!e.shiftKey && !e.altKey) {
     const blockBrowserDefault = ['s', 'r', 'w', 't', 'n', 'o', 'u'];
     if (blockBrowserDefault.includes(e.key)) {
-      e.preventDefault();
+      // CRITICAL: do NOT preventDefault in emacs mode. CodeMirror's runHandlers
+      // checks event.defaultPrevented and skips ALL handlers (including emacs's
+      // keymap) if it's already true. So calling preventDefault here would block
+      // Ctrl+S/W/N/R from reaching emacs (kill-region, isearch, etc.).
+      // In Vim mode the vim plugin swallows everything anyway, so it's safe.
+      // In Normal mode we still want to block browser defaults.
+      if (getMode() !== 'emacs') {
+        e.preventDefault();
+      }
       return;
     }
     // Other bare Ctrl+letter keys (a, b, c, d, e, f, g, h, i, j, k, l, m, p, q, v, x, y, z)

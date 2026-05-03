@@ -19,6 +19,14 @@ import {
   history,
   historyKeymap,
   emacsStyleKeymap,
+  cursorGroupBackward,
+  cursorGroupForward,
+  selectGroupBackward,
+  selectGroupForward,
+  cursorPageUp,
+  selectPageUp,
+  deleteGroupBackward,
+  deleteGroupForward,
 } from '@codemirror/commands';
 import { searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
@@ -514,17 +522,27 @@ export function toggleVim(view, enable) {
   }
 }
 
+// Alt-prefixed Emacs bindings that emacsStyleKeymap doesn't include but users expect.
+// These complement Ctrl-* in the fallback so we don't depend on @replit/codemirror-emacs's
+// ViewPlugin firing on every key (which appeared unreliable on Windows WebView2).
+const emacsAltKeymap = [
+  { key: 'Alt-b', run: cursorGroupBackward, shift: selectGroupBackward },
+  { key: 'Alt-f', run: cursorGroupForward, shift: selectGroupForward },
+  { key: 'Alt-v', run: cursorPageUp, shift: selectPageUp },
+  { key: 'Alt-d', run: deleteGroupForward },
+  { key: 'Alt-Backspace', run: deleteGroupBackward },
+];
+
 export function toggleEmacs(view, enable) {
   if (!view._keymodeCompartment) return;
   if (enable) {
-    // Two layers at highest precedence:
-    //   1. emacs() ViewPlugin from @replit/codemirror-emacs (full Emacs experience)
-    //   2. emacsStyleKeymap from @codemirror/commands (Ctrl-A/B/E/F/N/P/D/H/K/T/V)
-    // The keymap is a defensive fallback in case the ViewPlugin's keydown handler
-    // is somehow inactive (observed on Windows WebView2 with v0.2.17 release).
+    // Three layers at highest precedence:
+    //   1. emacs() ViewPlugin from @replit/codemirror-emacs (full experience)
+    //   2. emacsStyleKeymap (Ctrl-A/B/E/F/N/P/D/H/K/T/V) — defensive fallback
+    //   3. emacsAltKeymap (Alt-B/F/V/D/Backspace) — Alt bindings the keymap above lacks
     view.dispatch({
       effects: view._keymodeCompartment.reconfigure(
-        Prec.highest([emacs(), keymap.of(emacsStyleKeymap)]),
+        Prec.highest([emacs(), keymap.of([...emacsStyleKeymap, ...emacsAltKeymap])]),
       ),
     });
   } else {
