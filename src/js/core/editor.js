@@ -533,16 +533,46 @@ const emacsAltKeymap = [
   { key: 'Alt-Backspace', run: deleteGroupBackward },
 ];
 
+// Ctrl-S (isearch) and Ctrl-W (kill region) aren't in emacsStyleKeymap but
+// users in Emacs mode expect them. Add as fallback so they work even if the
+// @replit/codemirror-emacs ViewPlugin isn't dispatching.
+const emacsExtraCtrlKeymap = [
+  { key: 'Ctrl-s', run: openSearchPanel },
+  { key: 'Ctrl-r', run: openSearchPanel }, // CodeMirror's panel handles both directions
+  {
+    key: 'Ctrl-w',
+    run(view) {
+      const { from, to } = view.state.selection.main;
+      if (from === to) return false; // nothing selected → no-op
+      const text = view.state.sliceDoc(from, to);
+      try {
+        navigator.clipboard.writeText(text);
+      } catch {
+        /* clipboard may be unavailable; still delete */
+      }
+      view.dispatch({
+        changes: { from, to, insert: '' },
+        selection: { anchor: from },
+      });
+      return true;
+    },
+  },
+];
+
 export function toggleEmacs(view, enable) {
   if (!view._keymodeCompartment) return;
   if (enable) {
-    // Three layers at highest precedence:
+    // Layered at highest precedence:
     //   1. emacs() ViewPlugin from @replit/codemirror-emacs (full experience)
     //   2. emacsStyleKeymap (Ctrl-A/B/E/F/N/P/D/H/K/T/V) — defensive fallback
-    //   3. emacsAltKeymap (Alt-B/F/V/D/Backspace) — Alt bindings the keymap above lacks
+    //   3. emacsAltKeymap (Alt-B/F/V/D/Backspace) — Alt bindings missing from #2
+    //   4. emacsExtraCtrlKeymap (Ctrl-S/R/W) — Emacs Ctrl bindings missing from #2
     view.dispatch({
       effects: view._keymodeCompartment.reconfigure(
-        Prec.highest([emacs(), keymap.of([...emacsStyleKeymap, ...emacsAltKeymap])]),
+        Prec.highest([
+          emacs(),
+          keymap.of([...emacsStyleKeymap, ...emacsAltKeymap, ...emacsExtraCtrlKeymap]),
+        ]),
       ),
     });
   } else {
