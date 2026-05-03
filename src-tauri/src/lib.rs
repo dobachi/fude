@@ -71,7 +71,10 @@ pub struct Config {
     pub theme: String,
     pub features: Features,
     pub font_size: u32,
+    /// Deprecated: use `key_mode`. Kept for backward compatibility.
     pub vim_mode: bool,
+    /// "normal" | "vim" | "emacs"
+    pub key_mode: Option<String>,
     pub openrouter_api_key: Option<String>,
     pub ai_model: Option<String>,
     pub sidebar_sort: Option<String>,
@@ -83,7 +86,7 @@ pub struct ConfigResponse {
     pub theme: String,
     pub features: Features,
     pub font_size: u32,
-    pub vim_mode: bool,
+    pub key_mode: String,
     pub has_api_key: bool,
     pub api_key_storage: String,
     pub ai_model: Option<String>,
@@ -165,6 +168,7 @@ impl Default for Config {
             },
             font_size: 14,
             vim_mode: false,
+            key_mode: None,
             openrouter_api_key: None,
             ai_model: None,
             sidebar_sort: None,
@@ -401,11 +405,16 @@ fn get_config() -> Result<ConfigResponse, String> {
     let config = load_config()?;
     let storage = get_key_storage();
     let has_api_key = storage.get_key()?.is_some();
+    // Migrate legacy `vim_mode: bool` to `key_mode: String` for the response
+    let key_mode = config
+        .key_mode
+        .clone()
+        .unwrap_or_else(|| if config.vim_mode { "vim".to_string() } else { "normal".to_string() });
     Ok(ConfigResponse {
         theme: config.theme,
         features: config.features,
         font_size: config.font_size,
-        vim_mode: config.vim_mode,
+        key_mode,
         has_api_key,
         api_key_storage: storage.storage_type().to_string(),
         ai_model: config.ai_model,

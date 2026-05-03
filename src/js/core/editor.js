@@ -491,3 +491,17 @@ export async function toggleVim(view, enable) {
     view.dispatch({ effects: view._keymodeCompartment.reconfigure([]) });
   }
 }
+
+export async function toggleEmacs(view, enable) {
+  if (!view._keymodeCompartment) return;
+  if (enable) {
+    try {
+      const { emacs } = await import('@replit/codemirror-emacs');
+      view.dispatch({ effects: view._keymodeCompartment.reconfigure(emacs()) });
+    } catch (e) {
+      console.warn('Emacs extension not available:', e);
+    }
+  } else {
+    view.dispatch({ effects: view._keymodeCompartment.reconfigure([]) });
+  }
+}

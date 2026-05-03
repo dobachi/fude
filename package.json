@@ -29,6 +29,7 @@
     "@codemirror/state": "^6.6.0",
     "@codemirror/theme-one-dark": "^6.1.3",
     "@codemirror/view": "^6.40.0",
+    "@replit/codemirror-emacs": "^6.1.0",
     "@replit/codemirror-vim": "^6.3.0",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-cli": "^2.4.1",

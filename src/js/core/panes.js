@@ -25,12 +25,14 @@ let onChangeCallback = null;   // (pane, newContent) => void
 let onScrollCallback = null;   // (pane, info) => void
 let onPreviewScrollCallback = null; // (pane) => void
 let onSelectionChangeCallback = null; // (selectedText) => void
+let onEditorCreatedCallback = null;  // (pane) => void — invoked after createEditorInPane
 
-export function setCallbacks({ onChange, onScroll, onPreviewScroll, onSelectionChange }) {
+export function setCallbacks({ onChange, onScroll, onPreviewScroll, onSelectionChange, onEditorCreated }) {
   onChangeCallback = onChange;
   onScrollCallback = onScroll;
   onPreviewScrollCallback = onPreviewScroll;
   onSelectionChangeCallback = onSelectionChange;
+  onEditorCreatedCallback = onEditorCreated;
 }
 
 function attachPreviewScrollListener(pane) {
@@ -209,6 +211,9 @@ export function createEditorInPane(pane, content) {
   // Apply current theme
   const theme = document.documentElement.getAttribute('data-theme') || 'dark';
   setTheme(view, theme);
+
+  // Notify listener (e.g. keymode) so the new editor inherits global state
+  if (onEditorCreatedCallback) onEditorCreatedCallback(pane);
 
   return view;
 }

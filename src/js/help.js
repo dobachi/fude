@@ -6,38 +6,36 @@ const sections = [
   {
     title: '表示・レイアウト',
     items: [
-      ['Ctrl+J', 'エディタのみ表示'],
-      ['Ctrl+K', '分割表示'],
-      ['Ctrl+L', 'プレビューのみ表示'],
+      ['Ctrl+Shift+J', 'エディタのみ表示'],
+      ['Ctrl+Shift+K', '分割表示'],
+      ['Ctrl+Shift+L', 'プレビューのみ表示'],
       ['Ctrl+| / Ctrl+Shift+D', '縦分割'],
       ['Ctrl+\\ / Ctrl+Shift+H', '横分割'],
-      ['Ctrl+Shift+W', '分割ペインを閉じる'],
+      ['Ctrl+Shift+W', 'タブ/ペインを閉じる（複数ペインならペイン優先）'],
       ['Ctrl+矢印', 'ペイン移動'],
       ['Ctrl+- / Ctrl++', '文字縮小 / 拡大'],
-      ['Ctrl+E', 'サイドバー表示/非表示'],
+      ['Ctrl+Shift+E', 'サイドバー表示/非表示'],
     ],
   },
   {
     title: 'ファイル・タブ',
     items: [
-      ['Ctrl+T', '新規タブ'],
-      ['Ctrl+N', '新規ファイル'],
-      ['Ctrl+W', 'タブを閉じる'],
+      ['Ctrl+Shift+T / Ctrl+Shift+N', '新規タブ'],
       ['Ctrl+Tab', '次のタブ'],
       ['Ctrl+Shift+Tab', '前のタブ'],
-      ['Ctrl+S', '保存'],
-      ['Ctrl+Shift+S', '名前を付けて保存'],
-      ['Ctrl+O', 'フォルダを開く'],
-      ['Ctrl+R', 'ファイルをディスクから再読込（外部変更を検知すると自動）'],
+      ['Ctrl+Shift+S', '保存（未保存ファイルは保存先を尋ねる）'],
+      ['Ctrl+Alt+S', '名前を付けて保存'],
+      ['Ctrl+Shift+O', 'フォルダを開く'],
+      ['Ctrl+Shift+R', 'ファイルをディスクから再読込（外部変更を検知すると自動）'],
     ],
   },
   {
-    title: '編集',
+    title: '編集（Markdown）',
     items: [
-      ['Ctrl+B', '太字トグル'],
+      ['Ctrl+B', '太字トグル（Normal/Vim）'],
       ['Ctrl+Shift+8', '箇条書きトグル'],
       ['Ctrl+Shift+7', '番号付きリストトグル'],
-      ['Ctrl+F', '検索・置換'],
+      ['Ctrl+F', '検索・置換（Normal/Vim）'],
     ],
   },
   {
@@ -51,10 +49,36 @@ const sections = [
     ],
   },
   {
-    title: 'モード・その他',
+    title: 'キーモード',
     items: [
-      ['Ctrl+Shift+M', 'Vimモード切替'],
-      ['jj / jk', 'Vimインサートモード解除（ESC代替）'],
+      ['Ctrl+Shift+M', 'モード切替（Normal → Vim → Emacs）'],
+      ['設定パネル', 'モードを直接選択（Ctrl+,）'],
+    ],
+  },
+  {
+    title: 'Vimモード',
+    items: [
+      ['jj / jk', 'インサートモード解除（ESC代替）'],
+      ['Ctrl+[', 'インサート/ビジュアル解除（ESC代替）'],
+    ],
+  },
+  {
+    title: 'Emacsモード（カーソル/編集）',
+    items: [
+      ['Ctrl+A / Ctrl+E', '行頭 / 行末'],
+      ['Ctrl+B / Ctrl+F', '1文字前 / 後'],
+      ['Ctrl+P / Ctrl+N', '前行 / 次行'],
+      ['Ctrl+D / Ctrl+H', '次文字を削除 / 前文字を削除'],
+      ['Ctrl+K / Ctrl+Y', '行末までキル / ヤンク（貼り付け）'],
+      ['Ctrl+W / Alt+W', '領域をキル / コピー'],
+      ['Ctrl+S / Ctrl+R', 'インクリメンタル検索 / 逆検索'],
+      ['Alt+B / Alt+F', '単語前 / 後'],
+      ['Alt+V / Ctrl+V', 'ページ前 / 後'],
+    ],
+  },
+  {
+    title: 'その他',
+    items: [
       ['Ctrl+,', '設定'],
       ['Ctrl+?', 'このヘルプ'],
     ],
@@ -62,8 +86,8 @@ const sections = [
   {
     title: 'ブラウザモード用',
     items: [
-      ['Alt+N / Alt+T', '新規ファイル'],
-      ['Alt+W', 'タブを閉じる'],
+      ['Alt+N / Alt+T', '新規タブ'],
+      ['Alt+W', 'タブ/ペインを閉じる'],
       ['Alt+O', 'フォルダを開く'],
     ],
   },

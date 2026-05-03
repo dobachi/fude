@@ -1369,6 +1369,31 @@ body {
   border-color: var(--fg-accent);
 }
 
+/* ===== Mode indicator ===== */
+#mode-indicator {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  padding: 3px 9px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  opacity: 0.85;
+  pointer-events: none;
+  z-index: 90;
+}
+
+/* Shift left when AI panel is open so it doesn't sit under it */
+#app.ai-panel-open ~ #mode-indicator,
+body:has(#app.ai-panel-open) #mode-indicator {
+  right: calc(var(--ai-panel-width, 320px) + 12px);
+}
+
 /* ===== Reload banner ===== */
 .reload-banner {
   position: fixed;

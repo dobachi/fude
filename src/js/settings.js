@@ -41,6 +41,7 @@ export async function openSettings() {
           <select id="setting-keymode">
             <option value="normal"${getMode() === 'normal' ? ' selected' : ''}>Normal</option>
             <option value="vim"${getMode() === 'vim' ? ' selected' : ''}>Vim</option>
+            <option value="emacs"${getMode() === 'emacs' ? ' selected' : ''}>Emacs</option>
           </select>
         </div>
         <div class="setting-group">
@@ -111,9 +112,11 @@ async function saveSettings() {
       diff_highlight: document.querySelector('#setting-diff-highlight')?.checked || false,
     },
     font_size: parseInt(document.querySelector('#setting-fontsize')?.value || '14', 10),
-    vim_mode: document.querySelector('#setting-keymode')?.value === 'vim',
+    key_mode: document.querySelector('#setting-keymode')?.value || 'normal',
     openrouter_api_key: apiKeyValue || null,
   };
+  // Keep legacy `vim_mode` field in sync for backward compat
+  config.vim_mode = config.key_mode === 'vim';
 
   try {
     // Save API key separately if provided

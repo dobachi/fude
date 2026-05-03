@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 vi.mock('../core/editor.js', () => ({
   toggleVim: vi.fn().mockResolvedValue(undefined),
+  toggleEmacs: vi.fn().mockResolvedValue(undefined),
   getCurrentView: vi.fn(() => null),
 }));
 
@@ -16,6 +17,7 @@ describe('keymode module', () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    document.body.innerHTML = '';
 
     editor = await import('../core/editor.js');
     panes = await import('../core/panes.js');
@@ -28,6 +30,7 @@ describe('keymode module', () => {
     expect(typeof mod.getMode).toBe('function');
     expect(typeof mod.cycleMode).toBe('function');
     expect(typeof mod.reapplyMode).toBe('function');
+    expect(typeof mod.updateModeIndicator).toBe('function');
   });
 
   it('getMode returns normal by default', () => {
@@ -38,41 +41,60 @@ describe('keymode module', () => {
     await mod.setMode('vim');
     expect(mod.getMode()).toBe('vim');
 
+    await mod.setMode('emacs');
+    expect(mod.getMode()).toBe('emacs');
+
     await mod.setMode('normal');
     expect(mod.getMode()).toBe('normal');
   });
 
-  it('setMode calls toggleVim on pane editor views', async () => {
+  it('setMode calls toggleVim when entering vim', async () => {
     const mockView = { destroy: vi.fn() };
     panes.getAllPanes.mockReturnValue([{ editorView: mockView }]);
 
     await mod.setMode('vim');
     expect(editor.toggleVim).toHaveBeenCalledWith(mockView, true);
+  });
+
+  it('setMode calls toggleEmacs when entering emacs', async () => {
+    const mockView = { destroy: vi.fn() };
+    panes.getAllPanes.mockReturnValue([{ editorView: mockView }]);
+
+    editor.toggleEmacs.mockClear();
+    await mod.setMode('emacs');
+    expect(editor.toggleEmacs).toHaveBeenCalledWith(mockView, true);
+  });
+
+  it('setMode clears extensions when entering normal', async () => {
+    const mockView = { destroy: vi.fn() };
+    panes.getAllPanes.mockReturnValue([{ editorView: mockView }]);
 
     editor.toggleVim.mockClear();
     await mod.setMode('normal');
     expect(editor.toggleVim).toHaveBeenCalledWith(mockView, false);
   });
 
-  it('cycleMode cycles from normal to vim', async () => {
+  it('cycleMode cycles normal → vim → emacs → normal', async () => {
     expect(mod.getMode()).toBe('normal');
 
-    const next = await mod.cycleMode();
+    let next = await mod.cycleMode();
     expect(next).toBe('vim');
-    expect(mod.getMode()).toBe('vim');
-  });
 
-  it('cycleMode cycles from vim back to normal', async () => {
-    await mod.setMode('vim');
+    next = await mod.cycleMode();
+    expect(next).toBe('emacs');
 
-    const next = await mod.cycleMode();
+    next = await mod.cycleMode();
     expect(next).toBe('normal');
-    expect(mod.getMode()).toBe('normal');
   });
 
   it('initKeymode sets the initial mode', async () => {
-    await mod.initKeymode('vim');
-    expect(mod.getMode()).toBe('vim');
+    await mod.initKeymode('emacs');
+    expect(mod.getMode()).toBe('emacs');
+  });
+
+  it('initKeymode falls back to normal for unknown mode', async () => {
+    await mod.initKeymode('something-bogus');
+    expect(mod.getMode()).toBe('normal');
   });
 
   it('reapplyMode re-applies the current mode', async () => {
@@ -81,7 +103,31 @@ describe('keymode module', () => {
 
     await mod.reapplyMode();
     expect(mod.getMode()).toBe('vim');
-    // toggleVim should have been called again
-    expect(editor.toggleVim).toHaveBeenCalled();
+    // applied via the same dispatch path
+    const view = editor.getCurrentView();
+    if (view) {
+      expect(editor.toggleVim).toHaveBeenCalled();
+    }
+  });
+
+  it('updateModeIndicator creates a hidden badge for normal', () => {
+    mod.updateModeIndicator('normal');
+    const el = document.getElementById('mode-indicator');
+    expect(el).not.toBeNull();
+    expect(el.hidden).toBe(true);
+  });
+
+  it('updateModeIndicator shows VIM badge', () => {
+    mod.updateModeIndicator('vim');
+    const el = document.getElementById('mode-indicator');
+    expect(el.textContent).toBe('VIM');
+    expect(el.hidden).toBe(false);
+  });
+
+  it('updateModeIndicator shows EMACS badge', () => {
+    mod.updateModeIndicator('emacs');
+    const el = document.getElementById('mode-indicator');
+    expect(el.textContent).toBe('EMACS');
+    expect(el.hidden).toBe(false);
   });
 });

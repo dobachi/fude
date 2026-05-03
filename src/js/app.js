@@ -57,7 +57,7 @@ import {
   showReloadBanner,
   dismissReloadBanner,
 } from './core/file-watcher.js';
-import { reapplyMode, cycleMode } from './core/keymode.js';
+import { initKeymode, reapplyMode, cycleMode } from './core/keymode.js';
 import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
@@ -96,11 +96,13 @@ async function init() {
       theme: 'dark',
       features: { ai_copilot: false, diff_highlight: true },
       font_size: 14,
-      vim_mode: false,
+      key_mode: 'normal',
     };
   }
 
   initTheme(config.theme || 'dark');
+  // Restore the keymode (normal / vim / emacs). Backward compat: legacy `vim_mode: true`.
+  await initKeymode(config.key_mode || (config.vim_mode ? 'vim' : 'normal'));
   if (config.font_size) setFontSize(config.font_size);
 
   // Init preview for the default pane
@@ -115,6 +117,7 @@ async function init() {
     onScroll: handlePaneScroll,
     onPreviewScroll: handlePreviewScroll,
     onSelectionChange: handleSelectionChange,
+    onEditorCreated: () => { reapplyMode(); },
   });
 
   // Init sidebar
@@ -829,84 +832,152 @@ function saveActivePaneTabState() {
 }
 
 // ── Global keyboard shortcuts ──────────────────────────────
+// Save the active tab to disk. Used by Ctrl+Shift+S (save) and Ctrl+Alt+S (save as).
+async function performSave({ forceDialog }) {
+  const tab = getActiveTab();
+  const view = currentView();
+  if (!tab || !view) return;
+  const content = getContent(view);
+
+  // Quick path: existing path + not forcing dialog → just write
+  if (tab.path && !forceDialog) {
+    const ok = await triggerSave(tab.path, content);
+    if (ok) {
+      markClean(tab.id);
+      refreshSidebar();
+    }
+    return;
+  }
+
+  // Dialog path (no path yet, or explicit Save As)
+  try {
+    let filePath;
+    if (isLocalTauri()) {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      filePath = await save({
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+        defaultPath: tab.path || vaultPath || undefined,
+      });
+    } else {
+      openSavePicker(tab.path || vaultPath || '', async (filePath) => {
+        const ok = await triggerSave(filePath, content);
+        if (ok) {
+          updateTabPath(tab.id, filePath);
+          markClean(tab.id);
+          refreshSidebar();
+        }
+      });
+      return;
+    }
+    if (filePath) {
+      const ok = await triggerSave(filePath, content);
+      if (ok) {
+        updateTabPath(tab.id, filePath);
+        markClean(tab.id);
+        refreshSidebar();
+      }
+    }
+  } catch (err) {
+    console.error('Save failed:', err);
+  }
+}
+
+// Smart close: pane if multiple panes exist, otherwise the active tab.
+function smartClose() {
+  if (getPaneCount() > 1) {
+    closeActivePane();
+  } else {
+    const active = getActiveTab();
+    if (active) closeTab(active.id);
+  }
+}
+
 function handleGlobalKeys(e) {
-  // Alt+key shortcuts (browser-friendly alternatives for Ctrl+N/T/W)
+  // Alt+key shortcuts (browser-friendly fallbacks; harmless in Tauri)
   if (e.altKey && !e.ctrlKey) {
     switch (e.key) {
       case 'n':
-        e.preventDefault();
-        openTab(null, '');
-        return;
       case 't':
         e.preventDefault();
         openTab(null, '');
         return;
       case 'w': {
         e.preventDefault();
-        const active = getActiveTab();
-        if (active) closeTab(active.id);
+        smartClose();
         return;
       }
       case 'o':
         e.preventDefault();
         handleOpenFolder();
         return;
+      case 's':
+        // Ctrl+Alt+S — Save As (force dialog)
+        if (e.ctrlKey) {
+          e.preventDefault();
+          performSave({ forceDialog: true });
+          return;
+        }
+        break;
     }
+  }
+
+  // Ctrl+Alt+S (with both ctrl and alt) — Save As
+  if (e.ctrlKey && e.altKey && (e.key === 's' || e.key === 'S')) {
+    e.preventDefault();
+    e.stopPropagation();
+    performSave({ forceDialog: true });
     return;
   }
 
   const mod = e.ctrlKey || e.metaKey;
   if (!mod) return;
 
-  // Let these keys pass through to CodeMirror (vim mode needs them)
-  const passthroughKeys = ['u', 'd', 'f', 'b', 'c', 'v', 'x', 'z', 'a'];
-  if (passthroughKeys.includes(e.key) && !e.shiftKey) return;
+  // Bare Ctrl+letter is reserved for the editor (CodeMirror / Vim / Emacs).
+  // We preventDefault on keys whose browser default would be intrusive
+  // (Save Page, refresh, close window, etc.) but otherwise let CodeMirror handle.
+  if (!e.shiftKey && !e.altKey) {
+    const blockBrowserDefault = ['s', 'r', 'w', 't', 'n', 'o', 'u'];
+    if (blockBrowserDefault.includes(e.key)) {
+      e.preventDefault();
+      return;
+    }
+    // Other bare Ctrl+letter keys (a, b, c, d, e, f, g, h, i, j, k, l, m, p, q, v, x, y, z)
+    // pass through. Ctrl+I handled below if shifted.
+    // Ctrl+I (AI Chat) intercepted explicitly to keep the existing UX.
+    if (e.key === 'i') {
+      e.preventDefault();
+      e.stopPropagation();
+      const view = currentView();
+      let selectedText = '';
+      if (view) {
+        const { from, to } = view.state.selection.main;
+        if (from !== to) selectedText = view.state.sliceDoc(from, to);
+      }
+      toggleAIPanel(selectedText);
+      const aiPanelContent = document.getElementById('ai-panel-content');
+      if (aiPanelContent && !aiPanelContent.hasChildNodes()) {
+        initChatPanel(aiPanelContent, {
+          getVaultPath: () => vaultPath,
+          getActiveView: () => currentView(),
+        }).then(() => {
+          if (selectedText) updateSelectedContext(selectedText);
+          const activeTab = getActiveTab();
+          if (activeTab) updateDocContext(activeTab.path, activeTab.content);
+        });
+      }
+      return;
+    }
+    // Anything else bare Ctrl+letter passes through to CodeMirror.
+    return;
+  }
+
+  // From here on, modifier-laden combos. Ctrl+Shift+letter = app actions.
 
   // Help: Ctrl+? (Ctrl+Shift+/)
-  if ((e.key === '?' || (e.key === '/' && e.shiftKey)) && !e.altKey) {
+  if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
     e.preventDefault();
     e.stopPropagation();
     openHelp();
-    return;
-  }
-
-  // Reload from disk: Ctrl+R (also blocks browser reload in browser mode)
-  if ((e.key === 'r' || e.key === 'R') && !e.shiftKey && !e.altKey) {
-    e.preventDefault();
-    e.stopPropagation();
-    manualReload();
-    return;
-  }
-
-  // AI Chat panel toggle: Ctrl+I
-  if (e.key === 'i' && !e.shiftKey) {
-    e.preventDefault();
-    e.stopPropagation();
-    // Get current selection before toggling
-    const view = currentView();
-    let selectedText = '';
-    if (view) {
-      const { from, to } = view.state.selection.main;
-      if (from !== to) selectedText = view.state.sliceDoc(from, to);
-    }
-    toggleAIPanel(selectedText);
-    // Lazy-init chat panel on first open
-    const aiPanelContent = document.getElementById('ai-panel-content');
-    if (aiPanelContent && !aiPanelContent.hasChildNodes()) {
-      initChatPanel(aiPanelContent, {
-        getVaultPath: () => vaultPath,
-        getActiveView: () => currentView(),
-      }).then(() => {
-        // After init, set the selected context and doc context
-        if (selectedText) {
-          updateSelectedContext(selectedText);
-        }
-        const activeTab = getActiveTab();
-        if (activeTab) {
-          updateDocContext(activeTab.path, activeTab.content);
-        }
-      });
-    }
     return;
   }
 
@@ -919,7 +990,7 @@ function handleGlobalKeys(e) {
     return;
   }
 
-  // Vim toggle: Ctrl+Shift+M
+  // Mode cycle: Ctrl+Shift+M
   if (e.key === 'M' && e.shiftKey) {
     e.preventDefault();
     e.stopPropagation();
@@ -927,214 +998,114 @@ function handleGlobalKeys(e) {
     return;
   }
 
-  // Close pane: Ctrl+Shift+W
-  if (e.key === 'W' && e.shiftKey && getPaneCount() > 1) {
-    e.preventDefault();
-    e.stopPropagation();
-    closeActivePane();
-    return;
-  }
-
-  // Save As: Ctrl+Shift+S
-  if (e.key === 'S' && e.shiftKey) {
-    e.preventDefault();
-    e.stopPropagation();
-    (async () => {
-      const tab = getActiveTab();
-      const view = currentView();
-      if (!tab || !view) return;
-      const content = getContent(view);
-      try {
-        let filePath;
-        if (isLocalTauri()) {
-          const { save } = await import('@tauri-apps/plugin-dialog');
-          filePath = await save({
-            filters: [{ name: 'Markdown', extensions: ['md'] }],
-            defaultPath: tab.path || vaultPath || undefined,
-          });
-        } else {
-          openSavePicker(tab.path || '', async (filePath) => {
-            const ok = await triggerSave(filePath, content);
-            if (ok) {
-              updateTabPath(tab.id, filePath);
-              markClean(tab.id);
-              refreshSidebar();
-            }
-          });
-          return;
-        }
-        if (filePath) {
-          const ok = await triggerSave(filePath, content);
-          if (ok) {
-            updateTabPath(tab.id, filePath);
-            markClean(tab.id);
-            refreshSidebar();
-          }
-        }
-      } catch (err) {
-        console.error('Save As failed:', err);
-      }
-    })();
-    return;
-  }
-
   switch (e.key) {
-    case 'j':
+    // ── App actions on Ctrl+Shift+letter ───────────────────
+    case 'S':
       e.preventDefault();
       e.stopPropagation();
-      setViewMode('editor');
-      break;
-    case 'k':
+      performSave({ forceDialog: false });
+      return;
+    case 'R':
       e.preventDefault();
       e.stopPropagation();
-      setViewMode('split');
-      break;
-    case 'l':
+      manualReload();
+      return;
+    case 'W':
       e.preventDefault();
       e.stopPropagation();
-      setViewMode('preview');
-      break;
-    case 't':
+      smartClose();
+      return;
+    case 'T':
+    case 'N':
       e.preventDefault();
       e.stopPropagation();
       openTab(null, '');
-      break;
+      return;
+    case 'O':
+      e.preventDefault();
+      e.stopPropagation();
+      handleOpenFolder();
+      return;
+    case 'E':
+      e.preventDefault();
+      e.stopPropagation();
+      toggleSidebar();
+      return;
+    case 'J':
+      e.preventDefault();
+      e.stopPropagation();
+      setViewMode('editor');
+      return;
+    case 'K':
+      e.preventDefault();
+      e.stopPropagation();
+      setViewMode('split');
+      return;
+    case 'L':
+      e.preventDefault();
+      e.stopPropagation();
+      setViewMode('preview');
+      return;
+
+    // ── Other shortcuts unchanged ──────────────────────────
     case 'Tab':
       e.preventDefault();
       e.stopPropagation();
       saveActivePaneTabState();
       e.shiftKey ? prevTab() : nextTab();
-      break;
-    case 'w': {
-      e.preventDefault();
-      e.stopPropagation();
-      // Ctrl+Shift+W closes the active split pane; Ctrl+W closes the tab
-      if (e.shiftKey && getPaneCount() > 1) {
-        closeActivePane();
-      } else {
-        const active = getActiveTab();
-        if (active) closeTab(active.id);
-      }
-      break;
-    }
-    case 'e':
-      e.preventDefault();
-      e.stopPropagation();
-      toggleSidebar();
-      break;
-    case 's':
-      e.preventDefault();
-      e.stopPropagation();
-      (async () => {
-        const tab = getActiveTab();
-        const view = currentView();
-        if (!tab || !view) return;
-        const content = getContent(view);
-        if (tab.path) {
-          const ok = await triggerSave(tab.path, content);
-          if (ok) {
-            markClean(tab.id);
-            refreshSidebar();
-          }
-        } else {
-          // Save As dialog for untitled tabs
-          try {
-            let filePath;
-            if (isLocalTauri()) {
-              const { save } = await import('@tauri-apps/plugin-dialog');
-              filePath = await save({
-                filters: [{ name: 'Markdown', extensions: ['md'] }],
-                defaultPath: vaultPath || undefined,
-              });
-            } else {
-              openSavePicker(vaultPath || '', async (filePath) => {
-                const ok = await triggerSave(filePath, content);
-                if (ok) {
-                  updateTabPath(tab.id, filePath);
-                  markClean(tab.id);
-                  refreshSidebar();
-                }
-              });
-              return;
-            }
-            if (filePath) {
-              const ok = await triggerSave(filePath, content);
-              if (ok) {
-                updateTabPath(tab.id, filePath);
-                markClean(tab.id);
-                refreshSidebar();
-              }
-            }
-          } catch (err) {
-            console.error('Save As failed:', err);
-          }
-        }
-      })();
-      break;
-    case 'o':
-      e.preventDefault();
-      e.stopPropagation();
-      handleOpenFolder();
-      break;
-    case 'n':
-      e.preventDefault();
-      e.stopPropagation();
-      openTab(null, '');
-      break;
-    // Pane split
-    case '|':  // Ctrl+Shift+\
-    case 'D':  // Ctrl+Shift+D (alternative)
+      return;
+    case '|':
+    case 'D':
       if (e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
         splitVertical();
       }
-      break;
-    case '\\': // Ctrl+\
-    case 'H':  // Ctrl+Shift+H (alternative)
+      return;
+    case '\\':
+    case 'H':
       if (e.shiftKey || e.key === '\\') {
         e.preventDefault();
         e.stopPropagation();
         splitHorizontal();
       }
-      break;
+      return;
     case '-':
       e.preventDefault();
       e.stopPropagation();
       setFontSize(Math.max(10, getFontSize() - 1));
-      break;
+      return;
     case '=':
     case '+':
       e.preventDefault();
       e.stopPropagation();
       setFontSize(Math.min(32, getFontSize() + 1));
-      break;
+      return;
     case 'ArrowLeft':
       e.preventDefault();
       e.stopPropagation();
       focusPane('left');
-      break;
+      return;
     case 'ArrowRight':
       e.preventDefault();
       e.stopPropagation();
       focusPane('right');
-      break;
+      return;
     case 'ArrowUp':
       e.preventDefault();
       e.stopPropagation();
       focusPane('up');
-      break;
+      return;
     case 'ArrowDown':
       e.preventDefault();
       e.stopPropagation();
       focusPane('down');
-      break;
+      return;
     case ',':
       e.preventDefault();
       e.stopPropagation();
       openSettings();
-      break;
-    // Ctrl+Shift+V and Ctrl+? are handled above the switch
+      return;
   }
 }
 

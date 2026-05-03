@@ -1,31 +1,43 @@
-// keymode.js - Keyboard mode management (vim/emacs/normal)
-import { toggleVim, getCurrentView } from './editor.js';
+// keymode.js - Keyboard mode management (normal / vim / emacs)
+import { toggleVim, toggleEmacs, getCurrentView } from './editor.js';
 import { getAllPanes } from './panes.js';
 
+const MODES = ['normal', 'vim', 'emacs'];
 let currentMode = 'normal';
 
 export async function initKeymode(savedMode = 'normal') {
-  await setMode(savedMode);
+  await setMode(MODES.includes(savedMode) ? savedMode : 'normal');
+}
+
+async function applyToView(view, mode) {
+  if (!view) return;
+  if (mode === 'vim') {
+    await toggleVim(view, true);
+  } else if (mode === 'emacs') {
+    await toggleEmacs(view, true);
+  } else {
+    // normal: clear both
+    await toggleVim(view, false);
+  }
 }
 
 export async function setMode(mode) {
   currentMode = mode;
 
-  const enable = mode === 'vim';
-
-  // Apply to all pane views
   const panes = getAllPanes();
   for (const pane of panes) {
     if (pane.editorView) {
-      await toggleVim(pane.editorView, enable);
+      await applyToView(pane.editorView, mode);
     }
   }
 
   // Fallback: also apply to active view if panes not ready
   const view = getCurrentView();
   if (view) {
-    await toggleVim(view, enable);
+    await applyToView(view, mode);
   }
+
+  updateModeIndicator(mode);
 }
 
 export function getMode() {
@@ -37,9 +49,30 @@ export async function reapplyMode() {
 }
 
 export async function cycleMode() {
-  const modes = ['normal', 'vim'];
-  const index = modes.indexOf(currentMode);
-  const next = modes[(index + 1) % modes.length];
+  const index = MODES.indexOf(currentMode);
+  const next = MODES[(index + 1) % MODES.length];
   await setMode(next);
   return next;
+}
+
+const MODE_LABELS = {
+  vim: 'VIM',
+  emacs: 'EMACS',
+};
+
+export function updateModeIndicator(mode) {
+  let el = document.getElementById('mode-indicator');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'mode-indicator';
+    document.body.appendChild(el);
+  }
+  const label = MODE_LABELS[mode];
+  if (label) {
+    el.textContent = label;
+    el.hidden = false;
+  } else {
+    el.textContent = '';
+    el.hidden = true;
+  }
 }
