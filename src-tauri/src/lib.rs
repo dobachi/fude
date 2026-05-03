@@ -1050,6 +1050,7 @@ mod tests {
             },
             font_size: 18,
             vim_mode: true,
+            key_mode: Some("vim".to_string()),
             openrouter_api_key: Some("sk-test-key".to_string()),
             ai_model: Some("openai/gpt-4o".to_string()),
             sidebar_sort: Some("modified_desc".to_string()),
