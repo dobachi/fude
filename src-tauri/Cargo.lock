@@ -999,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "fude"
-version = "0.2.18"
+version = "0.2.19"
 dependencies = [
  "dirs 5.0.1",
  "futures-util",
