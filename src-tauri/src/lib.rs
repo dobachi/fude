@@ -319,7 +319,7 @@ fn scan_dir_tree_filtered(dir: &Path, show_all_files: bool) -> Result<Vec<FileEn
                     size,
                 });
             }
-        } else if show_all_files || name.ends_with(".md") {
+        } else if show_all_files || name.ends_with(".md") || name.ends_with(".qmd") {
             let (modified, created, size) = get_file_metadata(&path);
             entries.push(FileEntry {
                 name,
@@ -912,6 +912,18 @@ mod tests {
         // show_all_files: all files
         let entries = scan_dir_tree_filtered(tmp.path(), true).unwrap();
         assert_eq!(entries.len(), 3);
+    }
+
+    #[test]
+    fn scan_dir_tree_finds_qmd_files() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("report.qmd"), "---\ntitle: x\n---").unwrap();
+        fs::write(tmp.path().join("readme.txt"), "ignored").unwrap();
+
+        let entries = scan_dir_tree(tmp.path()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "report.qmd");
+        assert!(!entries[0].is_dir);
     }
 
     #[test]

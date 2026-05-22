@@ -894,7 +894,7 @@ async function performSave({ forceDialog }) {
     if (isLocalTauri()) {
       const { save } = await import('@tauri-apps/plugin-dialog');
       filePath = await save({
-        filters: [{ name: 'Markdown', extensions: ['md'] }],
+        filters: [{ name: 'Markdown', extensions: ['md', 'qmd'] }],
         defaultPath: tab.path || vaultPath || undefined,
       });
     } else {
