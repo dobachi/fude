@@ -794,8 +794,51 @@ fn get_open_dir() -> Result<String, String> {
 
 // ─── App Entry ─────────────────────────────────────────────
 
+/// Extract a file path and remote URL from a raw argv slice (argv[0] = executable).
+/// Used as a fallback when tauri-plugin-cli fails to parse (e.g. Windows file
+/// association passes a quoted absolute path that the clap parser may reject).
+fn parse_open_args(args: &[String]) -> (Option<String>, Option<String>) {
+    let mut path: Option<String> = None;
+    let mut remote: Option<String> = None;
+    let mut i = 1;
+    while i < args.len() {
+        let a = &args[i];
+        if a == "--remote" || a == "-r" {
+            i += 1;
+            if i < args.len() {
+                remote = Some(args[i].clone());
+            }
+        } else if let Some(v) = a.strip_prefix("--remote=") {
+            remote = Some(v.to_string());
+        } else if a.starts_with('-') {
+            // unknown flag — skip
+        } else if path.is_none() {
+            path = Some(a.clone());
+        }
+        i += 1;
+    }
+    (path, remote)
+}
+
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            let (path, _) = parse_open_args(&argv);
+            if let Some(p) = path {
+                let _ = app.emit("cli-args", serde_json::json!({ "path": p }));
+            }
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_cli::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -834,10 +877,10 @@ pub fn run() {
             }
 
             let handle = app.handle().clone();
-            if let Ok(matches) = app.cli().matches() {
-                let mut cli_path: Option<String> = None;
-                let mut cli_remote: Option<String> = None;
+            let mut cli_path: Option<String> = None;
+            let mut cli_remote: Option<String> = None;
 
+            if let Ok(matches) = app.cli().matches() {
                 if let Some(arg) = matches.args.get("path") {
                     if let Some(val) = arg.value.as_str() {
                         let s = val.to_string();
@@ -855,17 +898,30 @@ pub fn run() {
                         }
                     }
                 }
+            }
 
-                if let Some(remote_url) = cli_remote {
-                    let window = app.get_webview_window("main").unwrap();
-                    let _ = window.navigate(remote_url.parse().unwrap());
-                } else if let Some(path) = cli_path {
-                    let payload = serde_json::json!({ "path": path });
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_millis(500));
-                        let _ = handle.emit("cli-args", payload);
-                    });
+            // Fallback: parse raw argv directly. Required for Windows file
+            // association launches where the clap-based parser may not pick up
+            // the bare path argument.
+            if cli_path.is_none() && cli_remote.is_none() {
+                let raw: Vec<String> = std::env::args().collect();
+                let (p, r) = parse_open_args(&raw);
+                cli_path = p;
+                cli_remote = r;
+            }
+
+            if let Some(remote_url) = cli_remote {
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Ok(url) = remote_url.parse() {
+                        let _ = window.navigate(url);
+                    }
                 }
+            } else if let Some(path) = cli_path {
+                let payload = serde_json::json!({ "path": path });
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    let _ = handle.emit("cli-args", payload);
+                });
             }
             Ok(())
         })
@@ -1178,6 +1234,73 @@ mod tests {
         assert_eq!(restored.entries.len(), 2);
         assert!(restored.entries[0].is_dir);
         assert!(!restored.entries[1].is_dir);
+    }
+
+    // --- parse_open_args ---
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn parse_open_args_extracts_path_from_positional_arg() {
+        let (path, remote) = parse_open_args(&args(&["fude.exe", "C:\\Users\\me\\note.md"]));
+        assert_eq!(path.as_deref(), Some("C:\\Users\\me\\note.md"));
+        assert!(remote.is_none());
+    }
+
+    #[test]
+    fn parse_open_args_handles_unix_path() {
+        let (path, remote) = parse_open_args(&args(&["fude", "/home/user/notes.md"]));
+        assert_eq!(path.as_deref(), Some("/home/user/notes.md"));
+        assert!(remote.is_none());
+    }
+
+    #[test]
+    fn parse_open_args_parses_remote_short_flag() {
+        let (path, remote) = parse_open_args(&args(&["fude", "-r", "http://localhost:3000"]));
+        assert!(path.is_none());
+        assert_eq!(remote.as_deref(), Some("http://localhost:3000"));
+    }
+
+    #[test]
+    fn parse_open_args_parses_remote_long_flag() {
+        let (path, remote) = parse_open_args(&args(&["fude", "--remote", "http://example.com"]));
+        assert_eq!(remote.as_deref(), Some("http://example.com"));
+        assert!(path.is_none());
+    }
+
+    #[test]
+    fn parse_open_args_parses_remote_equals_form() {
+        let (path, remote) = parse_open_args(&args(&["fude", "--remote=http://x.test"]));
+        assert_eq!(remote.as_deref(), Some("http://x.test"));
+        assert!(path.is_none());
+    }
+
+    #[test]
+    fn parse_open_args_returns_none_when_only_executable() {
+        let (path, remote) = parse_open_args(&args(&["fude"]));
+        assert!(path.is_none());
+        assert!(remote.is_none());
+    }
+
+    #[test]
+    fn parse_open_args_returns_none_for_empty() {
+        let (path, remote) = parse_open_args(&[]);
+        assert!(path.is_none());
+        assert!(remote.is_none());
+    }
+
+    #[test]
+    fn parse_open_args_takes_first_path_only() {
+        let (path, _) = parse_open_args(&args(&["fude", "/a.md", "/b.md"]));
+        assert_eq!(path.as_deref(), Some("/a.md"));
+    }
+
+    #[test]
+    fn parse_open_args_skips_unknown_flags() {
+        let (path, _) = parse_open_args(&args(&["fude", "--debug", "/a.md"]));
+        assert_eq!(path.as_deref(), Some("/a.md"));
     }
 
     #[test]
