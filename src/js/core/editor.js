@@ -268,6 +268,10 @@ export function createEditor(
   const extensions = [
     // Vim mode FIRST - highest priority for key handling (ESC, Ctrl+[, etc.)
     keymodeCompartment.of([]),
+    // Required for vim visual block (Ctrl-V) operations: without this, CM6
+    // collapses the multi-range selection that visual block produces, so
+    // delete/yank/etc. only affect the primary range.
+    EditorState.allowMultipleSelections.of(true),
     lineNumbers(),
     highlightActiveLine(),
     drawSelection(),
