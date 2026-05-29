@@ -1021,9 +1021,16 @@ function handleGlobalKeys(e) {
   }
 
   // From here on, modifier-laden combos. Ctrl+Shift+letter = app actions.
+  //
+  // Normalize single-character keys to uppercase before matching. With Shift
+  // held, e.key for a letter is normally the uppercase form, but Caps Lock
+  // (Shift + Caps cancels for letters) or some keyboard layout / IME states
+  // can deliver the lowercase form — which caused Ctrl+Shift+S etc. to fall
+  // through silently. The Ctrl+Alt+S handler above already guards both cases.
+  const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
 
   // Help: Ctrl+? (Ctrl+Shift+/)
-  if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+  if (key === '?' || (key === '/' && e.shiftKey)) {
     e.preventDefault();
     e.stopPropagation();
     openHelp();
@@ -1031,7 +1038,7 @@ function handleGlobalKeys(e) {
   }
 
   // AI Composer: Ctrl+Shift+I
-  if (e.key === 'I' && e.shiftKey) {
+  if (key === 'I' && e.shiftKey) {
     e.preventDefault();
     e.stopPropagation();
     const view = currentView();
@@ -1040,14 +1047,14 @@ function handleGlobalKeys(e) {
   }
 
   // Mode cycle: Ctrl+Shift+M
-  if (e.key === 'M' && e.shiftKey) {
+  if (key === 'M' && e.shiftKey) {
     e.preventDefault();
     e.stopPropagation();
     cycleMode();
     return;
   }
 
-  switch (e.key) {
+  switch (key) {
     // ── App actions on Ctrl+Shift+letter ───────────────────
     case 'S':
       e.preventDefault();
