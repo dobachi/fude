@@ -46,7 +46,13 @@ function ensureMd() {
       // an absolute file by writing ![alt](/abs/path/img.png).
       const isRemote = !src || /^(https?:|data:|asset:|blob:)/i.test(src);
       if (currentBasePath && !isRemote) {
-        const abs = src.startsWith('/') ? src : `${currentBasePath}/${src}`;
+        // Treat both POSIX and Windows roots as "absolute". A leading drive
+        // letter like "C:\..." is also taken as absolute.
+        const isAbsolute = /^(\/|\\|[A-Za-z]:[/\\])/.test(src);
+        const joined = isAbsolute ? src : `${currentBasePath}/${src}`;
+        // Convert any backslashes to forward slashes so the Tauri asset
+        // protocol gets a clean URL path on Windows too.
+        const abs = joined.replace(/\\/g, '/');
         // convertFileSrc picks the correct platform URL: asset://localhost/...
         // on Linux/macOS, https://asset.localhost/... on Windows. Requires
         // app.security.assetProtocol.enable = true in tauri.conf.json.

@@ -98,6 +98,17 @@ function currentView() {
   return getActivePaneView();
 }
 
+/**
+ * Return the parent directory of an OS path. Handles both POSIX (/) and
+ * Windows (\) separators so basePath derivation works on every platform.
+ * Returns '' if path is falsy or has no separator.
+ */
+function dirnameOf(path) {
+  if (!path) return '';
+  const lastSep = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return lastSep >= 0 ? path.substring(0, lastSep) : '';
+}
+
 // ── Initialization ─────────────────────────────────────────
 async function init() {
   try {
@@ -457,7 +468,7 @@ function handlePaneContentChange(pane, newContent) {
   updateDocContext(tab.path, newContent);
 
   if (viewMode === 'split' || viewMode === 'preview') {
-    const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : '';
+    const basePath = dirnameOf(tab.path);
     // Suppress the spurious preview→editor scroll sync caused by innerHTML
     // replacement. When renderMarkdown resets innerHTML the browser drops
     // scrollTop to 0, fires a scroll event, and handlePreviewScroll would
@@ -590,7 +601,7 @@ function handleTabChange(tab) {
 
   // Render preview
   if (viewMode === 'split' || viewMode === 'preview') {
-    const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : '';
+    const basePath = dirnameOf(tab.path);
     renderMarkdown(tab.content, basePath, previewContainer);
   }
 
@@ -634,7 +645,7 @@ function applyReloadToAllPanes(path, content, tabId) {
       p.content = content;
       // Re-render preview if visible
       if ((viewMode === 'split' || viewMode === 'preview') && p.previewContainer) {
-        const basePath = path.substring(0, path.lastIndexOf('/'));
+        const basePath = dirnameOf(path);
         renderMarkdown(content, basePath, p.previewContainer);
       }
     }
@@ -707,7 +718,7 @@ function applyViewMode() {
     if (tab) {
       const pane = getActivePane();
       if (pane) {
-        const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : '';
+        const basePath = dirnameOf(tab.path);
         renderMarkdown(tab.content, basePath, pane.previewContainer);
       }
     }
