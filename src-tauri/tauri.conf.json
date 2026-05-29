@@ -20,7 +20,13 @@
         "browserExtensionsEnabled": false,
         "devtools": true
       }
-    ]
+    ],
+    "security": {
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    }
   },
   "bundle": {
     "active": true,

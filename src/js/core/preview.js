@@ -1,5 +1,7 @@
 // preview.js - Markdown preview with markdown-it
 import markdownIt from 'markdown-it';
+import { convertFileSrc } from '@tauri-apps/api/core';
+import { isLocalTauri } from '../backend.js';
 import { openExternal, isExternalUrl } from './external-link.js';
 
 // Build a URL-friendly slug from heading text. Lowercased, non-alphanumerics
@@ -38,15 +40,21 @@ function ensureMd() {
     const token = tokens[idx];
     const srcIndex = token.attrIndex('src');
     if (srcIndex >= 0) {
-      let src = token.attrs[srcIndex][1];
-      if (
-        currentBasePath &&
-        src &&
-        !src.startsWith('http') &&
-        !src.startsWith('data:') &&
-        !src.startsWith('/')
-      ) {
-        token.attrs[srcIndex][1] = `asset://localhost/${currentBasePath}/${src}`;
+      const src = token.attrs[srcIndex][1];
+      // Skip remote URLs, data URIs, and the asset protocol itself (already
+      // converted). Absolute paths are also taken as-is so users can target
+      // an absolute file by writing ![alt](/abs/path/img.png).
+      const isRemote = !src || /^(https?:|data:|asset:|blob:)/i.test(src);
+      if (currentBasePath && !isRemote) {
+        const abs = src.startsWith('/') ? src : `${currentBasePath}/${src}`;
+        // convertFileSrc picks the correct platform URL: asset://localhost/...
+        // on Linux/macOS, https://asset.localhost/... on Windows. Requires
+        // app.security.assetProtocol.enable = true in tauri.conf.json.
+        if (isLocalTauri()) {
+          token.attrs[srcIndex][1] = convertFileSrc(abs);
+        }
+        // In browser/dev mode leave the path untouched; the bundled server
+        // can serve it from disk via its own routes if configured.
       }
     }
     return defaultImageRender(tokens, idx, options, env, self);
