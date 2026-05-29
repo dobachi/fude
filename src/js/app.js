@@ -458,7 +458,18 @@ function handlePaneContentChange(pane, newContent) {
 
   if (viewMode === 'split' || viewMode === 'preview') {
     const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : '';
+    // Suppress the spurious preview→editor scroll sync caused by innerHTML
+    // replacement. When renderMarkdown resets innerHTML the browser drops
+    // scrollTop to 0, fires a scroll event, and handlePreviewScroll would
+    // otherwise drag the editor back to line ≈1 on every keystroke (vim x,
+    // delete, normal typing). Marking 'editor' as the recent sync source
+    // makes handlePreviewScroll's lockout swallow that bounce.
+    recordScrollSync('editor');
+    const prevScrollTop = pane.previewContainer.scrollTop;
     renderMarkdown(newContent, basePath, pane.previewContainer);
+    // Preserve preview scroll position across re-render so the preview
+    // doesn't visually jump to the top on every edit.
+    pane.previewContainer.scrollTop = prevScrollTop;
   }
 
   scheduleSessionSave();
