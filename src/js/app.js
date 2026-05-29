@@ -111,6 +111,84 @@ function dirnameOf(path) {
   return lastSep >= 0 ? path.substring(0, lastSep) : '';
 }
 
+const SIDEBAR_SPLIT_KEY = 'fude.sidebarSplit';
+
+/**
+ * Set up the drag handle between #file-tree and #outline-section. The split
+ * is stored as a pixel height for #file-tree (driving --filetree-height)
+ * and persisted to localStorage, with a sensible default of 50% on first use.
+ */
+function initSidebarResizer() {
+  const resizer = document.getElementById('sidebar-resizer');
+  const sidebar = document.getElementById('sidebar');
+  const fileTree = document.getElementById('file-tree');
+  if (!resizer || !sidebar || !fileTree) return;
+
+  // Apply persisted size (if any) before any drag. Stored as integer pixels.
+  try {
+    const saved = parseInt(localStorage.getItem(SIDEBAR_SPLIT_KEY) || '', 10);
+    if (Number.isFinite(saved) && saved > 0) {
+      document.documentElement.style.setProperty('--filetree-height', `${saved}px`);
+    }
+  } catch {
+    /* localStorage unavailable (private mode etc.) — keep CSS default */
+  }
+
+  const MIN_TREE_PX = 60;
+  const MIN_OUTLINE_PX = 80;
+
+  resizer.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = fileTree.getBoundingClientRect().height;
+    const sidebarHeight = sidebar.getBoundingClientRect().height;
+    const resizerHeight = resizer.getBoundingClientRect().height;
+    const maxTree = sidebarHeight - resizerHeight - MIN_OUTLINE_PX - getSidebarHeaderHeight();
+    resizer.classList.add('resizing');
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMove = (mv) => {
+      const next = Math.max(
+        MIN_TREE_PX,
+        Math.min(Math.max(MIN_TREE_PX, maxTree), startHeight + (mv.clientY - startY)),
+      );
+      document.documentElement.style.setProperty('--filetree-height', `${next}px`);
+    };
+    const onUp = () => {
+      resizer.classList.remove('resizing');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      try {
+        const final = Math.round(fileTree.getBoundingClientRect().height);
+        localStorage.setItem(SIDEBAR_SPLIT_KEY, String(final));
+      } catch {
+        /* ignore */
+      }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  // Double-click resets to the 50/50 default.
+  resizer.addEventListener('dblclick', () => {
+    document.documentElement.style.removeProperty('--filetree-height');
+    try {
+      localStorage.removeItem(SIDEBAR_SPLIT_KEY);
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
+function getSidebarHeaderHeight() {
+  const header = document.getElementById('sidebar-header');
+  return header ? header.getBoundingClientRect().height : 0;
+}
+
 // ── Initialization ─────────────────────────────────────────
 async function init() {
   try {
@@ -186,6 +264,11 @@ async function init() {
       },
     });
   }
+
+  // Sidebar resizer: drag to redistribute height between file-tree and
+  // outline-section. Persist the split to localStorage so it survives
+  // restart.
+  initSidebarResizer();
 
   // Tab change callback
   setTabChangeCallback(handleTabChange);

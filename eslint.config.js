@@ -34,6 +34,7 @@ export default [
         CSS: 'readonly',
         CustomEvent: 'readonly',
         fetch: 'readonly',
+        localStorage: 'readonly',
       },
     },
     rules: {
