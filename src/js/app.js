@@ -1319,6 +1319,54 @@ function handleGlobalKeys(e) {
   // We preventDefault on keys whose browser default would be intrusive
   // (Save Page, refresh, close window, etc.) but otherwise let CodeMirror handle.
   if (!e.shiftKey && !e.altKey) {
+    // Bare Ctrl + non-letter app shortcuts. Intercepted BEFORE the
+    // editor-pass-through below so they survive in vim/emacs modes too
+    // (they don't conflict with editor keybindings).
+    switch (e.key) {
+      case ',':
+        e.preventDefault();
+        e.stopPropagation();
+        openSettings();
+        return;
+      case '-':
+        e.preventDefault();
+        e.stopPropagation();
+        setFontSize(Math.max(10, getFontSize() - 1));
+        return;
+      case '=':
+      case '+':
+        e.preventDefault();
+        e.stopPropagation();
+        setFontSize(Math.min(32, getFontSize() + 1));
+        return;
+      case 'Tab':
+        e.preventDefault();
+        e.stopPropagation();
+        saveActivePaneTabState();
+        nextTab();
+        return;
+      case 'ArrowLeft':
+        e.preventDefault();
+        e.stopPropagation();
+        focusPane('left');
+        return;
+      case 'ArrowRight':
+        e.preventDefault();
+        e.stopPropagation();
+        focusPane('right');
+        return;
+      case 'ArrowUp':
+        e.preventDefault();
+        e.stopPropagation();
+        focusPane('up');
+        return;
+      case 'ArrowDown':
+        e.preventDefault();
+        e.stopPropagation();
+        focusPane('down');
+        return;
+    }
+
     const blockBrowserDefault = ['s', 'r', 'w', 't', 'n', 'o', 'u'];
     if (blockBrowserDefault.includes(e.key)) {
       // CRITICAL: do NOT preventDefault in emacs mode. CodeMirror's runHandlers
