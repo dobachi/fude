@@ -112,6 +112,7 @@ function dirnameOf(path) {
 }
 
 const SIDEBAR_SPLIT_KEY = 'fude.sidebarSplit';
+const SIDEBAR_WIDTH_KEY = 'fude.sidebarWidth';
 
 /**
  * Set up the drag handle between #file-tree and #outline-section. The split
@@ -187,6 +188,71 @@ function initSidebarResizer() {
 function getSidebarHeaderHeight() {
   const header = document.getElementById('sidebar-header');
   return header ? header.getBoundingClientRect().height : 0;
+}
+
+/**
+ * Set up the drag handle on the right edge of #sidebar. The width drives
+ * --sidebar-width (consumed by the #app grid template) and is persisted to
+ * localStorage. Double-click resets to the CSS default.
+ */
+function initSidebarWidthResizer() {
+  const resizer = document.getElementById('sidebar-width-resizer');
+  const sidebar = document.getElementById('sidebar');
+  if (!resizer || !sidebar) return;
+
+  // Apply persisted width before any drag.
+  try {
+    const saved = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY) || '', 10);
+    if (Number.isFinite(saved) && saved > 0) {
+      document.documentElement.style.setProperty('--sidebar-width', `${saved}px`);
+    }
+  } catch {
+    /* localStorage unavailable — keep CSS default */
+  }
+
+  const MIN_WIDTH = 140;
+  const MAX_WIDTH_RATIO = 0.6; // never let the sidebar exceed 60% of the viewport
+
+  resizer.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebar.getBoundingClientRect().width;
+    const maxWidth = Math.max(MIN_WIDTH, window.innerWidth * MAX_WIDTH_RATIO);
+    resizer.classList.add('resizing');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMove = (mv) => {
+      const next = Math.max(MIN_WIDTH, Math.min(maxWidth, startWidth + (mv.clientX - startX)));
+      document.documentElement.style.setProperty('--sidebar-width', `${next}px`);
+    };
+    const onUp = () => {
+      resizer.classList.remove('resizing');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      try {
+        const final = Math.round(sidebar.getBoundingClientRect().width);
+        localStorage.setItem(SIDEBAR_WIDTH_KEY, String(final));
+      } catch {
+        /* ignore */
+      }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  // Double-click to reset to the CSS default.
+  resizer.addEventListener('dblclick', () => {
+    document.documentElement.style.removeProperty('--sidebar-width');
+    try {
+      localStorage.removeItem(SIDEBAR_WIDTH_KEY);
+    } catch {
+      /* ignore */
+    }
+  });
 }
 
 // ── Initialization ─────────────────────────────────────────
@@ -269,6 +335,10 @@ async function init() {
   // outline-section. Persist the split to localStorage so it survives
   // restart.
   initSidebarResizer();
+
+  // Sidebar width resizer: drag the right edge of the sidebar to change
+  // its horizontal width. Also persisted.
+  initSidebarWidthResizer();
 
   // Tab change callback
   setTabChangeCallback(handleTabChange);

@@ -159,10 +159,37 @@ body {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  position: relative;
 }
 
 .sidebar-collapsed #sidebar {
   visibility: hidden;
+}
+
+/* ===== Sidebar width resizer (right edge of #sidebar) ===== */
+#sidebar-width-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 10;
+  user-select: none;
+}
+#sidebar-width-resizer:hover,
+#sidebar-width-resizer.resizing {
+  background: var(--accent, #007acc);
+}
+/* Wider invisible hit area without changing layout footprint. */
+#sidebar-width-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0 -3px;
+}
+.sidebar-collapsed #sidebar-width-resizer {
+  display: none;
 }
 
 /* Sidebar toggle button in tab bar */
