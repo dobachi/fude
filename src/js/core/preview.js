@@ -1,5 +1,6 @@
 // preview.js - Markdown preview with markdown-it
 import markdownIt from 'markdown-it';
+import { openExternal, externalHrefFromEvent } from './external-link.js';
 
 let md = null;
 let currentBasePath = '';
@@ -145,6 +146,15 @@ export function initPreview(container) {
   ensureMd();
   container.setAttribute('tabindex', '0');
   container.addEventListener('keydown', handlePreviewKeys);
+
+  // Route external link clicks to the OS default browser. Without this the
+  // Tauri webview would navigate itself away from the app.
+  container.addEventListener('click', (e) => {
+    const href = externalHrefFromEvent(e);
+    if (!href) return;
+    e.preventDefault();
+    openExternal(href);
+  });
 }
 
 /**

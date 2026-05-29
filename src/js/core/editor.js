@@ -31,8 +31,33 @@ import {
 import { searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
 import { oneDark } from '@codemirror/theme-one-dark';
+import { openExternal } from './external-link.js';
 
 let currentFontSize = 14;
+
+// Match http(s) URLs and mailto: addresses inside editor text. The terminators
+// keep us out of trailing markdown punctuation like ")" in [label](url).
+const EDITOR_URL_RE = /(?:https?:\/\/|mailto:)[^\s<>()'"`\]]+/g;
+
+// Scan a single line for the URL range that contains a given column.
+// Returns { url, from, to } in absolute document offsets, or null.
+function urlRangeAt(view, pos) {
+  const line = view.state.doc.lineAt(pos);
+  const col = pos - line.from;
+  EDITOR_URL_RE.lastIndex = 0;
+  let m;
+  while ((m = EDITOR_URL_RE.exec(line.text)) !== null) {
+    const start = m.index;
+    const end = m.index + m[0].length;
+    if (col >= start && col <= end) {
+      // Trim common trailing punctuation that almost never belongs to URLs.
+      let url = m[0];
+      while (/[.,;:!?]$/.test(url)) url = url.slice(0, -1);
+      return { url, from: line.from + start, to: line.from + start + url.length };
+    }
+  }
+  return null;
+}
 
 const baseTheme = EditorView.theme({
   '&': { height: '100%' },
@@ -339,6 +364,26 @@ export function createEditor(
   // Store compartment references on the view for later reconfiguration
   view._themeCompartment = themeCompartment;
   view._keymodeCompartment = keymodeCompartment;
+
+  // Ctrl/Cmd + click on a URL in the source opens it in the OS browser.
+  // Listen on the outer dom so coordinates resolve correctly across wrapped
+  // lines. Use mousedown (capture) so we can suppress CodeMirror's caret move
+  // and selection update before they happen.
+  view.dom.addEventListener(
+    'mousedown',
+    (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.button !== 0) return;
+      const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+      if (pos == null) return;
+      const hit = urlRangeAt(view, pos);
+      if (!hit) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openExternal(hit.url);
+    },
+    true,
+  );
 
   // Track IME composition to suppress onChange during input
   view.contentDOM.addEventListener('compositionstart', () => {

@@ -19,6 +19,14 @@
     "core:window:allow-destroy",
     "core:window:allow-close",
     "core:window:allow-set-title",
-    "core:app:default"
+    "core:app:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "http://**" },
+        { "url": "https://**" },
+        { "url": "mailto:*" }
+      ]
+    }
   ]
 }
