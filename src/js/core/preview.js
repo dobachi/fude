@@ -1,6 +1,17 @@
 // preview.js - Markdown preview with markdown-it
 import markdownIt from 'markdown-it';
-import { openExternal, externalHrefFromEvent } from './external-link.js';
+import { openExternal, isExternalUrl } from './external-link.js';
+
+// Build a URL-friendly slug from heading text. Lowercased, non-alphanumerics
+// collapsed to "-". Used to give headings stable ids so internal links like
+// [foo](#section) can scroll inside the preview.
+function slugify(text) {
+  return String(text)
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
 let md = null;
 let currentBasePath = '';
@@ -76,6 +87,28 @@ function ensureMd() {
   };
   md.renderer.rules.fence = renderFenceLike;
   md.renderer.rules.code_block = renderFenceLike;
+
+  // Auto-id headings (h1..h6) using a slug of their text. Lets internal
+  // anchor links like [back to top](#title) scroll inside the preview, and
+  // keeps the Tauri webview from navigating to tauri.localhost/#... when
+  // the click handler scrolls in-page.
+  const seenIds = new WeakMap();
+  md.renderer.rules.heading_open = function (tokens, idx, options, env, self) {
+    const inline = tokens[idx + 1];
+    const text = inline && inline.type === 'inline' ? inline.content : '';
+    let slug = slugify(text);
+    if (slug) {
+      // Disambiguate duplicates per render env so repeated headings still
+      // get unique ids ("foo", "foo-2", "foo-3", ...).
+      const counts = seenIds.get(env) || new Map();
+      const n = (counts.get(slug) || 0) + 1;
+      counts.set(slug, n);
+      seenIds.set(env, counts);
+      if (n > 1) slug = `${slug}-${n}`;
+      tokens[idx].attrSet('id', slug);
+    }
+    return self.renderToken(tokens, idx, options);
+  };
 }
 
 function escapeHtml(s) {
@@ -147,13 +180,38 @@ export function initPreview(container) {
   container.setAttribute('tabindex', '0');
   container.addEventListener('keydown', handlePreviewKeys);
 
-  // Route external link clicks to the OS default browser. Without this the
-  // Tauri webview would navigate itself away from the app.
+  // Intercept ALL link clicks inside the preview. Without this the Tauri
+  // webview will navigate itself away (e.g. an internal anchor like
+  // [foo](#R1) bounces the URL to tauri.localhost/#R1 and unloads the app).
+  //
+  //   http/https/mailto → OS default browser
+  //   #anchor           → scroll inside the preview to the matching id
+  //   anything else     → no-op (relative paths etc. are ignored for now)
   container.addEventListener('click', (e) => {
-    const href = externalHrefFromEvent(e);
+    const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (!a) return;
+    const href = a.getAttribute('href');
     if (!href) return;
     e.preventDefault();
-    openExternal(href);
+
+    if (isExternalUrl(href)) {
+      openExternal(href);
+      return;
+    }
+    if (href.startsWith('#')) {
+      const id = decodeURIComponent(href.slice(1));
+      if (!id) return;
+      // Prefer a strict id match; CSS.escape guards ids with punctuation.
+      const target =
+        container.querySelector(`#${CSS.escape(id)}`) ||
+        container.querySelector(`[name="${CSS.escape(id)}"]`);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      return;
+    }
+    // Relative paths or other schemes: silently swallow to avoid webview
+    // navigation. (Opening linked .md files in a new tab is a future feature.)
   });
 }
 
