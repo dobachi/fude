@@ -11,7 +11,32 @@ permissions:
   contents: write
 
 jobs:
+  # Create the GitHub Release once, BEFORE the matrix builds, so the three
+  # OS jobs never race each other into creating duplicate releases (which
+  # silently drops the assets of whichever loses the race — exactly what
+  # ate v0.2.36's Linux artifacts).
+  prepare-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create draft release (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "${{ github.ref_name }}" \
+              --repo "${{ github.repository }}" \
+              --title "Fude ${{ github.ref_name }}" \
+              --notes "Download the portable exe (Windows), AppImage (Linux), or dmg (macOS)." \
+              --draft
+          else
+            echo "Release ${{ github.ref_name }} already exists; skipping create."
+          fi
+
   build:
+    needs: [prepare-release]
     strategy:
       fail-fast: false
       matrix:
@@ -71,7 +96,12 @@ jobs:
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('Fude {0}', github.ref_name) || '' }}
           releaseBody: 'Download the portable exe (Windows), AppImage (Linux), or dmg (macOS).'
-          releaseDraft: false
+          # Keep the release in draft state during the matrix build. The
+          # release was pre-created (draft) by prepare-release, so every
+          # matrix job sees "Found release" and just uploads. We flip the
+          # release to published in the publish-release job once all three
+          # OS jobs have finished.
+          releaseDraft: true
           prerelease: false
 
       - name: Upload portable exe to release
@@ -90,3 +120,20 @@ jobs:
             src-tauri/target/release/fude*
             !src-tauri/target/release/bundle/**/deps
           retention-days: 7
+
+  # Flip the draft release to published only after every matrix build
+  # succeeded, so users never see a half-populated release.
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Mark release as published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false
