@@ -491,6 +491,21 @@ export function setScroll(view, scroll) {
 }
 
 /**
+ * Move the cursor to the start of the given 1-based line, scroll that line to
+ * the top of the viewport, and focus the editor. Used by the outline panel
+ * for "jump to heading".
+ */
+export function jumpToLine(view, line) {
+  if (!view) return;
+  const docLines = view.state.doc.lines;
+  const safe = Math.max(1, Math.min(Math.floor(line), docLines));
+  const pos = view.state.doc.line(safe).from;
+  view.dispatch({ selection: { anchor: pos } });
+  scrollEditorToLine(view, safe);
+  view.focus();
+}
+
+/**
  * Scroll the editor so that the given (fractional, 1-based) line is at the top.
  */
 export function scrollEditorToLine(view, line) {

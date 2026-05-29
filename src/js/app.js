@@ -11,8 +11,10 @@ import {
   setContent,
   setContentFromDisk,
   scrollEditorToLine,
+  jumpToLine,
   registerPanesModule,
 } from './core/editor.js';
+import { initOutline, updateOutline, setActiveOutlineLine, clearOutline } from './core/outline.js';
 import {
   initPreview,
   renderMarkdown,
@@ -168,6 +170,22 @@ async function init() {
       showAllFiles: config.sidebar_show_all_files || false,
       onSettingsChange: handleSidebarSettingsChange,
     });
+
+  // Init outline (document headings) below the file tree.
+  const outlineList = document.getElementById('outline-list');
+  if (outlineList) {
+    initOutline(outlineList, {
+      onJump: (line) => {
+        const view = currentView();
+        if (!view) return;
+        // Jumping is a user-initiated move; skip the editor→preview lockout
+        // that typing installs, but suppress the bounce-back from the editor
+        // scroll event we are about to dispatch.
+        recordScrollSync('editor');
+        jumpToLine(view, line);
+      },
+    });
+  }
 
   // Tab change callback
   setTabChangeCallback(handleTabChange);
@@ -455,6 +473,19 @@ async function init() {
 
 // ── Pane content/scroll callbacks ──────────────────────────
 
+// Debounce the outline rebuild during typing — heading extraction is cheap
+// but the resulting DOM diff isn't free, and we only need the outline to
+// catch up when the user pauses.
+const OUTLINE_DEBOUNCE_MS = 300;
+let outlineDebounceTimer = null;
+function scheduleOutlineUpdate(text) {
+  if (outlineDebounceTimer) clearTimeout(outlineDebounceTimer);
+  outlineDebounceTimer = setTimeout(() => {
+    outlineDebounceTimer = null;
+    updateOutline(text);
+  }, OUTLINE_DEBOUNCE_MS);
+}
+
 function handlePaneContentChange(pane, newContent) {
   // Find the tab for the active pane
   const tab = getActiveTab();
@@ -466,6 +497,10 @@ function handlePaneContentChange(pane, newContent) {
 
   // Update AI doc context with latest content
   updateDocContext(tab.path, newContent);
+
+  // Outline updates ride a debounce so we don't rebuild the heading list on
+  // every keystroke.
+  scheduleOutlineUpdate(newContent);
 
   if (viewMode === 'split' || viewMode === 'preview') {
     const basePath = dirnameOf(tab.path);
@@ -519,6 +554,12 @@ function recordScrollSync(source) {
 }
 
 function handlePaneScroll(pane, info) {
+  const { topLine, ratio } = info || {};
+  // Outline highlight tracks editor scroll directly — independent of preview
+  // sync gating so the active heading stays correct even while the user is
+  // typing.
+  if (typeof topLine === 'number') setActiveOutlineLine(topLine);
+
   if (viewMode !== 'split' || !pane.previewContainer) return;
   // Skip preview sync while we're absorbing the editor-scroll burst that
   // immediately follows a doc-change. Otherwise the preview jitters with
@@ -526,7 +567,6 @@ function handlePaneScroll(pane, info) {
   if (Date.now() < typingLockoutUntil) return;
   if (!shouldHandleScroll('editor')) return;
   recordScrollSync('editor');
-  const { topLine, ratio } = info || {};
   if (typeof topLine === 'number') {
     syncPreviewToLine(pane.previewContainer, topLine);
   } else if (typeof ratio === 'number') {
@@ -598,6 +638,7 @@ function handleTabChange(tab) {
     pane.editorView = null;
     pane.filePath = null;
     pane.content = '';
+    clearOutline();
     return;
   }
 
@@ -626,6 +667,9 @@ function handleTabChange(tab) {
 
   // Update AI doc context
   updateDocContext(tab.path, tab.content);
+
+  // Refresh outline for the newly active document
+  updateOutline(tab.content);
 
   // Focus editor after tab switch
   if (view) view.focus();
