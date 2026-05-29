@@ -476,6 +476,10 @@ function handlePaneContentChange(pane, newContent) {
     // delete, normal typing). Marking 'editor' as the recent sync source
     // makes handlePreviewScroll's lockout swallow that bounce.
     recordScrollSync('editor');
+    // Also gate editor→preview sync for a short window. CM reflows line
+    // wrap and may scrollIntoView the cursor on each keystroke, which
+    // would otherwise drive syncPreviewToLine and shake the preview.
+    typingLockoutUntil = Date.now() + TYPING_PREVIEW_SYNC_LOCKOUT_MS;
     const prevScrollTop = pane.previewContainer.scrollTop;
     renderMarkdown(newContent, basePath, pane.previewContainer);
     // Preserve preview scroll position across re-render so the preview
@@ -493,6 +497,15 @@ const SCROLL_LOCKOUT_MS = 100;
 let lastScrollSyncTime = 0;
 let lastScrollSyncSource = null;
 
+// Separate gate for editor scrolls that fire as side-effects of typing
+// (line-wrap reflow, cursor scrollIntoView, etc.). Without this, every
+// keystroke nudges the preview via syncPreviewToLine and the preview
+// visually jitters. Tuned long enough to absorb the burst that follows
+// a single character insert but short enough that the user's own scroll
+// resumes syncing immediately after they stop typing.
+const TYPING_PREVIEW_SYNC_LOCKOUT_MS = 250;
+let typingLockoutUntil = 0;
+
 function shouldHandleScroll(source) {
   if (lastScrollSyncSource && lastScrollSyncSource !== source) {
     if (Date.now() - lastScrollSyncTime < SCROLL_LOCKOUT_MS) return false;
@@ -507,6 +520,10 @@ function recordScrollSync(source) {
 
 function handlePaneScroll(pane, info) {
   if (viewMode !== 'split' || !pane.previewContainer) return;
+  // Skip preview sync while we're absorbing the editor-scroll burst that
+  // immediately follows a doc-change. Otherwise the preview jitters with
+  // every keystroke.
+  if (Date.now() < typingLockoutUntil) return;
   if (!shouldHandleScroll('editor')) return;
   recordScrollSync('editor');
   const { topLine, ratio } = info || {};
