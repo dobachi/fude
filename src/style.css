@@ -641,13 +641,42 @@ body {
 }
 
 .pane.view-split .editor-pane {
-  flex: 1;
+  /* Width is driven by --editor-pane-width (set by the resizer below).
+     Defaults to 50% so the split starts balanced. min-width keeps both
+     panes usable when dragged toward an edge. */
+  flex: 0 0 var(--editor-pane-width, 50%);
   border-right: var(--pane-border);
+  min-width: 100px;
+}
+
+.pane.view-split .editor-preview-resizer {
+  flex: 0 0 4px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 5;
+  user-select: none;
+}
+.pane.view-split .editor-preview-resizer::after {
+  /* Slightly larger invisible hit zone for easier grabbing. */
+  content: '';
+  position: absolute;
+  inset: 0 -3px;
+}
+.pane.view-split .editor-preview-resizer:hover,
+.pane.view-split .editor-preview-resizer.resizing {
+  background: var(--accent, #007acc);
 }
 
 .pane.view-split .preview-pane {
   display: block;
   flex: 1;
+  min-width: 100px;
+}
+
+/* Hide the resizer when only one side is shown. */
+.pane:not(.view-split) .editor-preview-resizer {
+  display: none;
 }
 
 /* ===== Editor (CodeMirror container) ===== */

@@ -143,7 +143,10 @@ function doSplit(cssClass) {
   const el = document.createElement('div');
   el.className = 'pane view-split';
   el.dataset.paneId = paneId;
-  el.innerHTML = '<div class="editor-pane"></div><div class="preview-pane"></div>';
+  el.innerHTML =
+    '<div class="editor-pane"></div>' +
+    '<div class="editor-preview-resizer" role="separator" aria-orientation="vertical" aria-label="Resize editor / preview"></div>' +
+    '<div class="preview-pane"></div>';
   workspace.appendChild(el);
 
   // Drag resize

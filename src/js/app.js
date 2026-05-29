@@ -113,6 +113,7 @@ function dirnameOf(path) {
 
 const SIDEBAR_SPLIT_KEY = 'fude.sidebarSplit';
 const SIDEBAR_WIDTH_KEY = 'fude.sidebarWidth';
+const EDITOR_PREVIEW_RATIO_KEY = 'fude.editorPreviewRatio';
 
 /**
  * Set up the drag handle between #file-tree and #outline-section. The split
@@ -188,6 +189,106 @@ function initSidebarResizer() {
 function getSidebarHeaderHeight() {
   const header = document.getElementById('sidebar-header');
   return header ? header.getBoundingClientRect().height : 0;
+}
+
+/**
+ * Apply the persisted editor/preview ratio (0..1) to all panes via a global
+ * CSS variable. A single value is shared across panes by design; per-pane
+ * splits drift the user's mental model and add little for a markdown editor.
+ */
+function applySavedEditorPreviewRatio() {
+  try {
+    const raw = localStorage.getItem(EDITOR_PREVIEW_RATIO_KEY);
+    const ratio = parseFloat(raw);
+    if (Number.isFinite(ratio) && ratio > 0 && ratio < 1) {
+      document.documentElement.style.setProperty(
+        '--editor-pane-width',
+        `${(ratio * 100).toFixed(2)}%`,
+      );
+    }
+  } catch {
+    /* localStorage unavailable — keep CSS default */
+  }
+}
+
+/**
+ * Drag the vertical bar between editor and preview inside any pane via
+ * event delegation. Drag updates --editor-pane-width as pixels for smooth
+ * motion; on release we convert to a percent ratio and persist it.
+ * Double-click on the resizer resets to the 50/50 default.
+ */
+function initEditorPreviewResizer() {
+  applySavedEditorPreviewRatio();
+
+  document.addEventListener('mousedown', (e) => {
+    const resizer = e.target.closest && e.target.closest('.editor-preview-resizer');
+    if (!resizer) return;
+    const pane = resizer.closest('.pane');
+    if (!pane || !pane.classList.contains('view-split')) return;
+    if (e.button !== 0) return;
+
+    const editorEl = pane.querySelector('.editor-pane');
+    const previewEl = pane.querySelector('.preview-pane');
+    if (!editorEl || !previewEl) return;
+
+    e.preventDefault();
+    const startX = e.clientX;
+    const startEditorWidth = editorEl.getBoundingClientRect().width;
+    const paneRect = pane.getBoundingClientRect();
+    const resizerWidth = resizer.getBoundingClientRect().width;
+    const MIN_SIDE_PX = 100;
+    const maxEditorWidth = paneRect.width - resizerWidth - MIN_SIDE_PX;
+
+    resizer.classList.add('resizing');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMove = (mv) => {
+      const next = Math.max(
+        MIN_SIDE_PX,
+        Math.min(maxEditorWidth, startEditorWidth + (mv.clientX - startX)),
+      );
+      // Pixels during drag for snappy feedback; we convert to % on release.
+      document.documentElement.style.setProperty('--editor-pane-width', `${next}px`);
+    };
+    const onUp = () => {
+      resizer.classList.remove('resizing');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+
+      // Save as a ratio so the split survives window/pane resizes.
+      const finalEditor = editorEl.getBoundingClientRect().width;
+      const paneWidth = pane.getBoundingClientRect().width;
+      if (paneWidth > 0) {
+        const ratio = finalEditor / paneWidth;
+        document.documentElement.style.setProperty(
+          '--editor-pane-width',
+          `${(ratio * 100).toFixed(2)}%`,
+        );
+        try {
+          localStorage.setItem(EDITOR_PREVIEW_RATIO_KEY, String(ratio));
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  // Double-click on the resizer resets to the default 50/50.
+  document.addEventListener('dblclick', (e) => {
+    const resizer = e.target.closest && e.target.closest('.editor-preview-resizer');
+    if (!resizer) return;
+    document.documentElement.style.removeProperty('--editor-pane-width');
+    try {
+      localStorage.removeItem(EDITOR_PREVIEW_RATIO_KEY);
+    } catch {
+      /* ignore */
+    }
+  });
 }
 
 /**
@@ -339,6 +440,11 @@ async function init() {
   // Sidebar width resizer: drag the right edge of the sidebar to change
   // its horizontal width. Also persisted.
   initSidebarWidthResizer();
+
+  // Editor↔Preview resizer: drag the thin bar between the editor and the
+  // preview inside any pane. Uses event delegation so dynamically created
+  // panes work without extra wiring.
+  initEditorPreviewResizer();
 
   // Tab change callback
   setTabChangeCallback(handleTabChange);
