@@ -166,7 +166,10 @@ export async function aiChatStream(messages, model, onChunk, onDone, onError, si
 
       await internals.invoke('ai_chat_stream', { messages, model, requestId });
     } catch (err) {
-      onError(err);
+      // Tauri command errors arrive as plain strings (the Err(String) value
+      // from #[tauri::command]), not Error instances. Wrap so consumers can
+      // safely read .message instead of getting "undefined".
+      onError(toError(err));
     }
   } else {
     // Browser mode: SSE via fetch
@@ -216,7 +219,24 @@ export async function aiChatStream(messages, model, onChunk, onDone, onError, si
       }
       onDone();
     } catch (err) {
-      if (err.name !== 'AbortError') onError(err);
+      if (err.name !== 'AbortError') onError(toError(err));
     }
+  }
+}
+
+/**
+ * Normalize a Tauri / fetch rejection to an Error instance. Tauri's
+ * #[command] error path serializes to a plain string, which makes
+ * `err.message` undefined downstream — surface the string as the message
+ * instead so error UI shows what the backend actually said.
+ */
+function toError(err) {
+  if (err instanceof Error) return err;
+  if (typeof err === 'string') return new Error(err);
+  if (err && typeof err === 'object' && 'message' in err) return new Error(String(err.message));
+  try {
+    return new Error(JSON.stringify(err));
+  } catch {
+    return new Error(String(err));
   }
 }

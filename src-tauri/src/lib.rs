@@ -469,37 +469,16 @@ fn save_config(config: Config) -> Result<(), String> {
     let dir = ensure_config_dir()?;
     let path = dir.join("config.json");
 
+    // Key management is the exclusive responsibility of set_api_key /
+    // delete_api_key. save_config must never read, write, or "preserve" the
+    // key through key storage — earlier attempts to be helpful here ended
+    // up routing the key back through a broken keyring and clobbering the
+    // copy that set_api_key had just written. Always carry forward whatever
+    // is already on disk so this command is a no-op for the key field.
     let mut config_to_save = config;
-
-    // The settings UI clears `openrouter_api_key` to None on the JS side
-    // immediately after calling `set_api_key`, so by the time save_config
-    // runs the incoming key is None even when one is currently in storage.
-    // Preserve whatever is already in config.json so we don't clobber a
-    // key that ConfigFallbackStorage just wrote (the keyring path is
-    // unaffected because the key never lives in config.json there).
-    // Explicit deletion still flows through `delete_api_key`.
-    if config_to_save.openrouter_api_key.is_none() {
-        if let Ok(existing) = load_config() {
-            if let Some(key) = existing.openrouter_api_key {
-                if !key.is_empty() {
-                    config_to_save.openrouter_api_key = Some(key);
-                }
-            }
-        }
-    }
-
-    // If an API key is provided (either fresh from the UI or preserved
-    // from disk above), make sure it is in key storage.
-    if let Some(ref key) = config_to_save.openrouter_api_key {
-        if !key.is_empty() {
-            let storage = get_key_storage();
-            storage.set_key(key)?;
-            // If keyring succeeded, don't store in config file
-            if storage.storage_type() == "keychain" {
-                config_to_save.openrouter_api_key = None;
-            }
-        }
-    }
+    config_to_save.openrouter_api_key = load_config()
+        .ok()
+        .and_then(|existing| existing.openrouter_api_key);
 
     let content = serde_json::to_string_pretty(&config_to_save)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
