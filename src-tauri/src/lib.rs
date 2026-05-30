@@ -118,7 +118,41 @@ fn init_key_storage() {
 }
 
 fn get_api_key() -> Result<Option<String>, String> {
-    get_key_storage().get_key()
+    // Check the primary storage chosen at startup first.
+    let primary = get_key_storage();
+    if let Some(key) = primary.get_key()? {
+        if !key.is_empty() {
+            return Ok(Some(key));
+        }
+    }
+    // Fall back to looking directly at config.json. Covers the case where
+    // a previous set_api_key call fell back to file storage because the
+    // OS keychain accepted the write but couldn't return it on read-back
+    // (observed on some Windows Credential Manager configurations).
+    let path = config_dir()?.join("config.json");
+    if path.exists() {
+        let fallback = key_storage::ConfigFallbackStorage::new(path);
+        return fallback.get_key();
+    }
+    Ok(None)
+}
+
+/// Locate the API key and report which storage type actually returned it.
+/// Used by `get_config` so the UI shows the right "Stored in" hint.
+fn locate_api_key() -> (bool, &'static str) {
+    let primary = get_key_storage();
+    if matches!(primary.get_key(), Ok(Some(ref k)) if !k.is_empty()) {
+        return (true, primary.storage_type());
+    }
+    if let Ok(path) = config_dir().map(|d| d.join("config.json")) {
+        if path.exists() {
+            let fallback = key_storage::ConfigFallbackStorage::new(path);
+            if matches!(fallback.get_key(), Ok(Some(ref k)) if !k.is_empty()) {
+                return (true, "config_file");
+            }
+        }
+    }
+    (false, primary.storage_type())
 }
 
 fn config_dir() -> Result<PathBuf, String> {
@@ -403,8 +437,10 @@ fn load_config() -> Result<Config, String> {
 #[tauri::command]
 fn get_config() -> Result<ConfigResponse, String> {
     let config = load_config()?;
-    let storage = get_key_storage();
-    let has_api_key = storage.get_key()?.is_some();
+    // locate_api_key checks the primary storage and then falls back to
+    // config.json, so a key that was rescued by the set_api_key fallback
+    // path still shows up as present here with the right storage label.
+    let (has_api_key, storage_type) = locate_api_key();
     // Migrate legacy `vim_mode: bool` to `key_mode: String` for the response
     let key_mode = config.key_mode.clone().unwrap_or_else(|| {
         if config.vim_mode {
@@ -419,7 +455,7 @@ fn get_config() -> Result<ConfigResponse, String> {
         font_size: config.font_size,
         key_mode,
         has_api_key,
-        api_key_storage: storage.storage_type().to_string(),
+        api_key_storage: storage_type.to_string(),
         ai_model: config.ai_model,
         sidebar_sort: config
             .sidebar_sort
@@ -597,30 +633,43 @@ fn browse_dir(path: String) -> Result<BrowseResult, String> {
 #[tauri::command]
 fn set_api_key(key: String) -> Result<String, String> {
     let storage = get_key_storage();
+    let primary_type = storage.storage_type();
     storage.set_key(&key)?;
 
     // Verify the write actually persisted. Some OS credential stores
     // (notably certain Windows Credential Manager configurations) accept
     // set_password but never return the credential on subsequent
-    // get_password calls — the previous behaviour silently reported
-    // success and the user was left with no working key. Surface that as
-    // a real error so the UI can react.
-    match storage.get_key()? {
-        Some(stored) if stored == key => { /* verified */ }
-        _ => {
-            // Try to clean up the half-written entry so it doesn't linger.
-            let _ = storage.delete_key();
-            return Err(format!(
-                "Key storage ({}) accepted the key but failed to return it on read-back. \
-                 This usually means your OS keychain / Credential Manager is read-only or \
-                 sandboxed. Restart the app to fall back to file storage.",
-                storage.storage_type()
-            ));
+    // get_password calls. If that happens, automatically fall back to
+    // file storage so the user's save isn't lost.
+    let verified = matches!(storage.get_key(), Ok(Some(ref stored)) if stored == &key);
+    if !verified {
+        // Clean up the orphan keychain entry that didn't round-trip.
+        let _ = storage.delete_key();
+
+        // Write directly to config.json via ConfigFallbackStorage.
+        ensure_config_dir()?;
+        let path = config_dir()?.join("config.json");
+        let fallback = key_storage::ConfigFallbackStorage::new(path.clone());
+        fallback.set_key(&key)?;
+
+        // Verify the fallback worked too. If both fail we genuinely
+        // cannot persist the key.
+        match fallback.get_key()? {
+            Some(stored) if stored == key => {}
+            _ => {
+                return Err(format!(
+                    "Both {} and config file storage failed to retain the API key. \
+                     Check filesystem permissions on the config directory.",
+                    primary_type
+                ));
+            }
         }
+
+        return Ok("config_file".to_string());
     }
 
-    // If using keychain, clear the key from config.json
-    if storage.storage_type() == "keychain" {
+    // Primary verified — if it's keychain, scrub any legacy plaintext from config.json
+    if primary_type == "keychain" {
         let path = config_dir()?.join("config.json");
         if path.exists() {
             let content =
@@ -635,7 +684,7 @@ fn set_api_key(key: String) -> Result<String, String> {
         }
     }
 
-    Ok(storage.storage_type().to_string())
+    Ok(primary_type.to_string())
 }
 
 #[tauri::command]
