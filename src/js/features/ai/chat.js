@@ -3,6 +3,7 @@ import { aiChatStream, getConfig } from '../../backend.js';
 import { buildMessages, DEFAULT_MODEL } from './openrouter-client.js';
 import { loadCatalogue, findModelById, resolveModel, persistModelChoice } from './model-store.js';
 import { openModelPicker } from './model-picker-modal.js';
+import { openApplyModal } from './apply-modal.js';
 import { saveChatHistory } from './chat-history.js';
 import { getEditorContext } from './context.js';
 import markdownit from 'markdown-it';
@@ -255,6 +256,7 @@ function renderMessages(container) {
     wrapper.className = `ai-msg ${msg.role}`;
     if (msg.role === 'assistant') {
       wrapper.innerHTML = md.render(msg.content);
+      enhanceCodeBlocksForApply(wrapper);
       wrapper.appendChild(createCopyButton(msg.content));
     } else {
       wrapper.textContent = msg.content;
@@ -265,6 +267,54 @@ function renderMessages(container) {
   container.scrollTop = container.scrollHeight;
 }
 
+/**
+ * Attach an "Apply to document" toolbar to every fenced code block in the
+ * given assistant message. Idempotent — running twice on the same element
+ * doesn't add duplicate buttons. The button reads the code block's
+ * textContent at click time so an already-streamed final result is used.
+ */
+function enhanceCodeBlocksForApply(wrapper) {
+  if (!wrapper) return;
+  const blocks = wrapper.querySelectorAll('pre');
+  blocks.forEach((pre) => {
+    if (pre.dataset.applyEnhanced === '1') return;
+    pre.dataset.applyEnhanced = '1';
+    const toolbar = document.createElement('div');
+    toolbar.className = 'ai-code-toolbar';
+    const applyBtn = document.createElement('button');
+    applyBtn.className = 'ai-code-apply';
+    applyBtn.type = 'button';
+    applyBtn.textContent = 'Apply to document';
+    applyBtn.title = 'Insert this revision into the editor';
+    applyBtn.addEventListener('click', async () => {
+      const text = readCodeBlockText(pre);
+      if (!text) return;
+      try {
+        await openApplyModal({ newText: text, getActiveView });
+      } catch (err) {
+        console.error('Apply modal failed:', err);
+      }
+    });
+    toolbar.appendChild(applyBtn);
+    pre.appendChild(toolbar);
+  });
+}
+
+/**
+ * Pull the code-block body out of a markdown-it rendered `<pre>` element.
+ * markdown-it wraps the content in a single `<code>` so its textContent is
+ * the unescaped source the model emitted.
+ */
+function readCodeBlockText(pre) {
+  if (!pre) return '';
+  const code = pre.querySelector('code');
+  const raw = code ? code.textContent : pre.textContent;
+  if (!raw) return '';
+  // Strip a single trailing newline that markdown-it always appends so we
+  // don't insert an extra blank line into the document.
+  return raw.endsWith('\n') ? raw.slice(0, -1) : raw;
+}
+
 async function sendMessage(text, messagesEl) {
   if (activeAbort) activeAbort.abort();
   activeAbort = new AbortController();
@@ -273,17 +323,10 @@ async function sendMessage(text, messagesEl) {
   chatMessages.push({ role: 'user', content: text });
 
   // Build context from current editor
-  let systemPrompt = 'You are a helpful writing assistant for a Markdown editor called Fude.';
-
-  // Add selected text context
-  if (currentSelectedText) {
-    systemPrompt += `\n\nThe user has selected the following text in the editor:\n\`\`\`\n${currentSelectedText}\n\`\`\``;
-  }
-
-  // Add full document context if enabled
-  if (includeDocContext && currentDocContent) {
-    systemPrompt += `\n\nThe user is editing the following document:\n\`\`\`markdown\n${currentDocContent}\n\`\`\``;
-  }
+  let systemPrompt = buildChatSystemPrompt({
+    selectedText: currentSelectedText,
+    docContent: includeDocContext ? currentDocContent : '',
+  });
 
   const messages = buildMessages(systemPrompt, chatMessages);
 
@@ -326,6 +369,10 @@ async function sendMessage(text, messagesEl) {
           renderTimer = null;
         }
         renderStreaming();
+        // Add Apply buttons to any fenced code blocks in the final output.
+        // We deliberately skip this during streaming chunks: the markup is
+        // unstable mid-stream and the user can't apply a half-written block.
+        enhanceCodeBlocksForApply(assistantDiv);
         assistantDiv.appendChild(createCopyButton(result));
         chatMessages.push({ role: 'assistant', content: result });
         // Auto-save chat history
@@ -359,4 +406,41 @@ async function sendMessage(text, messagesEl) {
 
 export function clearChat() {
   chatMessages = [];
+}
+
+/**
+ * Assemble the system prompt sent to the model. Kept pure & exported so the
+ * unit tests can pin down the wording the chat panel relies on.
+ *
+ * When a selection or full document context is supplied, we tell the model
+ * about the Apply-button protocol: emit the revised text inside a fenced
+ * markdown code block. The chat UI scans for those blocks and surfaces
+ * "Apply to document" buttons, so the model's output has to be machine
+ * extractable. The hint is omitted when there's no editor context — pure
+ * Q&A flows don't need it.
+ */
+export function buildChatSystemPrompt({ selectedText = '', docContent = '' } = {}) {
+  let prompt = 'You are a helpful writing assistant for a Markdown editor called Fude.';
+
+  if (selectedText) {
+    prompt += `\n\nThe user has selected the following text in the editor:\n\`\`\`\n${selectedText}\n\`\`\``;
+  }
+
+  if (docContent) {
+    prompt += `\n\nThe user is editing the following document:\n\`\`\`markdown\n${docContent}\n\`\`\``;
+  }
+
+  if (selectedText || docContent) {
+    prompt +=
+      '\n\nWhen the user asks you to edit, rewrite, expand, summarise, ' +
+      'translate, or otherwise change the document or selection, respond ' +
+      'with a short explanation followed by the **revised text inside a ' +
+      'single fenced code block tagged ```markdown**. The editor will ' +
+      'show an "Apply to document" button on that block. Do not include ' +
+      'the surrounding unchanged text — only the part that should replace ' +
+      'the current selection (or the whole document if no selection). For ' +
+      'pure questions or discussion, answer normally without a code block.';
+  }
+
+  return prompt;
 }
