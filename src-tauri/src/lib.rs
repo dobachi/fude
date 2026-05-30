@@ -76,7 +76,17 @@ pub struct Config {
     /// "normal" | "vim" | "emacs"
     pub key_mode: Option<String>,
     pub openrouter_api_key: Option<String>,
+    /// Global default model used by any AI feature that doesn't have a
+    /// per-task override below. Falls back to a hardcoded default in JS
+    /// when unset.
     pub ai_model: Option<String>,
+    /// Per-task overrides. When None, the feature uses `ai_model`.
+    #[serde(default)]
+    pub ai_model_chat: Option<String>,
+    #[serde(default)]
+    pub ai_model_composer: Option<String>,
+    #[serde(default)]
+    pub ai_model_inline: Option<String>,
     pub sidebar_sort: Option<String>,
     pub sidebar_show_all_files: Option<bool>,
 }
@@ -90,6 +100,9 @@ pub struct ConfigResponse {
     pub has_api_key: bool,
     pub api_key_storage: String,
     pub ai_model: Option<String>,
+    pub ai_model_chat: Option<String>,
+    pub ai_model_composer: Option<String>,
+    pub ai_model_inline: Option<String>,
     pub sidebar_sort: String,
     pub sidebar_show_all_files: bool,
 }
@@ -204,6 +217,9 @@ impl Default for Config {
             key_mode: None,
             openrouter_api_key: None,
             ai_model: None,
+            ai_model_chat: None,
+            ai_model_composer: None,
+            ai_model_inline: None,
             sidebar_sort: None,
             sidebar_show_all_files: None,
         }
@@ -457,6 +473,9 @@ fn get_config() -> Result<ConfigResponse, String> {
         has_api_key,
         api_key_storage: storage_type.to_string(),
         ai_model: config.ai_model,
+        ai_model_chat: config.ai_model_chat,
+        ai_model_composer: config.ai_model_composer,
+        ai_model_inline: config.ai_model_inline,
         sidebar_sort: config
             .sidebar_sort
             .unwrap_or_else(|| "name_asc".to_string()),
@@ -1182,6 +1201,9 @@ mod tests {
             key_mode: Some("vim".to_string()),
             openrouter_api_key: Some("sk-test-key".to_string()),
             ai_model: Some("openai/gpt-4o".to_string()),
+            ai_model_chat: Some("anthropic/claude-sonnet-4.5".to_string()),
+            ai_model_composer: None,
+            ai_model_inline: Some("google/gemini-2.5-flash".to_string()),
             sidebar_sort: Some("modified_desc".to_string()),
             sidebar_show_all_files: Some(true),
         };
@@ -1196,6 +1218,15 @@ mod tests {
         assert!(restored.vim_mode);
         assert_eq!(restored.openrouter_api_key.as_deref(), Some("sk-test-key"));
         assert_eq!(restored.ai_model.as_deref(), Some("openai/gpt-4o"));
+        assert_eq!(
+            restored.ai_model_chat.as_deref(),
+            Some("anthropic/claude-sonnet-4.5")
+        );
+        assert!(restored.ai_model_composer.is_none());
+        assert_eq!(
+            restored.ai_model_inline.as_deref(),
+            Some("google/gemini-2.5-flash")
+        );
         assert_eq!(restored.sidebar_sort.as_deref(), Some("modified_desc"));
         assert_eq!(restored.sidebar_show_all_files, Some(true));
     }

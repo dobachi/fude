@@ -1,8 +1,9 @@
 // composer.js - Composer UI: floating popup for AI text transformation
 import { aiChatStream } from '../../backend.js';
-import { buildMessages, composerSystemPrompt, DEFAULT_MODEL } from './openrouter-client.js';
+import { buildMessages, composerSystemPrompt } from './openrouter-client.js';
 import { getEditorContext } from './context.js';
 import { getConfig } from '../../backend.js';
+import { resolveModel } from './model-store.js';
 
 let composerEl = null;
 let activeAbort = null;
@@ -130,7 +131,7 @@ async function executeAction(view, ctx, action, customInstruction = '') {
     config = {};
   }
 
-  const model = config.ai_model || DEFAULT_MODEL;
+  const model = resolveModel(config, 'composer');
   const systemPrompt = composerSystemPrompt(action, customInstruction);
   const messages = buildMessages(systemPrompt, [{ role: 'user', content: ctx.selectedText }]);
 

@@ -1,7 +1,8 @@
 // chat.js - AI Chat panel UI
-import { aiChatStream, getConfig, saveConfig } from '../../backend.js';
+import { aiChatStream, getConfig } from '../../backend.js';
 import { buildMessages, DEFAULT_MODEL } from './openrouter-client.js';
-import { createModelPicker } from './model-picker.js';
+import { loadCatalogue, findModelById, resolveModel, persistModelChoice } from './model-store.js';
+import { openModelPicker } from './model-picker-modal.js';
 import { saveChatHistory } from './chat-history.js';
 import { getEditorContext } from './context.js';
 import markdownit from 'markdown-it';
@@ -35,7 +36,9 @@ export async function initChat(containerEl, opts) {
   } catch {
     config = {};
   }
-  currentModel = config.ai_model || DEFAULT_MODEL;
+  // Resolve via the model store so per-task ('chat') override wins over
+  // the global default and finally the hardcoded DEFAULT_MODEL.
+  currentModel = resolveModel(config, 'chat');
 
   renderChatUI();
 }
@@ -143,18 +146,55 @@ function renderChatUI() {
 async function setupModelBar(container) {
   container.innerHTML = '';
 
-  const picker = await createModelPicker(currentModel, async (modelId) => {
-    currentModel = modelId;
-    // Persist model choice
+  // Model trigger: a compact button showing the current model. Click opens
+  // the searchable Cmd+P style picker (see model-picker-modal.js).
+  const modelBtn = document.createElement('button');
+  modelBtn.className = 'ai-model-btn';
+  modelBtn.title = 'Change chat model';
+  container.appendChild(modelBtn);
+
+  const refreshModelLabel = async () => {
+    let label = currentModel || DEFAULT_MODEL;
     try {
-      const config = await getConfig();
-      config.ai_model = modelId;
-      await saveConfig(config);
+      const catalogue = await loadCatalogue();
+      const m = findModelById(catalogue, currentModel);
+      if (m && m.name) label = m.name;
     } catch {
-      /* ignore */
+      /* fall through with id as label */
+    }
+    modelBtn.textContent = `Model: ${label}`;
+  };
+  refreshModelLabel();
+
+  modelBtn.addEventListener('click', async () => {
+    const picked = await openModelPicker({
+      currentId: currentModel,
+      title: 'Chat model',
+      // Setting to null clears the per-task override and lets the chat
+      // fall back to the global default model.
+      allowUnset: true,
+    });
+    if (picked === undefined) return; // (cannot happen, but defensive)
+    try {
+      await persistModelChoice('chat', picked);
+      // If we cleared the per-task choice, fall back to whatever the
+      // resolution chain now picks (global default → hardcoded).
+      if (picked) {
+        currentModel = picked;
+      } else {
+        let cfg;
+        try {
+          cfg = await getConfig();
+        } catch {
+          cfg = {};
+        }
+        currentModel = resolveModel(cfg, 'chat');
+      }
+      refreshModelLabel();
+    } catch (e) {
+      console.error('Failed to save model choice:', e);
     }
   });
-  container.appendChild(picker);
 
   // Doc context toggle button
   const docToggle = document.createElement('button');

@@ -2,7 +2,7 @@
 import { ViewPlugin, Decoration, WidgetType, EditorView, keymap } from '@codemirror/view';
 import { StateField, StateEffect } from '@codemirror/state';
 import { aiChatStream, getConfig } from '../../backend.js';
-import { DEFAULT_MODEL } from './openrouter-client.js';
+import { resolveModel } from './model-store.js';
 
 const DEBOUNCE_MS = 800;
 const CONTEXT_CHARS = 500;
@@ -111,7 +111,7 @@ export function inlineCompletionExtension() {
 
         if (!config.features?.ai_copilot || !config.has_api_key) return;
 
-        const model = config.ai_model || DEFAULT_MODEL;
+        const model = resolveModel(config, 'inline');
         abortController = new AbortController();
 
         const messages = [

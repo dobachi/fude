@@ -3,6 +3,9 @@ import { applyTheme, getCurrentTheme } from './core/theme.js';
 import { setFontSize, getFontSize } from './core/editor.js';
 import { setMode, getMode } from './core/keymode.js';
 import * as backend from './backend.js';
+import { openModelPicker } from './features/ai/model-picker-modal.js';
+import { loadCatalogue, findModelById, persistModelChoice } from './features/ai/model-store.js';
+import { DEFAULT_MODEL } from './features/ai/openrouter-client.js';
 
 let settingsPanel = null;
 
@@ -55,6 +58,29 @@ export async function openSettings() {
           <input type="password" id="setting-api-key" value="" placeholder="${config.has_api_key ? '••••••••  (saved)' : 'sk-or-...'}" />
           ${config.has_api_key ? `<small class="setting-hint">Stored in: ${config.api_key_storage === 'keychain' ? 'OS Keychain' : 'Config file'}</small>` : ''}
         </div>
+        <div class="setting-group setting-models">
+          <label>AI Models</label>
+          <div class="model-row" data-feature="default">
+            <span class="model-row-label">Default</span>
+            <button class="model-row-btn" type="button">…</button>
+          </div>
+          <div class="model-row" data-feature="chat">
+            <span class="model-row-label">Chat</span>
+            <button class="model-row-btn" type="button">…</button>
+            <button class="model-row-reset icon-btn" type="button" title="Use default" aria-label="Use default">↺</button>
+          </div>
+          <div class="model-row" data-feature="composer">
+            <span class="model-row-label">Composer</span>
+            <button class="model-row-btn" type="button">…</button>
+            <button class="model-row-reset icon-btn" type="button" title="Use default" aria-label="Use default">↺</button>
+          </div>
+          <div class="model-row" data-feature="inline">
+            <span class="model-row-label">Inline</span>
+            <button class="model-row-btn" type="button">…</button>
+            <button class="model-row-reset icon-btn" type="button" title="Use default" aria-label="Use default">↺</button>
+          </div>
+          <small class="setting-hint">Per-task selections fall back to the default if left empty.</small>
+        </div>
       </div>
       <div class="settings-footer">
         <button class="btn-save-settings">Save</button>
@@ -85,6 +111,10 @@ export async function openSettings() {
     .querySelector('#setting-keymode')
     .addEventListener('change', (e) => setMode(e.target.value));
   settingsPanel.querySelector('.btn-save-settings').addEventListener('click', saveSettings);
+
+  // Model rows: each row shows the current selection (or "Use default" for
+  // unset per-task rows) and opens the picker on click.
+  setupModelRows(config).catch((e) => console.error('Model rows setup failed:', e));
 
   const handleEsc = (e) => {
     if (e.key === 'Escape') {
@@ -148,4 +178,97 @@ export function closeSettings() {
     settingsPanel.remove();
     settingsPanel = null;
   }
+}
+
+// ── Model rows ────────────────────────────────────────────────────────────
+
+const MODEL_FEATURE_FIELDS = {
+  default: 'ai_model',
+  chat: 'ai_model_chat',
+  composer: 'ai_model_composer',
+  inline: 'ai_model_inline',
+};
+
+const MODEL_TITLES = {
+  default: 'Default model',
+  chat: 'Chat model',
+  composer: 'Composer model',
+  inline: 'Inline completion model',
+};
+
+async function setupModelRows(initialConfig) {
+  if (!settingsPanel) return;
+  // Snapshot the config locally so a Save in another tab doesn't surprise us.
+  let liveConfig = initialConfig ? { ...initialConfig } : {};
+
+  // Preload the model catalogue so labels resolve without flicker.
+  let catalogue = [];
+  try {
+    catalogue = await loadCatalogue();
+  } catch {
+    catalogue = [];
+  }
+
+  const rows = settingsPanel.querySelectorAll('.model-row');
+
+  const refreshAll = () => {
+    rows.forEach((row) => {
+      const feature = row.dataset.feature;
+      const field = MODEL_FEATURE_FIELDS[feature];
+      const explicit = liveConfig[field];
+      const btn = row.querySelector('.model-row-btn');
+      const reset = row.querySelector('.model-row-reset');
+      if (feature === 'default') {
+        const id = explicit || DEFAULT_MODEL;
+        const m = findModelById(catalogue, id);
+        btn.textContent = m?.name || id;
+        btn.title = id;
+      } else if (explicit) {
+        const m = findModelById(catalogue, explicit);
+        btn.textContent = m?.name || explicit;
+        btn.title = explicit;
+        if (reset) reset.classList.remove('hidden');
+      } else {
+        btn.textContent = 'Use default';
+        btn.title = '';
+        if (reset) reset.classList.add('hidden');
+      }
+    });
+  };
+  refreshAll();
+
+  rows.forEach((row) => {
+    const feature = row.dataset.feature;
+    const btn = row.querySelector('.model-row-btn');
+    const reset = row.querySelector('.model-row-reset');
+
+    btn.addEventListener('click', async () => {
+      const field = MODEL_FEATURE_FIELDS[feature];
+      const picked = await openModelPicker({
+        currentId: liveConfig[field] || (feature === 'default' ? DEFAULT_MODEL : null),
+        title: MODEL_TITLES[feature],
+        allowUnset: feature !== 'default',
+      });
+      if (picked === undefined) return; // user cancelled with Esc — leave as is
+      try {
+        await persistModelChoice(feature, picked);
+        liveConfig[field] = picked || null;
+        refreshAll();
+      } catch (e) {
+        console.error('Failed to persist model choice:', e);
+      }
+    });
+
+    if (reset) {
+      reset.addEventListener('click', async () => {
+        try {
+          await persistModelChoice(feature, null);
+          liveConfig[MODEL_FEATURE_FIELDS[feature]] = null;
+          refreshAll();
+        } catch (e) {
+          console.error('Failed to reset model choice:', e);
+        }
+      });
+    }
+  });
 }
