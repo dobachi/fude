@@ -142,21 +142,34 @@ pub fn set_dir_permissions(_path: &std::path::Path) -> Result<(), String> {
 // ─── Factory ──────────────────────────────────────────────
 
 pub fn create_storage(config_path: PathBuf) -> Box<dyn KeyStorage> {
-    // Probe keyring availability
-    let probe = keyring::Entry::new(SERVICE_NAME, "probe-test");
-    match probe {
-        Ok(entry) => {
-            // Try a set/get/delete cycle to verify keyring works
-            match entry.set_password("probe") {
-                Ok(()) => {
-                    let _ = entry.delete_credential();
-                    Box::new(KeyringStorage)
-                }
-                Err(_) => Box::new(ConfigFallbackStorage::new(config_path)),
-            }
-        }
-        Err(_) => Box::new(ConfigFallbackStorage::new(config_path)),
+    // Probe keyring availability with a full set → get → match → delete cycle.
+    // The previous version skipped the get/match step, so configurations where
+    // set_password silently succeeds but get_password never returns the value
+    // (observed on some Windows Credential Manager setups) were misclassified
+    // as keyring-capable — keys would appear to save but vanish on read.
+    // Use a probe value long enough to be representative of a real API key
+    // so size-class quirks are exercised too.
+    let probe_value = "probe-fude-keyring-roundtrip-1234567890abcdef0";
+
+    let entry = match keyring::Entry::new(SERVICE_NAME, "probe-test") {
+        Ok(e) => e,
+        Err(_) => return Box::new(ConfigFallbackStorage::new(config_path)),
+    };
+    if entry.set_password(probe_value).is_err() {
+        return Box::new(ConfigFallbackStorage::new(config_path));
     }
+    let roundtripped = match entry.get_password() {
+        Ok(v) => v,
+        Err(_) => {
+            let _ = entry.delete_credential();
+            return Box::new(ConfigFallbackStorage::new(config_path));
+        }
+    };
+    let _ = entry.delete_credential();
+    if roundtripped != probe_value {
+        return Box::new(ConfigFallbackStorage::new(config_path));
+    }
+    Box::new(KeyringStorage)
 }
 
 // ─── Tests ────────────────────────────────────────────────

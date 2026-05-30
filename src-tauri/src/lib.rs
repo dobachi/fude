@@ -599,6 +599,26 @@ fn set_api_key(key: String) -> Result<String, String> {
     let storage = get_key_storage();
     storage.set_key(&key)?;
 
+    // Verify the write actually persisted. Some OS credential stores
+    // (notably certain Windows Credential Manager configurations) accept
+    // set_password but never return the credential on subsequent
+    // get_password calls — the previous behaviour silently reported
+    // success and the user was left with no working key. Surface that as
+    // a real error so the UI can react.
+    match storage.get_key()? {
+        Some(stored) if stored == key => { /* verified */ }
+        _ => {
+            // Try to clean up the half-written entry so it doesn't linger.
+            let _ = storage.delete_key();
+            return Err(format!(
+                "Key storage ({}) accepted the key but failed to return it on read-back. \
+                 This usually means your OS keychain / Credential Manager is read-only or \
+                 sandboxed. Restart the app to fall back to file storage.",
+                storage.storage_type()
+            ));
+        }
+    }
+
     // If using keychain, clear the key from config.json
     if storage.storage_type() == "keychain" {
         let path = config_dir()?.join("config.json");
