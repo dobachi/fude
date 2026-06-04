@@ -69,6 +69,14 @@ export async function writeFile(path, content) {
   return doInvoke('write_file', { path, content });
 }
 
+export async function copyImageToAssets(srcPath, docPath) {
+  return doInvoke('copy_image_to_assets', { src_path: srcPath, doc_path: docPath });
+}
+
+export async function saveImageBytes(bytes, docPath, ext) {
+  return doInvoke('save_image_bytes', { bytes, doc_path: docPath, ext });
+}
+
 export async function writeTempFile(path, content) {
   return doInvoke('write_temp_file', { path, content });
 }

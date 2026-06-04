@@ -335,6 +335,20 @@ export function createEditor(
       document.documentElement.getAttribute('data-theme') === 'light' ? lightTheme : darkTheme,
     ),
     EditorView.lineWrapping,
+    EditorView.domEventHandlers({
+      paste(event, view) {
+        if (!_imagePasteHandler) return false;
+        const items = event.clipboardData?.items;
+        if (!items) return false;
+        const hasImage = Array.from(items).some((it) => it.type?.startsWith('image/'));
+        if (!hasImage) return false;
+        // Hand off to app.js (async). Consume the event so the raw image data
+        // isn't pasted as garbage text by the default handler.
+        event.preventDefault();
+        _imagePasteHandler(view, items);
+        return true;
+      },
+    }),
   ];
 
   // Track IME composition state to avoid RangeError during Japanese input
@@ -559,6 +573,16 @@ let _panesModule = null;
 export function registerPanesModule(mod) {
   _panesModule = mod;
   _getActivePaneView = mod.getActivePaneView;
+}
+
+// Handler invoked when an image is pasted into the editor. Set by app.js, which
+// knows the active document path. Receives (view, items: DataTransferItemList)
+// and returns true if it consumed the paste (caller then prevents default).
+let _imagePasteHandler = null;
+
+/** Register the image-paste handler. Called once from app.js. */
+export function registerImagePasteHandler(fn) {
+  _imagePasteHandler = fn;
 }
 
 // Statically import vim/emacs so they're always bundled and initialized at load.

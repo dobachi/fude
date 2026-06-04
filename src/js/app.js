@@ -13,8 +13,11 @@ import {
   scrollEditorToLine,
   jumpToLine,
   registerPanesModule,
+  registerImagePasteHandler,
 } from './core/editor.js';
 import { initOutline, updateOutline, setActiveOutlineLine, clearOutline } from './core/outline.js';
+import { isImagePath, mimeToExt, insertImageMarkdown } from './core/image-insert.js';
+import { showToast } from './core/toast.js';
 import {
   initPreview,
   renderMarkdown,
@@ -212,6 +215,28 @@ function applySavedEditorPreviewRatio() {
 }
 
 /**
+ * Copy dropped image files into the active document's `assets/` folder and
+ * insert Markdown references at the cursor. Requires the active tab to be saved
+ * (so we know where `assets/` should live).
+ */
+async function insertImageFiles(imagePaths, view) {
+  const tab = getActiveTab();
+  if (!tab || !tab.path) {
+    showToast('画像を挿入するには、先にファイルを保存してください', { type: 'error' });
+    return;
+  }
+  for (const imgPath of imagePaths) {
+    try {
+      const relPath = await backend.copyImageToAssets(imgPath, tab.path);
+      insertImageMarkdown(view, relPath);
+    } catch (e) {
+      console.error('Failed to insert image:', e);
+      showToast(`画像の挿入に失敗しました: ${imgPath}`, { type: 'error' });
+    }
+  }
+}
+
+/**
  * Drag the vertical bar between editor and preview inside any pane via
  * event delegation. Drag updates --editor-pane-width as pixels for smooth
  * motion; on release we convert to a percent ratio and persist it.
@@ -354,6 +379,39 @@ function initSidebarWidthResizer() {
       /* ignore */
     }
   });
+}
+
+/**
+ * Handle an image paste: save the clipboard image bytes into the active
+ * document's `assets/` folder and insert a Markdown reference. Registered with
+ * editor.js, which fires this when a paste contains image data.
+ */
+async function handleImagePaste(view, items) {
+  const tab = getActiveTab();
+  if (!tab || !tab.path) {
+    showToast('画像を貼り付けるには、先にファイルを保存してください', { type: 'error' });
+    return;
+  }
+  for (const item of items) {
+    if (!item.type?.startsWith('image/')) continue;
+    const file = item.getAsFile();
+    if (!file) continue;
+    try {
+      const buf = await file.arrayBuffer();
+      const bytes = Array.from(new Uint8Array(buf));
+      const relPath = await backend.saveImageBytes(bytes, tab.path, mimeToExt(item.type));
+      insertImageMarkdown(view, relPath);
+    } catch (e) {
+      console.error('Failed to paste image:', e);
+      showToast('画像の貼り付けに失敗しました', { type: 'error' });
+    }
+  }
+}
+
+// Wire the image-paste handler into the editor (Tauri only — relies on the
+// native fs commands to write into assets/).
+if (isLocalTauri()) {
+  registerImagePasteHandler(handleImagePaste);
 }
 
 // ── Initialization ─────────────────────────────────────────
@@ -602,11 +660,33 @@ async function init() {
       if (path) await openPath(path);
     });
 
-    // Open files dropped from file manager
+    // Handle files dropped from the file manager: images are inserted into the
+    // active editor, everything else opens as a tab (previous behavior).
     listen('tauri://drag-drop', async (event) => {
       const paths = event.payload?.paths;
       if (!paths || paths.length === 0) return;
-      for (const filePath of paths.slice(0, 20)) {
+
+      const view = currentView();
+      const images = view ? paths.filter(isImagePath) : [];
+      const others = view ? paths.filter((p) => !isImagePath(p)) : paths;
+
+      if (images.length > 0) {
+        // Move the cursor to the drop location when we can map it; otherwise
+        // fall back to inserting at the current cursor position.
+        const pos = event.payload?.position;
+        if (pos) {
+          try {
+            const dpr = window.devicePixelRatio || 1;
+            const offset = view.posAtCoords({ x: pos.x / dpr, y: pos.y / dpr });
+            if (offset != null) view.dispatch({ selection: { anchor: offset } });
+          } catch {
+            /* best-effort: keep current cursor */
+          }
+        }
+        await insertImageFiles(images, view);
+      }
+
+      for (const filePath of others.slice(0, 20)) {
         await openPath(filePath);
       }
     });

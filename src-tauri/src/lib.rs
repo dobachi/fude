@@ -407,6 +407,89 @@ fn write_file(path: String, content: String) -> Result<(), String> {
     fs::write(&path, content).map_err(|e| format!("Failed to write file '{}': {}", path, e))
 }
 
+/// Returns the `assets/` directory next to the given document, creating it if needed.
+fn assets_dir_for_doc(doc_path: &str) -> Result<PathBuf, String> {
+    let parent = Path::new(doc_path)
+        .parent()
+        .ok_or_else(|| format!("Cannot determine parent directory of '{}'", doc_path))?;
+    let assets = parent.join("assets");
+    fs::create_dir_all(&assets).map_err(|e| {
+        format!(
+            "Failed to create assets directory '{}': {}",
+            assets.display(),
+            e
+        )
+    })?;
+    Ok(assets)
+}
+
+/// Returns a non-colliding path inside `assets_dir` for `basename` (e.g. "photo.png").
+/// If the file already exists, appends a counter: "photo-1.png", "photo-2.png", ...
+fn unique_asset_path(assets_dir: &Path, basename: &str) -> PathBuf {
+    let candidate = assets_dir.join(basename);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let base = Path::new(basename);
+    let stem = base.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
+    let ext = base.extension().and_then(|s| s.to_str());
+    let mut n = 1;
+    loop {
+        let name = match ext {
+            Some(e) => format!("{}-{}.{}", stem, n, e),
+            None => format!("{}-{}", stem, n),
+        };
+        let candidate = assets_dir.join(&name);
+        if !candidate.exists() {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+/// Copies an image file into the `assets/` folder beside `doc_path`.
+/// Returns the inserted relative path (e.g. "assets/photo.png").
+#[tauri::command]
+fn copy_image_to_assets(src_path: String, doc_path: String) -> Result<String, String> {
+    let assets = assets_dir_for_doc(&doc_path)?;
+    let basename = Path::new(&src_path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| format!("Invalid source path '{}'", src_path))?;
+    let dest = unique_asset_path(&assets, basename);
+    fs::copy(&src_path, &dest).map_err(|e| {
+        format!(
+            "Failed to copy image '{}' to '{}': {}",
+            src_path,
+            dest.display(),
+            e
+        )
+    })?;
+    let name = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(basename);
+    Ok(format!("assets/{}", name))
+}
+
+/// Writes raw image bytes (e.g. from a clipboard paste) into the `assets/` folder
+/// beside `doc_path`. Returns the inserted relative path (e.g. "assets/pasted-image.png").
+#[tauri::command]
+fn save_image_bytes(bytes: Vec<u8>, doc_path: String, ext: String) -> Result<String, String> {
+    let assets = assets_dir_for_doc(&doc_path)?;
+    let ext = ext.trim_start_matches('.');
+    let ext = if ext.is_empty() { "png" } else { ext };
+    let basename = format!("pasted-image.{}", ext);
+    let dest = unique_asset_path(&assets, &basename);
+    fs::write(&dest, &bytes)
+        .map_err(|e| format!("Failed to write image '{}': {}", dest.display(), e))?;
+    let name = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&basename);
+    Ok(format!("assets/{}", name))
+}
+
 #[tauri::command]
 fn read_dir_tree(path: String, show_all_files: Option<bool>) -> Result<Vec<FileEntry>, String> {
     let dir = Path::new(&path);
@@ -933,6 +1016,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_file,
             write_file,
+            copy_image_to_assets,
+            save_image_bytes,
             read_dir_tree,
             load_session,
             save_session,
@@ -1411,5 +1496,104 @@ mod tests {
         let entries = scan_dir_tree(tmp.path()).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "notes.md");
+    }
+
+    // --- unique_asset_path / image copy tests ---
+
+    #[test]
+    fn unique_asset_path_returns_basename_when_free() {
+        let tmp = TempDir::new().unwrap();
+        let p = unique_asset_path(tmp.path(), "photo.png");
+        assert_eq!(p, tmp.path().join("photo.png"));
+    }
+
+    #[test]
+    fn unique_asset_path_appends_counter_on_collision() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("photo.png"), b"a").unwrap();
+        let p = unique_asset_path(tmp.path(), "photo.png");
+        assert_eq!(p, tmp.path().join("photo-1.png"));
+
+        fs::write(tmp.path().join("photo-1.png"), b"b").unwrap();
+        let p = unique_asset_path(tmp.path(), "photo.png");
+        assert_eq!(p, tmp.path().join("photo-2.png"));
+    }
+
+    #[test]
+    fn unique_asset_path_handles_no_extension() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("image"), b"a").unwrap();
+        let p = unique_asset_path(tmp.path(), "image");
+        assert_eq!(p, tmp.path().join("image-1"));
+    }
+
+    #[test]
+    fn copy_image_to_assets_creates_assets_and_returns_relative_path() {
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("source.png");
+        fs::write(&src, b"PNGDATA").unwrap();
+        let doc = tmp.path().join("note.md");
+
+        let rel = copy_image_to_assets(
+            src.to_str().unwrap().to_string(),
+            doc.to_str().unwrap().to_string(),
+        )
+        .unwrap();
+        assert_eq!(rel, "assets/source.png");
+        let copied = tmp.path().join("assets/source.png");
+        assert!(copied.exists());
+        assert_eq!(fs::read(copied).unwrap(), b"PNGDATA");
+    }
+
+    #[test]
+    fn copy_image_to_assets_avoids_overwrite() {
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("source.png");
+        fs::write(&src, b"NEW").unwrap();
+        let doc = tmp.path().join("note.md");
+        fs::create_dir(tmp.path().join("assets")).unwrap();
+        fs::write(tmp.path().join("assets/source.png"), b"OLD").unwrap();
+
+        let rel = copy_image_to_assets(
+            src.to_str().unwrap().to_string(),
+            doc.to_str().unwrap().to_string(),
+        )
+        .unwrap();
+        assert_eq!(rel, "assets/source-1.png");
+        // original untouched
+        assert_eq!(
+            fs::read(tmp.path().join("assets/source.png")).unwrap(),
+            b"OLD"
+        );
+    }
+
+    #[test]
+    fn save_image_bytes_writes_file_with_extension() {
+        let tmp = TempDir::new().unwrap();
+        let doc = tmp.path().join("note.md");
+        let rel = save_image_bytes(
+            b"BYTES".to_vec(),
+            doc.to_str().unwrap().to_string(),
+            "png".to_string(),
+        )
+        .unwrap();
+        assert_eq!(rel, "assets/pasted-image.png");
+        assert_eq!(
+            fs::read(tmp.path().join("assets/pasted-image.png")).unwrap(),
+            b"BYTES"
+        );
+    }
+
+    #[test]
+    fn save_image_bytes_defaults_extension_when_empty() {
+        let tmp = TempDir::new().unwrap();
+        let doc = tmp.path().join("note.md");
+        let rel = save_image_bytes(
+            b"X".to_vec(),
+            doc.to_str().unwrap().to_string(),
+            String::new(),
+        )
+        .unwrap();
+        assert_eq!(rel, "assets/pasted-image.png");
     }
 }
