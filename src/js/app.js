@@ -231,7 +231,7 @@ async function insertImageFiles(imagePaths, view) {
       insertImageMarkdown(view, relPath);
     } catch (e) {
       console.error('Failed to insert image:', e);
-      showToast(`画像の挿入に失敗しました: ${imgPath}`, { type: 'error' });
+      showToast(`画像の挿入に失敗しました: ${e?.message || e}`, { type: 'error', duration: 8000 });
     }
   }
 }
@@ -386,24 +386,24 @@ function initSidebarWidthResizer() {
  * document's `assets/` folder and insert a Markdown reference. Registered with
  * editor.js, which fires this when a paste contains image data.
  */
-async function handleImagePaste(view, items) {
+async function handleImagePaste(view, images) {
   const tab = getActiveTab();
   if (!tab || !tab.path) {
     showToast('画像を貼り付けるには、先にファイルを保存してください', { type: 'error' });
     return;
   }
-  for (const item of items) {
-    if (!item.type?.startsWith('image/')) continue;
-    const file = item.getAsFile();
-    if (!file) continue;
+  for (const { file, type } of images) {
     try {
       const buf = await file.arrayBuffer();
       const bytes = Array.from(new Uint8Array(buf));
-      const relPath = await backend.saveImageBytes(bytes, tab.path, mimeToExt(item.type));
+      const relPath = await backend.saveImageBytes(bytes, tab.path, mimeToExt(type));
       insertImageMarkdown(view, relPath);
     } catch (e) {
       console.error('Failed to paste image:', e);
-      showToast('画像の貼り付けに失敗しました', { type: 'error' });
+      showToast(`画像の貼り付けに失敗しました: ${e?.message || e}`, {
+        type: 'error',
+        duration: 8000,
+      });
     }
   }
 }

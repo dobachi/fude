@@ -340,12 +340,20 @@ export function createEditor(
         if (!_imagePasteHandler) return false;
         const items = event.clipboardData?.items;
         if (!items) return false;
-        const hasImage = Array.from(items).some((it) => it.type?.startsWith('image/'));
-        if (!hasImage) return false;
-        // Hand off to app.js (async). Consume the event so the raw image data
-        // isn't pasted as garbage text by the default handler.
+        // Extract the image files synchronously: clipboardData (and getAsFile)
+        // become invalid once this handler returns, so async code can't read
+        // them later. We capture File objects here and hand them off.
+        const images = [];
+        for (const it of items) {
+          if (it.type?.startsWith('image/')) {
+            const f = it.getAsFile();
+            if (f) images.push({ file: f, type: it.type });
+          }
+        }
+        if (images.length === 0) return false;
+        // Consume the event so the raw image data isn't pasted as garbage text.
         event.preventDefault();
-        _imagePasteHandler(view, items);
+        _imagePasteHandler(view, images);
         return true;
       },
     }),
