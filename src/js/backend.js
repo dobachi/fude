@@ -70,11 +70,12 @@ export async function writeFile(path, content) {
 }
 
 export async function copyImageToAssets(srcPath, docPath) {
-  return doInvoke('copy_image_to_assets', { src_path: srcPath, doc_path: docPath });
+  // Tauri v2 maps snake_case Rust params to camelCase JS keys.
+  return doInvoke('copy_image_to_assets', { srcPath, docPath });
 }
 
 export async function saveImageBytes(bytes, docPath, ext) {
-  return doInvoke('save_image_bytes', { bytes, doc_path: docPath, ext });
+  return doInvoke('save_image_bytes', { bytes, docPath, ext });
 }
 
 export async function writeTempFile(path, content) {
