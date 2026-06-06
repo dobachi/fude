@@ -1004,6 +1004,30 @@ fn get_open_dir() -> Result<String, String> {
 /// Extract a file path and remote URL from a raw argv slice (argv[0] = executable).
 /// Used as a fallback when tauri-plugin-cli fails to parse (e.g. Windows file
 /// association passes a quoted absolute path that the clap parser may reject).
+/// Resolve a (possibly relative) CLI path argument to an absolute path string,
+/// using `base` (the launch working directory) for relative paths. On Unix the
+/// result is canonicalized when the target exists; otherwise the lexical join is
+/// returned. On Windows the lexical join is used to avoid `\\?\` verbatim paths.
+fn resolve_cli_path(path: &str, base: Option<PathBuf>) -> String {
+    let p = Path::new(path);
+    let joined = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        let base = base
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        base.join(p)
+    };
+
+    #[cfg(not(windows))]
+    {
+        if let Ok(abs) = joined.canonicalize() {
+            return abs.to_string_lossy().to_string();
+        }
+    }
+    joined.to_string_lossy().to_string()
+}
+
 fn parse_open_args(args: &[String]) -> (Option<String>, Option<String>) {
     let mut path: Option<String> = None;
     let mut remote: Option<String> = None;
@@ -1032,7 +1056,7 @@ pub fn run() {
 
     #[cfg(desktop)]
     {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.show();
@@ -1040,7 +1064,8 @@ pub fn run() {
             }
             let (path, _) = parse_open_args(&argv);
             if let Some(p) = path {
-                let _ = app.emit("cli-args", serde_json::json!({ "path": p }));
+                let resolved = resolve_cli_path(&p, Some(PathBuf::from(&cwd)));
+                let _ = app.emit("cli-args", serde_json::json!({ "path": resolved }));
             }
         }));
     }
@@ -1127,7 +1152,8 @@ pub fn run() {
                     }
                 }
             } else if let Some(path) = cli_path {
-                let payload = serde_json::json!({ "path": path });
+                let resolved = resolve_cli_path(&path, std::env::current_dir().ok());
+                let payload = serde_json::json!({ "path": resolved });
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(500));
                     let _ = handle.emit("cli-args", payload);
@@ -1523,6 +1549,39 @@ mod tests {
     fn parse_open_args_skips_unknown_flags() {
         let (path, _) = parse_open_args(&args(&["fude", "--debug", "/a.md"]));
         assert_eq!(path.as_deref(), Some("/a.md"));
+    }
+
+    // --- resolve_cli_path tests ---
+
+    #[cfg(not(windows))]
+    #[test]
+    fn resolve_cli_path_keeps_absolute_unchanged() {
+        // Nonexistent absolute path: canonicalize fails, returned as-is.
+        let r = resolve_cli_path("/nonexistent/abs/path.md", Some(PathBuf::from("/base")));
+        assert_eq!(r, "/nonexistent/abs/path.md");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn resolve_cli_path_joins_relative_to_base() {
+        // Nonexistent relative path: canonicalize fails, returns lexical join.
+        let r = resolve_cli_path("notes/a.md", Some(PathBuf::from("/work/dir")));
+        assert_eq!(r, "/work/dir/notes/a.md");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn resolve_cli_path_canonicalizes_existing_relative_dir() {
+        let tmp = TempDir::new().unwrap();
+        let sub = tmp.path().join("docs");
+        fs::create_dir(&sub).unwrap();
+        let r = resolve_cli_path("docs", Some(tmp.path().to_path_buf()));
+        // Result is absolute and points at the existing subdirectory.
+        assert!(Path::new(&r).is_absolute());
+        assert_eq!(
+            Path::new(&r).canonicalize().unwrap(),
+            sub.canonicalize().unwrap()
+        );
     }
 
     #[test]
