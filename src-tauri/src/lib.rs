@@ -423,6 +423,43 @@ fn assets_dir_for_doc(doc_path: &str) -> Result<PathBuf, String> {
     Ok(assets)
 }
 
+/// Sanitizes a filename so it is safe inside a Markdown image path `![](...)`.
+/// Spaces, parentheses, brackets and other URL/Markdown-breaking characters are
+/// replaced with '-', then runs of '-' are collapsed. Unicode letters (e.g.
+/// Japanese) are preserved. The extension is kept intact.
+fn sanitize_basename(name: &str) -> String {
+    let path = Path::new(name);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
+    let ext = path.extension().and_then(|s| s.to_str());
+
+    const UNSAFE: &str = "()[]<>#?%&{}|\\^~`\"'*:;,";
+    let cleaned: String = stem
+        .chars()
+        .map(|c| {
+            if c.is_whitespace() || c.is_control() || UNSAFE.contains(c) {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let collapsed = cleaned
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let stem = if collapsed.is_empty() {
+        "image".to_string()
+    } else {
+        collapsed
+    };
+
+    match ext {
+        Some(e) => format!("{}.{}", stem, e),
+        None => stem,
+    }
+}
+
 /// Returns a non-colliding path inside `assets_dir` for `basename` (e.g. "photo.png").
 /// If the file already exists, appends a counter: "photo-1.png", "photo-2.png", ...
 fn unique_asset_path(assets_dir: &Path, basename: &str) -> PathBuf {
@@ -456,7 +493,8 @@ fn copy_image_to_assets(src_path: String, doc_path: String) -> Result<String, St
         .file_name()
         .and_then(|s| s.to_str())
         .ok_or_else(|| format!("Invalid source path '{}'", src_path))?;
-    let dest = unique_asset_path(&assets, basename);
+    let basename = sanitize_basename(basename);
+    let dest = unique_asset_path(&assets, &basename);
     fs::copy(&src_path, &dest).map_err(|e| {
         format!(
             "Failed to copy image '{}' to '{}': {}",
@@ -468,7 +506,7 @@ fn copy_image_to_assets(src_path: String, doc_path: String) -> Result<String, St
     let name = dest
         .file_name()
         .and_then(|s| s.to_str())
-        .unwrap_or(basename);
+        .unwrap_or(&basename);
     Ok(format!("assets/{}", name))
 }
 
@@ -1496,6 +1534,36 @@ mod tests {
         let entries = scan_dir_tree(tmp.path()).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "notes.md");
+    }
+
+    // --- sanitize_basename tests ---
+
+    #[test]
+    fn sanitize_basename_replaces_spaces_and_parens() {
+        assert_eq!(
+            sanitize_basename("Screenshot 2026-06-06 215104.png"),
+            "Screenshot-2026-06-06-215104.png"
+        );
+        assert_eq!(sanitize_basename("photo 03 (1).jpg"), "photo-03-1.jpg");
+    }
+
+    #[test]
+    fn sanitize_basename_collapses_dashes_and_keeps_extension() {
+        assert_eq!(sanitize_basename("a   b___c.PNG"), "a-b___c.PNG");
+        assert_eq!(
+            sanitize_basename("weird[name]{x}.webp"),
+            "weird-name-x.webp"
+        );
+    }
+
+    #[test]
+    fn sanitize_basename_preserves_unicode() {
+        assert_eq!(sanitize_basename("図 1.png"), "図-1.png");
+    }
+
+    #[test]
+    fn sanitize_basename_falls_back_when_empty_stem() {
+        assert_eq!(sanitize_basename("   .png"), "image.png");
     }
 
     // --- unique_asset_path / image copy tests ---
