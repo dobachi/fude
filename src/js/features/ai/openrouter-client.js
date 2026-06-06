@@ -18,36 +18,53 @@ export function buildMessages(systemPrompt, messages) {
 /**
  * Composer system prompt for text transformation.
  * @param {string} action - One of: rewrite, summarize, expand, fix_grammar, custom
- * @param {string} [customInstruction] - Only used when action is 'custom'
+ * @param {string} [instruction] - Optional user direction. For 'custom' it is
+ *   the whole instruction; for the preset actions it is appended as extra
+ *   direction (empty = default behavior).
  * @returns {string}
  */
-export function composerSystemPrompt(action, customInstruction = '') {
+export function composerSystemPrompt(action, instruction = '') {
   const base =
     'You are a helpful writing assistant. You will be given a text selection from a Markdown document. ';
+  const trimmed = instruction.trim();
+  const direction = trimmed
+    ? ` Additionally, follow this instruction from the user: "${trimmed}".`
+    : '';
 
   switch (action) {
     case 'rewrite':
       return (
         base +
-        'Rewrite the text to improve clarity and readability while preserving the meaning. Return ONLY the rewritten text, no explanations.'
+        'Rewrite the text to improve clarity and readability while preserving the meaning.' +
+        direction +
+        ' Return ONLY the rewritten text, no explanations.'
       );
     case 'summarize':
-      return base + 'Summarize the text concisely. Return ONLY the summary, no explanations.';
+      return (
+        base +
+        'Summarize the text concisely.' +
+        direction +
+        ' Return ONLY the summary, no explanations.'
+      );
     case 'expand':
       return (
         base +
-        'Expand the text with more detail and depth while maintaining the same style and tone. Return ONLY the expanded text, no explanations.'
+        'Expand the text with more detail and depth while maintaining the same style and tone.' +
+        direction +
+        ' Return ONLY the expanded text, no explanations.'
       );
     case 'fix_grammar':
       return (
         base +
-        'Fix all grammar, spelling, and punctuation errors in the text. Return ONLY the corrected text, no explanations.'
+        'Fix all grammar, spelling, and punctuation errors in the text.' +
+        direction +
+        ' Return ONLY the corrected text, no explanations.'
       );
     case 'custom':
       return (
         base +
-        (customInstruction ||
-          "Follow the user's instruction. Return ONLY the result, no explanations.")
+        (trimmed || "Follow the user's instruction.") +
+        ' Return ONLY the result, no explanations.'
       );
     default:
       return base + "Follow the user's instruction. Return ONLY the result, no explanations.";

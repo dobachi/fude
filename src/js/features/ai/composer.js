@@ -54,15 +54,34 @@ export function openComposer(view) {
   composerEl.style.left = `${left}px`;
 
   // Action button handlers
-  composerEl.querySelectorAll('.ai-composer-action').forEach((btn) => {
+  const actionButtons = Array.from(composerEl.querySelectorAll('.ai-composer-action'));
+  actionButtons.forEach((btn) => {
     btn.addEventListener('click', () => {
       const action = btn.dataset.action;
       if (action === 'custom') {
         showCustomInput(view, ctx);
-      } else {
+      } else if (action === 'fix_grammar') {
         executeAction(view, ctx, action);
+      } else {
+        // rewrite / summarize / expand: let the user optionally add direction.
+        showInstructionInput(view, ctx, action);
       }
     });
+  });
+
+  // Keyboard navigation: focus the first action so arrow keys work when the
+  // Composer is opened via keyboard shortcut. Up/Down move focus; Enter/Space
+  // activate (native button behavior).
+  let focusIdx = 0;
+  if (actionButtons.length) actionButtons[0].focus();
+  composerEl.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    // Only navigate while the action menu is still showing.
+    if (!actionButtons.length || !composerEl.contains(actionButtons[0])) return;
+    e.preventDefault();
+    const dir = e.key === 'ArrowDown' ? 1 : -1;
+    focusIdx = (focusIdx + dir + actionButtons.length) % actionButtons.length;
+    actionButtons[focusIdx].focus();
   });
 
   // Close on Escape or click outside
@@ -105,6 +124,40 @@ function showCustomInput(view, ctx) {
   const run = () => {
     const instruction = input.value.trim();
     if (instruction) executeAction(view, ctx, 'custom', instruction);
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      run();
+    }
+  });
+  goBtn.addEventListener('click', run);
+  input.focus();
+}
+
+/**
+ * Show an optional instruction field for a preset action (rewrite/summarize/
+ * expand). Submitting with an empty field runs the default behavior; any text
+ * is passed to the model as additional direction.
+ */
+function showInstructionInput(view, ctx, action) {
+  if (!composerEl) return;
+  const label = ACTIONS.find((a) => a.id === action)?.label || action;
+  composerEl.innerHTML = `
+    <div class="ai-composer-custom ai-composer-custom-col">
+      <div class="ai-composer-custom-label">${label}: 方針・意図（任意）</div>
+      <div class="ai-composer-custom-row">
+        <input type="text" class="ai-composer-custom-input" placeholder="例: もっと簡潔に / 専門用語を避けて（空欄でもOK）" />
+        <button class="ai-composer-custom-go">実行</button>
+      </div>
+    </div>
+  `;
+  const input = composerEl.querySelector('.ai-composer-custom-input');
+  const goBtn = composerEl.querySelector('.ai-composer-custom-go');
+
+  const run = () => {
+    executeAction(view, ctx, action, input.value.trim());
   };
 
   input.addEventListener('keydown', (e) => {

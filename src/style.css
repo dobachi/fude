@@ -1796,8 +1796,14 @@ body {
   text-align: left;
 }
 
-.ai-composer-action:hover {
+.ai-composer-action:hover,
+.ai-composer-action:focus {
   background: var(--bg-hover);
+}
+
+.ai-composer-action:focus {
+  outline: 1px solid var(--border-focus);
+  outline-offset: -1px;
 }
 
 .ai-composer-icon {
@@ -1810,6 +1816,21 @@ body {
   display: flex;
   gap: 6px;
   padding: 8px;
+}
+
+.ai-composer-custom-col {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.ai-composer-custom-label {
+  font-size: calc(var(--font-size) - 1px);
+  color: var(--fg-secondary);
+}
+
+.ai-composer-custom-row {
+  display: flex;
+  gap: 6px;
 }
 
 .ai-composer-custom-input {
