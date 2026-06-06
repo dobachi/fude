@@ -1460,33 +1460,9 @@ function handleGlobalKeys(e) {
       }
       return;
     }
-    // Other bare Ctrl+letter keys (a, b, c, d, e, f, g, h, i, j, k, l, m, p, q, v, x, y, z)
-    // pass through. Ctrl+I handled below if shifted.
-    // Ctrl+I (AI Chat) intercepted explicitly to keep the existing UX.
-    if (e.key === 'i') {
-      e.preventDefault();
-      e.stopPropagation();
-      const view = currentView();
-      let selectedText = '';
-      if (view) {
-        const { from, to } = view.state.selection.main;
-        if (from !== to) selectedText = view.state.sliceDoc(from, to);
-      }
-      toggleAIPanel(selectedText);
-      const aiPanelContent = document.getElementById('ai-panel-content');
-      if (aiPanelContent && !aiPanelContent.hasChildNodes()) {
-        initChatPanel(aiPanelContent, {
-          getVaultPath: () => vaultPath,
-          getActiveView: () => currentView(),
-        }).then(() => {
-          if (selectedText) updateSelectedContext(selectedText);
-          const activeTab = getActiveTab();
-          if (activeTab) updateDocContext(activeTab.path, activeTab.content);
-        });
-      }
-      return;
-    }
-    // Anything else bare Ctrl+letter passes through to CodeMirror.
+    // All bare Ctrl+letter keys pass through to CodeMirror / Vim / Emacs.
+    // (AI Chat is on Ctrl+Shift+I, AI Composer on Ctrl+Shift+C — handled below.
+    // Ctrl+I is left free for the editor, e.g. italic conventions.)
     return;
   }
 
@@ -1507,8 +1483,33 @@ function handleGlobalKeys(e) {
     return;
   }
 
-  // AI Composer: Ctrl+Shift+I
+  // AI Chat: Ctrl+Shift+I
   if (key === 'I' && e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    const view = currentView();
+    let selectedText = '';
+    if (view) {
+      const { from, to } = view.state.selection.main;
+      if (from !== to) selectedText = view.state.sliceDoc(from, to);
+    }
+    toggleAIPanel(selectedText);
+    const aiPanelContent = document.getElementById('ai-panel-content');
+    if (aiPanelContent && !aiPanelContent.hasChildNodes()) {
+      initChatPanel(aiPanelContent, {
+        getVaultPath: () => vaultPath,
+        getActiveView: () => currentView(),
+      }).then(() => {
+        if (selectedText) updateSelectedContext(selectedText);
+        const activeTab = getActiveTab();
+        if (activeTab) updateDocContext(activeTab.path, activeTab.content);
+      });
+    }
+    return;
+  }
+
+  // AI Composer: Ctrl+Shift+C
+  if (key === 'C' && e.shiftKey) {
     e.preventDefault();
     e.stopPropagation();
     const view = currentView();
