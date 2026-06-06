@@ -297,8 +297,10 @@ function escapeHtml(text) {
 }
 
 /**
- * Execute a composer action directly without showing the action menu.
- * Used by context-menu to skip the redundant menu.
+ * Open the composer for a specific action without showing the action menu.
+ * Used by the right-click context menu. For rewrite/summarize/expand this shows
+ * the optional instruction field (same as the keyboard menu); fix_grammar runs
+ * immediately.
  * @param {import('@codemirror/view').EditorView} view
  * @param {string} action - Action id (rewrite, summarize, expand, fix_grammar)
  */
@@ -339,7 +341,12 @@ export function executeActionDirect(view, action) {
   };
   setTimeout(() => document.addEventListener('mousedown', clickOutside), 0);
 
-  executeAction(view, ctx, action);
+  if (action === 'fix_grammar') {
+    executeAction(view, ctx, action);
+  } else {
+    // rewrite / summarize / expand: let the user optionally add direction.
+    showInstructionInput(view, ctx, action);
+  }
 }
 
 export function closeComposer() {
