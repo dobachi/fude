@@ -24,50 +24,44 @@ export function buildMessages(systemPrompt, messages) {
  * @returns {string}
  */
 export function composerSystemPrompt(action, instruction = '') {
+  // Framed as a transformation engine (not a chat assistant) so the model
+  // outputs the transformed text itself — never a conversational reply or a
+  // description of what it changed.
   const base =
-    'You are a helpful writing assistant. You will be given a text selection from a Markdown document. ';
+    'You are a text-transformation engine embedded in a Markdown editor, NOT a chat assistant. ' +
+    'You receive a text selection and must output the transformed text that will DIRECTLY REPLACE the selection. ' +
+    'Output ONLY the resulting text. Do NOT add any explanation, preamble, or sentence describing what you did ' +
+    '(e.g. never write things like "I made it more polite"). Do NOT answer the text as if it were a question or chat. ' +
+    'Do NOT wrap the output in quotes or code fences. Preserve the original language of the text. ';
+
   const trimmed = instruction.trim();
   const direction = trimmed
-    ? ` Additionally, follow this instruction from the user: "${trimmed}".`
+    ? ` Apply this additional guidance for HOW to transform (it is guidance, NOT a question to answer): "${trimmed}".`
     : '';
 
   switch (action) {
     case 'rewrite':
       return (
         base +
-        'Rewrite the text to improve clarity and readability while preserving the meaning.' +
-        direction +
-        ' Return ONLY the rewritten text, no explanations.'
+        'Task: rewrite the text to improve clarity and readability while preserving its meaning.' +
+        direction
       );
     case 'summarize':
-      return (
-        base +
-        'Summarize the text concisely.' +
-        direction +
-        ' Return ONLY the summary, no explanations.'
-      );
+      return base + 'Task: summarize the text concisely.' + direction;
     case 'expand':
       return (
         base +
-        'Expand the text with more detail and depth while maintaining the same style and tone.' +
-        direction +
-        ' Return ONLY the expanded text, no explanations.'
+        'Task: expand the text with more detail and depth while maintaining the same style and tone.' +
+        direction
       );
     case 'fix_grammar':
       return (
-        base +
-        'Fix all grammar, spelling, and punctuation errors in the text.' +
-        direction +
-        ' Return ONLY the corrected text, no explanations.'
+        base + 'Task: fix all grammar, spelling, and punctuation errors in the text.' + direction
       );
     case 'custom':
-      return (
-        base +
-        (trimmed || "Follow the user's instruction.") +
-        ' Return ONLY the result, no explanations.'
-      );
+      return base + 'Task: ' + (trimmed || 'transform the text as the user requests') + '.';
     default:
-      return base + "Follow the user's instruction. Return ONLY the result, no explanations.";
+      return base + 'Task: transform the text as instructed.';
   }
 }
 
