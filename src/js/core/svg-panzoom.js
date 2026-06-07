@@ -112,14 +112,14 @@ function makeControls(pz, onExpand) {
   return controls;
 }
 
-/** Open `svgEl` (a clone is used) full-window with its own pan/zoom. */
-export function openFullscreen(svgEl) {
+/** Open `el` (an <svg> or <img>; a clone is used) full-window with pan/zoom. */
+export function openFullscreen(el) {
   const overlay = document.createElement('div');
   overlay.className = 'panzoom-fullscreen';
 
   const stage = document.createElement('div');
   stage.className = 'panzoom-fs-stage';
-  const svg = svgEl.cloneNode(true);
+  const svg = el.cloneNode(true);
   svg.style.transform = '';
   svg.removeAttribute('data-panzoom');
   stage.appendChild(svg);
@@ -145,6 +145,14 @@ export function openFullscreen(svgEl) {
   };
   closeBtn.addEventListener('click', close);
   document.addEventListener('keydown', onKey);
+}
+
+/** Open an image (by URL) full-window with pan/zoom. */
+export function openImageFullscreen(src) {
+  const img = document.createElement('img');
+  img.src = src;
+  img.alt = '';
+  openFullscreen(img);
 }
 
 /**

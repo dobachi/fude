@@ -329,21 +329,33 @@ fn scan_dir_tree(dir: &Path) -> Result<Vec<FileEntry>, String> {
 }
 
 /// File extensions shown in the sidebar by default (without "show all files"):
-/// Markdown variants plus PlantUML sources (Fude previews these too).
+/// Markdown variants, PlantUML sources, and images (Fude previews these too).
 fn is_listed_file(name: &str) -> bool {
     const EXTS: &[&str] = &[
+        // Markdown
         ".md",
         ".markdown",
         ".mdown",
         ".mkd",
         ".mkdn",
         ".qmd",
+        // PlantUML
         ".puml",
         ".plantuml",
         ".uml",
         ".iuml",
         ".pu",
         ".wsd",
+        // Images
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".bmp",
+        ".svg",
+        ".avif",
+        ".ico",
     ];
     let lower = name.to_lowercase();
     EXTS.iter().any(|e| lower.ends_with(e))
@@ -1603,7 +1615,8 @@ mod tests {
         fs::write(tmp.path().join("a.puml"), "@startuml\n@enduml").unwrap();
         fs::write(tmp.path().join("b.uml"), "@startuml\n@enduml").unwrap();
         fs::write(tmp.path().join("c.markdown"), "# x").unwrap();
-        fs::write(tmp.path().join("ignored.png"), "binary").unwrap();
+        fs::write(tmp.path().join("d.png"), "binary").unwrap();
+        fs::write(tmp.path().join("ignored.zip"), "binary").unwrap();
 
         let names: Vec<String> = scan_dir_tree(tmp.path())
             .unwrap()
@@ -1613,7 +1626,8 @@ mod tests {
         assert!(names.contains(&"a.puml".to_string()));
         assert!(names.contains(&"b.uml".to_string()));
         assert!(names.contains(&"c.markdown".to_string()));
-        assert!(!names.contains(&"ignored.png".to_string()));
+        assert!(names.contains(&"d.png".to_string()));
+        assert!(!names.contains(&"ignored.zip".to_string()));
     }
 
     #[test]

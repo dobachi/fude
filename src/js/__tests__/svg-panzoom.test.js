@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { attachPanZoom, openFullscreen } from '../core/svg-panzoom.js';
+import { attachPanZoom, openFullscreen, openImageFullscreen } from '../core/svg-panzoom.js';
 
 function makeHolder() {
   const holder = document.createElement('div');
@@ -57,6 +57,17 @@ describe('openFullscreen', () => {
     expect(overlay.querySelector('svg')).toBeTruthy();
     expect(overlay.querySelector('.panzoom-fs-close')).toBeTruthy();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(document.querySelector('.panzoom-fullscreen')).toBeFalsy();
+  });
+
+  it('openImageFullscreen shows an img overlay', () => {
+    openImageFullscreen('asset://localhost/x.png');
+    const overlay = document.querySelector('.panzoom-fullscreen');
+    expect(overlay).toBeTruthy();
+    const img = overlay.querySelector('img');
+    expect(img).toBeTruthy();
+    expect(img.getAttribute('src')).toBe('asset://localhost/x.png');
+    overlay.querySelector('.panzoom-fs-close').click();
     expect(document.querySelector('.panzoom-fullscreen')).toBeFalsy();
   });
 });

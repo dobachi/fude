@@ -958,11 +958,20 @@ function handleSelectionChange(selectedText) {
 // ── File handling ──────────────────────────────────────────
 async function handleFileSelect(path) {
   try {
+    // Images can't be loaded as text — open them in the pan/zoom viewer.
+    if (isImagePath(path)) {
+      const { convertFileSrc } = await import('@tauri-apps/api/core');
+      const { openImageFullscreen } = await import('./core/svg-panzoom.js');
+      openImageFullscreen(isLocalTauri() ? convertFileSrc(path) : path);
+      highlightFile(path);
+      return;
+    }
     const content = await backend.readFile(path);
     openTab(path, content);
     highlightFile(path);
   } catch (e) {
     console.error('Failed to open file:', e);
+    showToast(`ファイルを開けませんでした: ${e?.message || e}`, { type: 'error', duration: 6000 });
   }
 }
 
