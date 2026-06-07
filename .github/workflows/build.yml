@@ -41,7 +41,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-24.04
+          # Build Linux on the oldest supported distro so the binaries' glibc
+          # baseline (2.35) stays low — they then run on 22.04, 24.04, and newer
+          # (newer glibc is backward-compatible). Deps below exist on 22.04.
+          - platform: ubuntu-22.04
             target: linux
           - platform: windows-latest
             target: windows
