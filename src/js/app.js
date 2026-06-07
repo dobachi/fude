@@ -14,6 +14,7 @@ import {
   jumpToLine,
   registerPanesModule,
   registerImagePasteHandler,
+  registerSaveHandler,
 } from './core/editor.js';
 import { initOutline, updateOutline, setActiveOutlineLine, clearOutline } from './core/outline.js';
 import { isImagePath, mimeToExt, insertImageMarkdown } from './core/image-insert.js';
@@ -424,6 +425,9 @@ async function handleImagePaste(view, images) {
 if (isLocalTauri()) {
   registerImagePasteHandler(handleImagePaste);
 }
+
+// Let Emacs mode's native C-x C-s save the file.
+registerSaveHandler(() => performSave({ forceDialog: false }));
 
 // ── Initialization ─────────────────────────────────────────
 async function init() {
@@ -1393,23 +1397,7 @@ function handleGlobalKeys(e) {
         e.preventDefault();
         handleOpenFolder();
         return;
-      case 's':
-        // Ctrl+Alt+S — Save As (force dialog)
-        if (e.ctrlKey) {
-          e.preventDefault();
-          performSave({ forceDialog: true });
-          return;
-        }
-        break;
     }
-  }
-
-  // Ctrl+Alt+S (with both ctrl and alt) — Save As
-  if (e.ctrlKey && e.altKey && (e.key === 's' || e.key === 'S')) {
-    e.preventDefault();
-    e.stopPropagation();
-    performSave({ forceDialog: true });
-    return;
   }
 
   const mod = e.ctrlKey || e.metaKey;
@@ -1465,6 +1453,15 @@ function handleGlobalKeys(e) {
         e.stopPropagation();
         focusPane('down');
         return;
+    }
+
+    // Ctrl+S = Save (conventional). Skipped in Emacs, where Ctrl+S is isearch
+    // and saving is done with the native C-x C-s chord instead.
+    if (e.key === 's' && getMode() !== 'emacs') {
+      e.preventDefault();
+      e.stopPropagation();
+      performSave({ forceDialog: false });
+      return;
     }
 
     const blockBrowserDefault = ['s', 'r', 'w', 't', 'n', 'o', 'u'];
@@ -1548,9 +1545,10 @@ function handleGlobalKeys(e) {
   switch (key) {
     // ── App actions on Ctrl+Shift+letter ───────────────────
     case 'S':
+      // Ctrl+Shift+S = Save As (force the dialog). Plain save is Ctrl+S.
       e.preventDefault();
       e.stopPropagation();
-      performSave({ forceDialog: false });
+      performSave({ forceDialog: true });
       return;
     case 'R':
       e.preventDefault();
@@ -1617,42 +1615,8 @@ function handleGlobalKeys(e) {
         splitHorizontal();
       }
       return;
-    case '-':
-      e.preventDefault();
-      e.stopPropagation();
-      setFontSize(Math.max(10, getFontSize() - 1));
-      return;
-    case '=':
-    case '+':
-      e.preventDefault();
-      e.stopPropagation();
-      setFontSize(Math.min(32, getFontSize() + 1));
-      return;
-    case 'ArrowLeft':
-      e.preventDefault();
-      e.stopPropagation();
-      focusPane('left');
-      return;
-    case 'ArrowRight':
-      e.preventDefault();
-      e.stopPropagation();
-      focusPane('right');
-      return;
-    case 'ArrowUp':
-      e.preventDefault();
-      e.stopPropagation();
-      focusPane('up');
-      return;
-    case 'ArrowDown':
-      e.preventDefault();
-      e.stopPropagation();
-      focusPane('down');
-      return;
-    case ',':
-      e.preventDefault();
-      e.stopPropagation();
-      openSettings();
-      return;
+    // Font size (Ctrl±) and pane focus (Ctrl+Arrows) and settings (Ctrl+,)
+    // live on bare Ctrl above — not duplicated here.
   }
 }
 

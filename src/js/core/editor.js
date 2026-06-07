@@ -596,9 +596,26 @@ export function registerImagePasteHandler(fn) {
 // Statically import vim/emacs so they're always bundled and initialized at load.
 // Earlier dynamic imports occasionally failed silently in Windows WebView2 builds.
 import { vim, Vim } from '@replit/codemirror-vim';
-import { emacs } from '@replit/codemirror-emacs';
+import { emacs, EmacsHandler } from '@replit/codemirror-emacs';
 
 let vimMapsRegistered = false;
+
+// Emacs-native save: C-x C-s. The actual save is an app action, so editor.js
+// just exposes a hook that app.js fills in with its save function.
+let _saveHandler = null;
+/** Register the app's save function so Emacs C-x C-s can trigger it. */
+export function registerSaveHandler(fn) {
+  _saveHandler = fn;
+}
+EmacsHandler.addCommands({
+  fudeSaveBuffer: {
+    exec() {
+      if (_saveHandler) _saveHandler();
+    },
+    readOnly: true,
+  },
+});
+EmacsHandler.bindKey('C-x C-s', 'fudeSaveBuffer');
 
 export function toggleVim(view, enable) {
   if (!view._keymodeCompartment) return;
