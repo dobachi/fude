@@ -446,6 +446,51 @@ fn write_file(path: String, content: String) -> Result<(), String> {
     fs::write(&path, content).map_err(|e| format!("Failed to write file '{}': {}", path, e))
 }
 
+/// Rename/move a file or directory.
+#[tauri::command]
+fn rename_path(from: String, to: String) -> Result<(), String> {
+    if from.is_empty() || to.is_empty() {
+        return Err("Invalid path".to_string());
+    }
+    if Path::new(&to).exists() {
+        return Err(format!("'{}' already exists", to));
+    }
+    fs::rename(&from, &to).map_err(|e| format!("Failed to rename '{}': {}", from, e))
+}
+
+/// Move a file or directory to the OS trash/recycle bin.
+#[tauri::command]
+fn delete_path(path: String) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("Invalid path".to_string());
+    }
+    trash::delete(&path).map_err(|e| format!("Failed to move '{}' to trash: {}", path, e))
+}
+
+/// Create a new empty file (errors if it already exists). Parent dirs created.
+#[tauri::command]
+fn create_file(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if p.exists() {
+        return Err(format!("'{}' already exists", path));
+    }
+    if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create parent of '{}': {}", path, e))?;
+    }
+    fs::write(&path, "").map_err(|e| format!("Failed to create '{}': {}", path, e))
+}
+
+/// Create a new directory (errors if it already exists).
+#[tauri::command]
+fn create_directory(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if p.exists() {
+        return Err(format!("'{}' already exists", path));
+    }
+    fs::create_dir_all(&path).map_err(|e| format!("Failed to create directory '{}': {}", path, e))
+}
+
 /// Returns the `assets/` directory next to the given document, creating it if needed.
 fn assets_dir_for_doc(doc_path: &str) -> Result<PathBuf, String> {
     let parent = Path::new(doc_path)
@@ -1464,6 +1509,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_file,
             write_file,
+            rename_path,
+            delete_path,
+            create_file,
+            create_directory,
             copy_image_to_assets,
             save_image_bytes,
             fetch_extension_manifest,

@@ -21,6 +21,8 @@ import { isImagePath, mimeToExt, insertImageMarkdown } from './core/image-insert
 import { attachPanZoom } from './core/svg-panzoom.js';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
+import { showMenu } from './core/menu.js';
+import { promptDialog, confirmDialog } from './core/dialog.js';
 import {
   initPreview,
   syncPreviewToLine,
@@ -42,6 +44,10 @@ import {
   updateTabPath,
   setTabChangeCallback,
   setTabPathChangeCallback,
+  setTabContextMenuCallback,
+  closeOtherTabs,
+  closeTabsToRight,
+  closeAllTabs,
   getTabsForSession,
   getActiveTabIndex,
   getAllTabs,
@@ -498,6 +504,7 @@ async function init() {
       sort: config.sidebar_sort || 'name_asc',
       showAllFiles: config.sidebar_show_all_files || false,
       onSettingsChange: handleSidebarSettingsChange,
+      onContextMenu: handleFileContextMenu,
     });
 
   // Init outline (document headings) below the file tree.
@@ -533,6 +540,7 @@ async function init() {
   // Tab change callback
   setTabChangeCallback(handleTabChange);
   setTabPathChangeCallback(handleTabPathChange);
+  setTabContextMenuCallback(handleTabContextMenu);
   initFileWatcher(handleExternalFileChange);
 
   // Global keyboard shortcuts - capture at window level to override browser defaults
@@ -979,6 +987,157 @@ async function handleFileSelect(path) {
     console.error('Failed to open file:', e);
     showToast(`ファイルを開けませんでした: ${e?.message || e}`, { type: 'error', duration: 6000 });
   }
+}
+
+// ── Right-click context menus ──────────────────────────────
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('コピーしました', { duration: 1500 });
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      showToast('コピーしました', { duration: 1500 });
+    } catch {
+      showToast('コピーに失敗しました', { type: 'error' });
+    }
+  }
+}
+
+/** Path separator matching the given path's style (Windows vs POSIX). */
+function joinPath(dir, name) {
+  const sep = dir.includes('\\') && !dir.includes('/') ? '\\' : '/';
+  return `${dir.replace(/[/\\]+$/, '')}${sep}${name}`;
+}
+
+function toRelative(path) {
+  if (!vaultPath || !path) return path;
+  const base = vaultPath.replace(/[/\\]+$/, '');
+  if (path.startsWith(base)) return path.slice(base.length).replace(/^[/\\]+/, '') || path;
+  return path;
+}
+
+async function revealInFileManager(path) {
+  if (!isLocalTauri()) return;
+  try {
+    const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
+    await revealItemInDir(path);
+  } catch (e) {
+    console.error('Reveal failed:', e);
+    showToast(`ファイルマネージャで表示に失敗: ${e?.message || e}`, { type: 'error' });
+  }
+}
+
+async function refreshTree() {
+  if (!vaultPath) return;
+  try {
+    const tree = await backend.readDirTree(vaultPath, getShowAllFiles());
+    loadDirectory(tree);
+  } catch (e) {
+    console.error('Failed to refresh tree:', e);
+  }
+}
+
+async function doNewFile(entry) {
+  const dir = entry.isDir ? entry.path : dirnameOf(entry.path);
+  const name = await promptDialog('新規ファイル名', 'untitled.md', '作成');
+  if (!name) return;
+  const newPath = joinPath(dir, name);
+  try {
+    await backend.createFile(newPath);
+    await refreshTree();
+    await handleFileSelect(newPath);
+  } catch (e) {
+    showToast(`作成に失敗: ${e?.message || e}`, { type: 'error' });
+  }
+}
+
+async function doNewFolder(entry) {
+  const dir = entry.isDir ? entry.path : dirnameOf(entry.path);
+  const name = await promptDialog('新規フォルダ名', 'new-folder', '作成');
+  if (!name) return;
+  try {
+    await backend.createDirectory(joinPath(dir, name));
+    await refreshTree();
+  } catch (e) {
+    showToast(`作成に失敗: ${e?.message || e}`, { type: 'error' });
+  }
+}
+
+async function doRename(entry) {
+  const name = await promptDialog('新しい名前', entry.name, '変更');
+  if (!name || name === entry.name) return;
+  const newPath = joinPath(dirnameOf(entry.path), name);
+  try {
+    await backend.renamePath(entry.path, newPath);
+    const tab = getAllTabs().find((t) => t.path === entry.path);
+    if (tab) updateTabPath(tab.id, newPath);
+    await refreshTree();
+  } catch (e) {
+    showToast(`名前変更に失敗: ${e?.message || e}`, { type: 'error' });
+  }
+}
+
+async function doDelete(entry) {
+  const ok = await confirmDialog(`「${entry.name}」をゴミ箱に移動しますか？`, {
+    okLabel: '削除',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await backend.deletePath(entry.path);
+    const tab = getAllTabs().find((t) => t.path === entry.path);
+    if (tab) closeTab(tab.id);
+    await refreshTree();
+  } catch (e) {
+    showToast(`削除に失敗: ${e?.message || e}`, { type: 'error' });
+  }
+}
+
+function handleFileContextMenu(entry, x, y) {
+  const items = [];
+  if (!entry.isDir) items.push({ label: '開く', action: () => handleFileSelect(entry.path) });
+  items.push(
+    { label: 'パスをコピー', action: () => copyText(entry.path) },
+    { label: '相対パスをコピー', action: () => copyText(toRelative(entry.path)) },
+    { label: 'ファイル名をコピー', action: () => copyText(entry.name) },
+    { separator: true },
+    { label: 'ファイルマネージャで表示', action: () => revealInFileManager(entry.path) },
+    { separator: true },
+    { label: '新規ファイル…', action: () => doNewFile(entry) },
+    { label: '新規フォルダ…', action: () => doNewFolder(entry) },
+    { label: '名前を変更…', action: () => doRename(entry) },
+    { label: '削除（ゴミ箱へ）', danger: true, action: () => doDelete(entry) },
+  );
+  showMenu(x, y, items);
+}
+
+function handleTabContextMenu(tabId, x, y) {
+  const tab = getAllTabs().find((t) => t.id === tabId);
+  if (!tab) return;
+  const items = [
+    { label: '閉じる', action: () => closeTab(tabId) },
+    { label: '他のタブを閉じる', action: () => closeOtherTabs(tabId) },
+    { label: '右側のタブを閉じる', action: () => closeTabsToRight(tabId) },
+    { label: 'すべて閉じる', action: () => closeAllTabs() },
+  ];
+  if (tab.path) {
+    items.push(
+      { separator: true },
+      { label: 'パスをコピー', action: () => copyText(tab.path) },
+      { label: 'ファイル名をコピー', action: () => copyText(getFilename(tab.path)) },
+      { separator: true },
+      { label: 'ファイルマネージャで表示', action: () => revealInFileManager(tab.path) },
+    );
+  }
+  showMenu(x, y, items);
 }
 
 async function openPath(path) {

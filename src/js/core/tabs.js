@@ -33,6 +33,11 @@ let activeTabId = null;
 let nextTabId = 1;
 let onTabChange = null;
 let onTabPathChange = null;
+let onTabContextMenu = null;
+
+export function setTabContextMenuCallback(callback) {
+  onTabContextMenu = callback;
+}
 
 export function setTabChangeCallback(callback) {
   onTabChange = callback;
@@ -103,6 +108,23 @@ export function closeTab(id) {
   }
 
   forceCloseTab(id);
+}
+
+/** Close every tab except `id`. */
+export function closeOtherTabs(id) {
+  for (const tid of tabs.filter((t) => t.id !== id).map((t) => t.id)) closeTab(tid);
+}
+
+/** Close all tabs to the right of `id`. */
+export function closeTabsToRight(id) {
+  const idx = tabs.findIndex((t) => t.id === id);
+  if (idx < 0) return;
+  for (const tid of tabs.slice(idx + 1).map((t) => t.id)) closeTab(tid);
+}
+
+/** Close all tabs. */
+export function closeAllTabs() {
+  for (const tid of tabs.map((t) => t.id)) closeTab(tid);
 }
 
 function forceCloseTab(id) {
@@ -255,6 +277,10 @@ function renderTabBar() {
         e.stopPropagation();
         setTimeout(() => closeTab(tab.id), 0);
       }
+    });
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (onTabContextMenu) onTabContextMenu(tab.id, e.clientX, e.clientY);
     });
 
     tabBar.appendChild(el);

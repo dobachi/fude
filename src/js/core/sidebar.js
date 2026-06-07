@@ -7,6 +7,7 @@ let currentEntries = [];
 let currentSort = 'name_asc';
 let showAllFiles = false;
 let onSettingsChange = null;
+let onContextMenu = null;
 
 const SORT_OPTIONS = {
   name_asc: { key: 'name', order: 'asc' },
@@ -27,6 +28,7 @@ export function initSidebar(container, fileSelectCallback, opts) {
     if (opts.sort) currentSort = opts.sort;
     if (opts.showAllFiles) showAllFiles = opts.showAllFiles;
     if (opts.onSettingsChange) onSettingsChange = opts.onSettingsChange;
+    if (opts.onContextMenu) onContextMenu = opts.onContextMenu;
   }
 
   initPopover();
@@ -139,6 +141,11 @@ function buildTreeItem(entry) {
       const icon = label.querySelector('.tree-icon');
       icon.textContent = item.classList.contains('open') ? '\u25bc' : '\u25b6';
     });
+    label.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (onContextMenu)
+        onContextMenu({ path: entry.path, name: entry.name, isDir: true }, e.clientX, e.clientY);
+    });
     item.appendChild(label);
 
     if (entry.children && entry.children.length > 0) {
@@ -161,6 +168,11 @@ function buildTreeItem(entry) {
 
     label.addEventListener('click', () => {
       if (onFileSelect) onFileSelect(entry.path);
+    });
+    label.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (onContextMenu)
+        onContextMenu({ path: entry.path, name: entry.name, isDir: false }, e.clientX, e.clientY);
     });
     item.appendChild(label);
   }

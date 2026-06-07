@@ -69,6 +69,22 @@ export async function writeFile(path, content) {
   return doInvoke('write_file', { path, content });
 }
 
+export async function renamePath(from, to) {
+  return doInvoke('rename_path', { from, to });
+}
+
+export async function deletePath(path) {
+  return doInvoke('delete_path', { path });
+}
+
+export async function createFile(path) {
+  return doInvoke('create_file', { path });
+}
+
+export async function createDirectory(path) {
+  return doInvoke('create_directory', { path });
+}
+
 export async function copyImageToAssets(srcPath, docPath) {
   // Tauri v2 maps snake_case Rust params to camelCase JS keys.
   return doInvoke('copy_image_to_assets', { srcPath, docPath });
