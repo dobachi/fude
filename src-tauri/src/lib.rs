@@ -328,6 +328,27 @@ fn scan_dir_tree(dir: &Path) -> Result<Vec<FileEntry>, String> {
     scan_dir_tree_filtered(dir, false)
 }
 
+/// File extensions shown in the sidebar by default (without "show all files"):
+/// Markdown variants plus PlantUML sources (Fude previews these too).
+fn is_listed_file(name: &str) -> bool {
+    const EXTS: &[&str] = &[
+        ".md",
+        ".markdown",
+        ".mdown",
+        ".mkd",
+        ".mkdn",
+        ".qmd",
+        ".puml",
+        ".plantuml",
+        ".uml",
+        ".iuml",
+        ".pu",
+        ".wsd",
+    ];
+    let lower = name.to_lowercase();
+    EXTS.iter().any(|e| lower.ends_with(e))
+}
+
 fn scan_dir_tree_filtered(dir: &Path, show_all_files: bool) -> Result<Vec<FileEntry>, String> {
     let mut entries = Vec::new();
 
@@ -375,7 +396,7 @@ fn scan_dir_tree_filtered(dir: &Path, show_all_files: bool) -> Result<Vec<FileEn
                     size,
                 });
             }
-        } else if show_all_files || name.ends_with(".md") || name.ends_with(".qmd") {
+        } else if show_all_files || is_listed_file(&name) {
             let (modified, created, size) = get_file_metadata(&path);
             entries.push(FileEntry {
                 name,
@@ -1574,6 +1595,25 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "report.qmd");
         assert!(!entries[0].is_dir);
+    }
+
+    #[test]
+    fn scan_dir_tree_lists_plantuml_and_markdown_variants() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("a.puml"), "@startuml\n@enduml").unwrap();
+        fs::write(tmp.path().join("b.uml"), "@startuml\n@enduml").unwrap();
+        fs::write(tmp.path().join("c.markdown"), "# x").unwrap();
+        fs::write(tmp.path().join("ignored.png"), "binary").unwrap();
+
+        let names: Vec<String> = scan_dir_tree(tmp.path())
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert!(names.contains(&"a.puml".to_string()));
+        assert!(names.contains(&"b.uml".to_string()));
+        assert!(names.contains(&"c.markdown".to_string()));
+        assert!(!names.contains(&"ignored.png".to_string()));
     }
 
     #[test]
