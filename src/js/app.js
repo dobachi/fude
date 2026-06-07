@@ -1290,6 +1290,14 @@ async function handleOpenFolder() {
         const tree = await backend.readDirTree(folder, getShowAllFiles());
         loadDirectory(tree);
         scheduleSessionSave();
+        if (!tree || tree.length === 0) {
+          showToast(
+            'このフォルダに表示できるファイルがありません（設定で「全ファイル表示」を試してください）',
+            {
+              duration: 6000,
+            },
+          );
+        }
       }
     } else {
       openFolderPicker(async (folder) => {
@@ -1301,6 +1309,7 @@ async function handleOpenFolder() {
     }
   } catch (e) {
     console.error('Failed to open folder:', e);
+    showToast(`フォルダを開けませんでした: ${e?.message || e}`, { type: 'error', duration: 8000 });
   }
 }
 

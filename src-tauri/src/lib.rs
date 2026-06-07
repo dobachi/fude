@@ -358,7 +358,10 @@ fn scan_dir_tree_filtered(dir: &Path, show_all_files: bool) -> Result<Vec<FileEn
         let is_dir = item.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
 
         if is_dir {
-            let children = scan_dir_tree_filtered(&path, show_all_files)?;
+            // Be resilient: a subdirectory we can't read (permissions, special
+            // network entries on WSL/UNC paths, etc.) must not abort the whole
+            // scan — skip it instead.
+            let children = scan_dir_tree_filtered(&path, show_all_files).unwrap_or_default();
             // Only include directories that contain files (directly or nested)
             if !children.is_empty() {
                 let (modified, created, size) = get_file_metadata(&path);
@@ -533,11 +536,11 @@ fn save_image_bytes(bytes: Vec<u8>, doc_path: String, ext: String) -> Result<Str
 
 #[tauri::command]
 fn read_dir_tree(path: String, show_all_files: Option<bool>) -> Result<Vec<FileEntry>, String> {
-    let dir = Path::new(&path);
-    if !dir.is_dir() {
-        return Err(format!("'{}' is not a directory", path));
-    }
-    scan_dir_tree_filtered(dir, show_all_files.unwrap_or(false))
+    // Don't gate on `is_dir()` first: on some network/UNC paths (e.g. WSL's
+    // \\wsl.localhost\...) metadata can be flaky and falsely report "not a
+    // directory". Attempt the scan directly so the real OS error surfaces and
+    // genuine directories still open.
+    scan_dir_tree_filtered(Path::new(&path), show_all_files.unwrap_or(false))
 }
 
 #[tauri::command]
