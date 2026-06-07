@@ -10,6 +10,7 @@
 // cross-origin module-import (CORS) problems with the asset:// protocol. The
 // returned SVG is sanitized before it ever touches the app DOM.
 import { readExtensionFile } from '../../backend.js';
+import { resolveIncludes } from './includes.js';
 
 const EXT_ID = 'plantuml';
 const RENDER_TIMEOUT_MS = 20000;
@@ -167,12 +168,25 @@ async function ensureEngine() {
   return enginePromise;
 }
 
-async function doRenderPlantUML(text) {
+async function doRenderPlantUML(text, baseDir, cacheKey) {
+  // Resolve !include locally (stdlib packs + local files) before rendering,
+  // since the engine has no filesystem/network.
+  let source = text;
+  if (/^\s*!include/m.test(text)) {
+    const r = await resolveIncludes(text, baseDir);
+    source = r.text;
+    if (r.missingNamespaces.length) {
+      throw new Error(
+        `未導入の stdlib: ${r.missingNamespaces.join(', ')}（設定の拡張機能で有効化してください）`,
+      );
+    }
+  }
+
   await ensureEngine();
   const id = ++seq;
   const svg = await new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
-    iframe.contentWindow.postMessage({ type: 'render', id, text }, '*');
+    iframe.contentWindow.postMessage({ type: 'render', id, text: source }, '*');
     setTimeout(() => {
       if (pending.has(id)) {
         pending.delete(id);
@@ -181,7 +195,7 @@ async function doRenderPlantUML(text) {
     }, RENDER_TIMEOUT_MS);
   });
   const clean = sanitizeSvg(svg);
-  cache.set(text, clean);
+  cache.set(cacheKey, clean);
   return clean;
 }
 
@@ -197,9 +211,10 @@ let renderChain = Promise.resolve();
  * @param {string} text
  * @returns {Promise<string>}
  */
-export function renderPlantUML(text) {
-  if (cache.has(text)) return cache.get(text);
-  const run = renderChain.then(() => doRenderPlantUML(text));
+export function renderPlantUML(text, baseDir = '') {
+  const cacheKey = `${baseDir} ${text}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+  const run = renderChain.then(() => doRenderPlantUML(text, baseDir, cacheKey));
   // Keep the chain alive regardless of individual success/failure.
   renderChain = run.then(
     () => {},

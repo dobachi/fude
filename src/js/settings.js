@@ -88,7 +88,12 @@ export async function openSettings() {
             <span class="ext-status" id="ext-status-plantuml"></span>
             <div class="ext-progress" id="ext-progress-plantuml" style="display:none"><div class="ext-progress-bar"></div></div>
           </div>
-          <small class="setting-hint">有効化すると初回のみ描画エンジン（約十数MB）をダウンロードします。コードブロックを <code>\`\`\`plantuml</code> で記述するとプレビューに図が表示されます。</small>
+          <div class="ext-row" data-ext="plantuml-archimate">
+            <label><input type="checkbox" id="setting-archimate" /> PlantUML ArchiMate (stdlib)</label>
+            <span class="ext-status" id="ext-status-archimate"></span>
+            <div class="ext-progress" id="ext-progress-archimate" style="display:none"><div class="ext-progress-bar"></div></div>
+          </div>
+          <small class="setting-hint">PlantUML: 有効化すると初回のみ描画エンジン（約十数MB）をダウンロード。 ArchiMate: <code>!include &lt;archimate/Archimate&gt;</code> をローカルで解決（PlantUML本体が前提・自動導入）。</small>
         </div>
       </div>
       <div class="settings-footer">
@@ -137,61 +142,119 @@ export async function openSettings() {
   document.addEventListener('keydown', handleEsc);
 }
 
-async function setupExtensions() {
-  const cb = settingsPanel?.querySelector('#setting-plantuml');
-  const statusEl = settingsPanel?.querySelector('#ext-status-plantuml');
-  const progEl = settingsPanel?.querySelector('#ext-progress-plantuml');
-  const bar = progEl?.querySelector('.ext-progress-bar');
-  if (!cb || !statusEl) return;
-
-  let installed = false;
-  try {
-    const st = await backend.extensionStatus('plantuml');
-    installed = !!st.installed;
-  } catch {
-    /* ignore (e.g. browser mode) */
-  }
-  statusEl.textContent = installed ? '導入済み' : '未導入';
-
-  cb.addEventListener('change', async () => {
-    if (!cb.checked) {
-      statusEl.textContent = installed ? '導入済み（無効）' : '未導入';
-      return;
-    }
-    if (installed) {
-      statusEl.textContent = '導入済み';
-      return;
-    }
-    // First enable: download the engine.
-    cb.disabled = true;
-    if (progEl) progEl.style.display = '';
-    if (bar) bar.style.width = '0%';
-    statusEl.textContent = 'ダウンロード中…';
-    await new Promise((resolve) => {
-      backend.installExtension(
-        'plantuml',
-        (p, t) => {
-          const pct = t ? Math.round((p / t) * 100) : 0;
-          if (bar) bar.style.width = `${pct}%`;
-          statusEl.textContent = `ダウンロード中… ${pct}%`;
-        },
-        () => {
-          installed = true;
-          statusEl.textContent = '導入済み';
-          if (progEl) progEl.style.display = 'none';
-          cb.disabled = false;
-          resolve();
-        },
-        (err) => {
-          statusEl.textContent = `失敗: ${err.message}`;
-          if (progEl) progEl.style.display = 'none';
-          cb.checked = false;
-          cb.disabled = false;
-          resolve();
-        },
-      );
-    });
+// Download an extension showing progress in the given row elements.
+// Resolves true on success, false on failure.
+function installExtensionWithProgress(id, statusEl, progEl, bar) {
+  if (progEl) progEl.style.display = '';
+  if (bar) bar.style.width = '0%';
+  statusEl.textContent = 'ダウンロード中…';
+  return new Promise((resolve) => {
+    backend.installExtension(
+      id,
+      (p, t) => {
+        const pct = t ? Math.round((p / t) * 100) : 0;
+        if (bar) bar.style.width = `${pct}%`;
+        statusEl.textContent = `ダウンロード中… ${pct}%`;
+      },
+      () => {
+        statusEl.textContent = '導入済み';
+        if (progEl) progEl.style.display = 'none';
+        resolve(true);
+      },
+      (err) => {
+        statusEl.textContent = `失敗: ${err.message}`;
+        if (progEl) progEl.style.display = 'none';
+        resolve(false);
+      },
+    );
   });
+}
+
+async function isInstalled(id) {
+  try {
+    const st = await backend.extensionStatus(id);
+    return !!st.installed;
+  } catch {
+    return false;
+  }
+}
+
+async function setupExtensions() {
+  const panel = settingsPanel;
+  if (!panel) return;
+
+  // --- PlantUML engine (gated by features.plantuml_preview) ---
+  const cb = panel.querySelector('#setting-plantuml');
+  const statusEl = panel.querySelector('#ext-status-plantuml');
+  const progEl = panel.querySelector('#ext-progress-plantuml');
+  const bar = progEl?.querySelector('.ext-progress-bar');
+
+  // --- ArchiMate stdlib (state = installed) ---
+  const acb = panel.querySelector('#setting-archimate');
+  const aStatus = panel.querySelector('#ext-status-archimate');
+  const aProg = panel.querySelector('#ext-progress-archimate');
+  const aBar = aProg?.querySelector('.ext-progress-bar');
+
+  let plantumlInstalled = await isInstalled('plantuml');
+  if (statusEl) statusEl.textContent = plantumlInstalled ? '導入済み' : '未導入';
+
+  let archimateInstalled = await isInstalled('plantuml-archimate');
+  if (acb) acb.checked = archimateInstalled;
+  if (aStatus) aStatus.textContent = archimateInstalled ? '導入済み' : '未導入';
+
+  if (cb && statusEl) {
+    cb.addEventListener('change', async () => {
+      if (!cb.checked) {
+        statusEl.textContent = plantumlInstalled ? '導入済み（無効）' : '未導入';
+        return;
+      }
+      if (plantumlInstalled) {
+        statusEl.textContent = '導入済み';
+        return;
+      }
+      cb.disabled = true;
+      const ok = await installExtensionWithProgress('plantuml', statusEl, progEl, bar);
+      plantumlInstalled = ok;
+      cb.checked = ok;
+      cb.disabled = false;
+    });
+  }
+
+  if (acb && aStatus) {
+    acb.addEventListener('change', async () => {
+      if (!acb.checked) {
+        // Uninstall the stdlib pack (files kept-or-removed is fine; remove to be tidy).
+        try {
+          await backend.uninstallExtension('plantuml-archimate');
+        } catch {
+          /* ignore */
+        }
+        archimateInstalled = false;
+        aStatus.textContent = '未導入';
+        return;
+      }
+      if (archimateInstalled) {
+        aStatus.textContent = '導入済み';
+        return;
+      }
+      acb.disabled = true;
+      // ArchiMate needs the engine — install it first if missing.
+      if (!plantumlInstalled) {
+        const okEngine = await installExtensionWithProgress('plantuml', statusEl, progEl, bar);
+        plantumlInstalled = okEngine;
+        if (cb) cb.checked = okEngine;
+        if (!okEngine) {
+          acb.checked = false;
+          acb.disabled = false;
+          return;
+        }
+      }
+      const ok = await installExtensionWithProgress('plantuml-archimate', aStatus, aProg, aBar);
+      archimateInstalled = ok;
+      acb.checked = ok;
+      acb.disabled = false;
+    });
+  }
 }
 
 async function saveSettings() {

@@ -265,7 +265,7 @@ export function isPlantumlFile(path) {
 }
 
 /** Render an entire document as a single PlantUML diagram into `container`. */
-function renderPlantumlDocument(content, container) {
+function renderPlantumlDocument(content, container, baseDir) {
   container.innerHTML = '';
   const holder = document.createElement('div');
   holder.className = 'puml-diagram';
@@ -274,7 +274,7 @@ function renderPlantumlDocument(content, container) {
   container.appendChild(holder);
 
   import('../features/plantuml/adapter.js')
-    .then((adapter) => adapter.renderPlantUML(content))
+    .then((adapter) => adapter.renderPlantUML(content, baseDir))
     .then((svg) => {
       if (!holder.isConnected) return;
       holder.innerHTML = svg;
@@ -299,7 +299,7 @@ function renderPlantumlDocument(content, container) {
 export function renderPreview(content, basePath, container, filePath) {
   if (!container) return;
   if (plantumlEnabled && isPlantumlFile(filePath)) {
-    renderPlantumlDocument(content, container);
+    renderPlantumlDocument(content, container, basePath);
     return;
   }
   renderMarkdown(content, basePath, container);
@@ -341,7 +341,7 @@ export async function enhancePreview(container) {
     pre.replaceWith(holder);
 
     adapter
-      .renderPlantUML(text)
+      .renderPlantUML(text, currentBasePath)
       .then((svg) => {
         if (!holder.isConnected) return;
         holder.innerHTML = svg;
