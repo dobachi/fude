@@ -20,11 +20,10 @@ import { isImagePath, mimeToExt, insertImageMarkdown } from './core/image-insert
 import { showToast } from './core/toast.js';
 import {
   initPreview,
-  renderMarkdown,
   syncPreviewToLine,
   getLineFromPreview,
   setPlantumlEnabled,
-  enhancePreview,
+  renderPreview,
 } from './core/preview.js';
 import {
   openTab,
@@ -111,8 +110,7 @@ function rerenderPreviews() {
   for (const p of panesModule.getAllPanes()) {
     if (!p.previewContainer) continue;
     const basePath = dirnameOf(p.filePath);
-    renderMarkdown(p.content || '', basePath, p.previewContainer);
-    enhancePreview(p.previewContainer);
+    renderPreview(p.content || '', basePath, p.previewContainer, p.filePath);
   }
 }
 
@@ -877,8 +875,7 @@ function handlePaneContentChange(pane, newContent) {
     // would otherwise drive syncPreviewToLine and shake the preview.
     typingLockoutUntil = Date.now() + TYPING_PREVIEW_SYNC_LOCKOUT_MS;
     const prevScrollTop = pane.previewContainer.scrollTop;
-    renderMarkdown(newContent, basePath, pane.previewContainer);
-    enhancePreview(pane.previewContainer);
+    renderPreview(newContent, basePath, pane.previewContainer, tab.path);
     // Preserve preview scroll position across re-render so the preview
     // doesn't visually jump to the top on every edit.
     pane.previewContainer.scrollTop = prevScrollTop;
@@ -1022,8 +1019,7 @@ function handleTabChange(tab) {
   // Render preview
   if (viewMode === 'split' || viewMode === 'preview') {
     const basePath = dirnameOf(tab.path);
-    renderMarkdown(tab.content, basePath, previewContainer);
-    enhancePreview(previewContainer);
+    renderPreview(tab.content, basePath, previewContainer, tab.path);
   }
 
   if (tab.path) highlightFile(tab.path);
@@ -1070,8 +1066,7 @@ function applyReloadToAllPanes(path, content, tabId) {
       // Re-render preview if visible
       if ((viewMode === 'split' || viewMode === 'preview') && p.previewContainer) {
         const basePath = dirnameOf(path);
-        renderMarkdown(content, basePath, p.previewContainer);
-        enhancePreview(p.previewContainer);
+        renderPreview(content, basePath, p.previewContainer, path);
       }
     }
   }
@@ -1144,8 +1139,7 @@ function applyViewMode() {
       const pane = getActivePane();
       if (pane) {
         const basePath = dirnameOf(tab.path);
-        renderMarkdown(tab.content, basePath, pane.previewContainer);
-        enhancePreview(pane.previewContainer);
+        renderPreview(tab.content, basePath, pane.previewContainer, tab.path);
       }
     }
   }

@@ -20,7 +20,14 @@ let seq = 0;
 const pending = new Map(); // id -> { resolve, reject }
 const cache = new Map(); // diagram text -> sanitized svg
 
-const RUNNER_HTML = `<!doctype html><html><head><meta charset="utf-8"></head><body><script>
+// NOTE on the design (verified in a real Chromium via puppeteer):
+//  - The engine entry is `render(lines, elementId)` which WRITES the SVG into a
+//    DOM element (the `renderToString` export returns undefined — do not use it).
+//  - viz-global.js (Graphviz) locates resources via `new URL(x, document.baseURI)`.
+//    In a srcdoc iframe document.baseURI is "about:srcdoc", which breaks that and
+//    makes dot-based diagrams (class/component/rectangle graphs) render empty.
+//    Setting a valid <base href> fixes it; sequence diagrams work either way.
+const RUNNER_HTML = `<!doctype html><html><head><meta charset="utf-8"><base href="https://tauri.localhost/"></head><body><div id="out"></div><script>
   var renderFn = null;
   function loadClassic(code){return new Promise(function(res,rej){
     var url=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
@@ -34,6 +41,7 @@ const RUNNER_HTML = `<!doctype html><html><head><meta charset="utf-8"></head><bo
     var url=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
     try{ return await import(url); } finally { URL.revokeObjectURL(url); }
   }
+  function readOut(){ var el=document.getElementById('out'); return el ? el.innerHTML : ''; }
   window.addEventListener('message', function(e){
     var msg=e.data||{};
     if(msg.type==='init'){
@@ -41,23 +49,29 @@ const RUNNER_HTML = `<!doctype html><html><head><meta charset="utf-8"></head><bo
         try{
           if(msg.viz) await loadClassic(msg.viz);
           var mod=await loadModule(msg.plantuml);
-          renderFn = mod.renderToString || (mod.default && mod.default.renderToString);
-          if(typeof renderFn!=='function') throw new Error('renderToString export not found');
+          renderFn = mod.render || (mod.default && mod.default.render);
+          if(typeof renderFn!=='function') throw new Error('render export not found');
           parent.postMessage({type:'ready'},'*');
         }catch(err){ parent.postMessage({type:'init-error',error:String(err&&err.message||err)},'*'); }
       })();
     } else if(msg.type==='render'){
-      try{
-        if(!renderFn) throw new Error('engine not ready');
-        var lines=msg.text.split(/\\r\\n|\\r|\\n/);
-        var svg=renderFn(lines);
-        if(svg && typeof svg.then==='function'){
-          svg.then(function(s){parent.postMessage({type:'result',id:msg.id,svg:s},'*');})
-             .catch(function(er){parent.postMessage({type:'result',id:msg.id,error:String(er&&er.message||er)},'*');});
-        } else {
+      (async function(){
+        try{
+          if(!renderFn) throw new Error('engine not ready');
+          var el=document.getElementById('out'); el.innerHTML='';
+          var ret=renderFn(msg.text.split(/\\r\\n|\\r|\\n/),'out');
+          if(ret && typeof ret.then==='function') await ret;
+          // Graphviz/viz writes the SVG asynchronously, so poll until it lands
+          // (a single rAF is not enough for dot-based diagrams).
+          var svg='';
+          for(var i=0;i<200;i++){
+            svg=readOut();
+            if(svg && svg.indexOf('<svg')!==-1) break;
+            await new Promise(function(r){setTimeout(r,50);});
+          }
           parent.postMessage({type:'result',id:msg.id,svg:svg},'*');
-        }
-      }catch(err){ parent.postMessage({type:'result',id:msg.id,error:String(err&&err.message||err)},'*'); }
+        }catch(err){ parent.postMessage({type:'result',id:msg.id,error:String(err&&err.message||err)},'*'); }
+      })();
     }
   });
 </script></body></html>`;

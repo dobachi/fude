@@ -252,6 +252,57 @@ export function setPlantumlEnabled(enabled) {
   plantumlEnabled = !!enabled;
 }
 
+// File extensions whose entire contents are a single PlantUML diagram.
+const PLANTUML_EXTS = ['puml', 'plantuml', 'uml', 'iuml', 'pu', 'wsd'];
+
+/** True if `path` is a standalone PlantUML file (rendered whole as one diagram). */
+export function isPlantumlFile(path) {
+  if (!path) return false;
+  const dot = path.lastIndexOf('.');
+  if (dot < 0) return false;
+  return PLANTUML_EXTS.includes(path.slice(dot + 1).toLowerCase());
+}
+
+/** Render an entire document as a single PlantUML diagram into `container`. */
+function renderPlantumlDocument(content, container) {
+  container.innerHTML = '';
+  const holder = document.createElement('div');
+  holder.className = 'puml-diagram';
+  holder.setAttribute('data-source-line', '1');
+  holder.textContent = '⏳ PlantUML…';
+  container.appendChild(holder);
+
+  import('../features/plantuml/adapter.js')
+    .then((adapter) => adapter.renderPlantUML(content))
+    .then((svg) => {
+      if (holder.isConnected) holder.innerHTML = svg;
+    })
+    .catch((err) => {
+      if (!holder.isConnected) return;
+      holder.classList.add('puml-error');
+      holder.textContent = `PlantUML error: ${err.message}`;
+    });
+}
+
+/**
+ * Render a document into the preview, choosing the right renderer: a standalone
+ * PlantUML file (when the extension is enabled) is drawn as a single diagram;
+ * everything else is Markdown (with ```plantuml fences enhanced afterwards).
+ * @param {string} content
+ * @param {string} basePath
+ * @param {HTMLElement} container
+ * @param {string} [filePath]
+ */
+export function renderPreview(content, basePath, container, filePath) {
+  if (!container) return;
+  if (plantumlEnabled && isPlantumlFile(filePath)) {
+    renderPlantumlDocument(content, container);
+    return;
+  }
+  renderMarkdown(content, basePath, container);
+  enhancePreview(container);
+}
+
 /**
  * Post-render pass: replace ```plantuml / ```puml code blocks with rendered
  * SVG. No-op unless the extension is enabled. The heavy engine adapter is
