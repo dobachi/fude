@@ -37,6 +37,7 @@ export default [
         localStorage: 'readonly',
         DOMParser: 'readonly',
         XMLSerializer: 'readonly',
+        WheelEvent: 'readonly',
       },
     },
     rules: {

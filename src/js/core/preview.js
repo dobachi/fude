@@ -1,6 +1,7 @@
 // preview.js - Markdown preview with markdown-it
 import markdownIt from 'markdown-it';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { attachPanZoom } from './svg-panzoom.js';
 import { isLocalTauri } from '../backend.js';
 import { openExternal, isExternalUrl } from './external-link.js';
 
@@ -275,7 +276,9 @@ function renderPlantumlDocument(content, container) {
   import('../features/plantuml/adapter.js')
     .then((adapter) => adapter.renderPlantUML(content))
     .then((svg) => {
-      if (holder.isConnected) holder.innerHTML = svg;
+      if (!holder.isConnected) return;
+      holder.innerHTML = svg;
+      attachPanZoom(holder);
     })
     .catch((err) => {
       if (!holder.isConnected) return;
@@ -340,7 +343,9 @@ export async function enhancePreview(container) {
     adapter
       .renderPlantUML(text)
       .then((svg) => {
-        if (holder.isConnected) holder.innerHTML = svg;
+        if (!holder.isConnected) return;
+        holder.innerHTML = svg;
+        attachPanZoom(holder);
       })
       .catch((err) => {
         if (!holder.isConnected) return;

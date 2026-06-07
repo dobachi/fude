@@ -1860,6 +1860,53 @@ body {
   white-space: pre-wrap;
 }
 
+/* Pan/zoom viewport for rendered diagrams */
+.puml-diagram.panzoom {
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.puml-diagram.panzoom.grabbing {
+  cursor: grabbing;
+}
+
+.panzoom-controls {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.puml-diagram.panzoom:hover .panzoom-controls {
+  opacity: 1;
+}
+
+.panzoom-controls button {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  color: var(--fg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.panzoom-controls button:hover {
+  background: var(--bg-hover);
+}
+
 .ai-composer-custom {
   display: flex;
   gap: 6px;
