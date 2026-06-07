@@ -152,6 +152,7 @@ export function openImageFullscreen(src) {
   const img = document.createElement('img');
   img.src = src;
   img.alt = '';
+  img.draggable = false;
   openFullscreen(img);
 }
 
@@ -162,10 +163,13 @@ export function openImageFullscreen(src) {
  */
 export function attachPanZoom(holder) {
   if (!holder || holder.dataset.panzoom === '1') return;
-  const svg = holder.querySelector('svg');
-  if (!svg) return;
+  const target = holder.querySelector('svg, img');
+  if (!target) return;
   holder.dataset.panzoom = '1';
   holder.classList.add('panzoom');
-  const pz = enablePanZoom(holder, svg);
-  holder.appendChild(makeControls(pz, () => openFullscreen(svg)));
+  // Images are draggable by default; that native drag steals pointer events and
+  // breaks panning, so disable it.
+  if (target.tagName.toLowerCase() === 'img') target.draggable = false;
+  const pz = enablePanZoom(holder, target);
+  holder.appendChild(makeControls(pz, () => openFullscreen(target)));
 }

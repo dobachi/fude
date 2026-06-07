@@ -55,7 +55,7 @@ function getFilename(path) {
   return path.split('/').pop().split('\\').pop();
 }
 
-export function openTab(path, content = '') {
+export function openTab(path, content = '', opts = {}) {
   // Check if file already open
   if (path) {
     const existing = tabs.find((t) => t.path === path);
@@ -73,6 +73,8 @@ export function openTab(path, content = '') {
     dirty: false,
     cursor: { from: 0, to: 0 },
     scroll: { top: 0, left: 0 },
+    // 'text' (editable) or 'image' (read-only viewer).
+    kind: opts.kind || 'text',
   };
 
   tabs.push(tab);

@@ -18,6 +18,8 @@ import {
 } from './core/editor.js';
 import { initOutline, updateOutline, setActiveOutlineLine, clearOutline } from './core/outline.js';
 import { isImagePath, mimeToExt, insertImageMarkdown } from './core/image-insert.js';
+import { attachPanZoom } from './core/svg-panzoom.js';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
 import {
   initPreview,
@@ -608,6 +610,10 @@ async function init() {
     // First, open all tabs with saved content
     for (const tabInfo of session.open_tabs) {
       try {
+        if (isImagePath(tabInfo.path)) {
+          openTab(tabInfo.path, '', { kind: 'image' });
+          continue;
+        }
         const content = await backend.readFile(tabInfo.path);
         openTab(tabInfo.path, content);
       } catch {
@@ -960,10 +966,10 @@ async function handleFileSelect(path) {
   try {
     // Images can't be loaded as text — open them in the pan/zoom viewer.
     if (isImagePath(path)) {
-      const { convertFileSrc } = await import('@tauri-apps/api/core');
-      const { openImageFullscreen } = await import('./core/svg-panzoom.js');
-      openImageFullscreen(isLocalTauri() ? convertFileSrc(path) : path);
+      // Open images as a read-only viewer tab (not as editable text).
+      openTab(path, '', { kind: 'image' });
       highlightFile(path);
+      if (viewMode === 'preview') setViewMode('split');
       return;
     }
     const content = await backend.readFile(path);
@@ -990,6 +996,25 @@ async function openPath(path) {
   }
 }
 
+/** Render an image file into a pane's main area as a pan/zoom viewer. */
+function renderImageTab(pane, tab) {
+  if (pane.previewContainer) pane.previewContainer.innerHTML = '';
+  const container = pane.editorContainer;
+  if (!container) return;
+  container.innerHTML = '';
+  const holder = document.createElement('div');
+  holder.className = 'puml-diagram image-view';
+  const img = document.createElement('img');
+  img.src = isLocalTauri() ? convertFileSrc(tab.path) : tab.path;
+  img.alt = tab.name || '';
+  img.draggable = false;
+  holder.appendChild(img);
+  container.appendChild(holder);
+  // Enable pan/zoom once the image has dimensions (and immediately, idempotently).
+  attachPanZoom(holder);
+  img.addEventListener('load', () => attachPanZoom(holder), { once: true });
+}
+
 // ── Tab change handler ─────────────────────────────────────
 function handleTabChange(tab) {
   const pane = getActivePane();
@@ -1011,6 +1036,18 @@ function handleTabChange(tab) {
     pane.filePath = null;
     pane.content = '';
     clearOutline();
+    return;
+  }
+
+  // Image tabs are a read-only viewer, not a text editor.
+  if (tab.kind === 'image') {
+    renderImageTab(pane, tab);
+    pane.filePath = tab.path;
+    pane.content = '';
+    pane.editorView = null;
+    if (tab.path) highlightFile(tab.path);
+    clearOutline();
+    scheduleSessionSave();
     return;
   }
 
@@ -1339,7 +1376,7 @@ function saveActivePaneTabState() {
 async function performSave({ forceDialog }) {
   const tab = getActiveTab();
   const view = currentView();
-  if (!tab || !view) return;
+  if (!tab || tab.kind === 'image' || !view) return;
   const content = getContent(view);
 
   // Quick path: existing path + not forcing dialog → just write
