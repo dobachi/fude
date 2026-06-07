@@ -167,14 +167,7 @@ async function ensureEngine() {
   return enginePromise;
 }
 
-/**
- * Render PlantUML text to sanitized SVG markup. Results are cached by source so
- * repeated previews (every keystroke) don't re-run the engine.
- * @param {string} text
- * @returns {Promise<string>}
- */
-export async function renderPlantUML(text) {
-  if (cache.has(text)) return cache.get(text);
+async function doRenderPlantUML(text) {
   await ensureEngine();
   const id = ++seq;
   const svg = await new Promise((resolve, reject) => {
@@ -190,6 +183,29 @@ export async function renderPlantUML(text) {
   const clean = sanitizeSvg(svg);
   cache.set(text, clean);
   return clean;
+}
+
+// Renders share one iframe with a single output element, so they must run one
+// at a time — otherwise concurrent renders (e.g. switching files quickly) race
+// on that element and a diagram can show the previous file's output.
+let renderChain = Promise.resolve();
+
+/**
+ * Render PlantUML text to sanitized SVG markup. Results are cached by source so
+ * repeated previews (every keystroke) don't re-run the engine. Calls are
+ * serialized to avoid cross-render races in the shared engine iframe.
+ * @param {string} text
+ * @returns {Promise<string>}
+ */
+export function renderPlantUML(text) {
+  if (cache.has(text)) return cache.get(text);
+  const run = renderChain.then(() => doRenderPlantUML(text));
+  // Keep the chain alive regardless of individual success/failure.
+  renderChain = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
 }
 
 /** Drop the engine + cache (e.g. after the extension is re-installed). */
