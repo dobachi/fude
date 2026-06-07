@@ -69,6 +69,11 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # rust-cache keys by RUNNER_OS (Linux) + host triple, which are the
+          # same for ubuntu-22.04 and ubuntu-24.04 — without this, a cache built
+          # on one distro is restored on the other and the prebuilt `tauri`
+          # rlib mismatches ("can't find crate for tauri"). Namespace per runner.
+          key: ${{ matrix.platform }}
 
       - name: Install Linux dependencies
         if: matrix.target == 'linux'
