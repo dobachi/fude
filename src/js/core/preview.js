@@ -243,6 +243,62 @@ export function renderMarkdown(text, basePath = '', container = null) {
   container.innerHTML = html;
 }
 
+// ── PlantUML extension hook ────────────────────────────────
+
+let plantumlEnabled = false;
+
+/** Toggle PlantUML diagram rendering in the preview (set from config). */
+export function setPlantumlEnabled(enabled) {
+  plantumlEnabled = !!enabled;
+}
+
+/**
+ * Post-render pass: replace ```plantuml / ```puml code blocks with rendered
+ * SVG. No-op unless the extension is enabled. The heavy engine adapter is
+ * imported lazily and only when a diagram is actually present.
+ * @param {HTMLElement} container
+ */
+export async function enhancePreview(container) {
+  if (!plantumlEnabled || !container) return;
+  const codes = container.querySelectorAll(
+    'pre > code.language-plantuml, pre > code.language-puml',
+  );
+  if (!codes.length) return;
+
+  let adapter;
+  try {
+    adapter = await import('../features/plantuml/adapter.js');
+  } catch (e) {
+    console.error('Failed to load PlantUML adapter:', e);
+    return;
+  }
+
+  codes.forEach((code) => {
+    const pre = code.parentElement;
+    if (!pre || pre.dataset.pumlHandled) return;
+    pre.dataset.pumlHandled = '1';
+
+    const text = code.textContent || '';
+    const line = pre.getAttribute('data-source-line') || '';
+    const holder = document.createElement('div');
+    holder.className = 'puml-diagram';
+    if (line) holder.setAttribute('data-source-line', line);
+    holder.textContent = '⏳ PlantUML…';
+    pre.replaceWith(holder);
+
+    adapter
+      .renderPlantUML(text)
+      .then((svg) => {
+        if (holder.isConnected) holder.innerHTML = svg;
+      })
+      .catch((err) => {
+        if (!holder.isConnected) return;
+        holder.classList.add('puml-error');
+        holder.textContent = `PlantUML error: ${err.message}`;
+      });
+  });
+}
+
 export function setTheme(_theme) {
   // Theme is handled via CSS data-theme attribute
 }

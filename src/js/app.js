@@ -23,6 +23,8 @@ import {
   renderMarkdown,
   syncPreviewToLine,
   getLineFromPreview,
+  setPlantumlEnabled,
+  enhancePreview,
 } from './core/preview.js';
 import {
   openTab,
@@ -101,6 +103,17 @@ registerPanesModule(panesModule);
 /** Helper: get the active pane's EditorView */
 function currentView() {
   return getActivePaneView();
+}
+
+/** Re-render the preview in every pane (used after a live config change). */
+function rerenderPreviews() {
+  if (viewMode !== 'split' && viewMode !== 'preview') return;
+  for (const p of panesModule.getAllPanes()) {
+    if (!p.previewContainer) continue;
+    const basePath = dirnameOf(p.filePath);
+    renderMarkdown(p.content || '', basePath, p.previewContainer);
+    enhancePreview(p.previewContainer);
+  }
 }
 
 /**
@@ -428,6 +441,15 @@ async function init() {
   }
 
   initTheme(config.theme || 'dark');
+  setPlantumlEnabled(config.features?.plantuml_preview);
+
+  // Live-apply config changes saved from the Settings panel.
+  window.addEventListener('fude:config-saved', (e) => {
+    const saved = e.detail || {};
+    config = saved;
+    setPlantumlEnabled(saved.features?.plantuml_preview);
+    rerenderPreviews();
+  });
 
   // Stamp app version into title and mode badge ASAP so it's visible even if
   // a later init step throws. Tauri-only; browser mode just shows mode without version.
@@ -856,6 +878,7 @@ function handlePaneContentChange(pane, newContent) {
     typingLockoutUntil = Date.now() + TYPING_PREVIEW_SYNC_LOCKOUT_MS;
     const prevScrollTop = pane.previewContainer.scrollTop;
     renderMarkdown(newContent, basePath, pane.previewContainer);
+    enhancePreview(pane.previewContainer);
     // Preserve preview scroll position across re-render so the preview
     // doesn't visually jump to the top on every edit.
     pane.previewContainer.scrollTop = prevScrollTop;
@@ -1000,6 +1023,7 @@ function handleTabChange(tab) {
   if (viewMode === 'split' || viewMode === 'preview') {
     const basePath = dirnameOf(tab.path);
     renderMarkdown(tab.content, basePath, previewContainer);
+    enhancePreview(previewContainer);
   }
 
   if (tab.path) highlightFile(tab.path);
@@ -1047,6 +1071,7 @@ function applyReloadToAllPanes(path, content, tabId) {
       if ((viewMode === 'split' || viewMode === 'preview') && p.previewContainer) {
         const basePath = dirnameOf(path);
         renderMarkdown(content, basePath, p.previewContainer);
+        enhancePreview(p.previewContainer);
       }
     }
   }
@@ -1120,6 +1145,7 @@ function applyViewMode() {
       if (pane) {
         const basePath = dirnameOf(tab.path);
         renderMarkdown(tab.content, basePath, pane.previewContainer);
+        enhancePreview(pane.previewContainer);
       }
     }
   }

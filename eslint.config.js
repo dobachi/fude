@@ -35,6 +35,8 @@ export default [
         CustomEvent: 'readonly',
         fetch: 'readonly',
         localStorage: 'readonly',
+        DOMParser: 'readonly',
+        XMLSerializer: 'readonly',
       },
     },
     rules: {

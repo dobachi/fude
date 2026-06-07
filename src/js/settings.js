@@ -81,6 +81,15 @@ export async function openSettings() {
           </div>
           <small class="setting-hint">Per-task selections fall back to the default if left empty.</small>
         </div>
+        <div class="setting-group setting-extensions">
+          <label>拡張機能 / Extensions</label>
+          <div class="ext-row" data-ext="plantuml">
+            <label><input type="checkbox" id="setting-plantuml" ${config.features?.plantuml_preview ? 'checked' : ''} /> PlantUML Preview</label>
+            <span class="ext-status" id="ext-status-plantuml"></span>
+            <div class="ext-progress" id="ext-progress-plantuml" style="display:none"><div class="ext-progress-bar"></div></div>
+          </div>
+          <small class="setting-hint">有効化すると初回のみ描画エンジン（約十数MB）をダウンロードします。コードブロックを <code>\`\`\`plantuml</code> で記述するとプレビューに図が表示されます。</small>
+        </div>
       </div>
       <div class="settings-footer">
         <button class="btn-save-settings">Save</button>
@@ -116,6 +125,9 @@ export async function openSettings() {
   // unset per-task rows) and opens the picker on click.
   setupModelRows(config).catch((e) => console.error('Model rows setup failed:', e));
 
+  // Extensions: show install state and handle on-demand download.
+  setupExtensions().catch((e) => console.error('Extensions setup failed:', e));
+
   const handleEsc = (e) => {
     if (e.key === 'Escape') {
       closeSettings();
@@ -123,6 +135,63 @@ export async function openSettings() {
     }
   };
   document.addEventListener('keydown', handleEsc);
+}
+
+async function setupExtensions() {
+  const cb = settingsPanel?.querySelector('#setting-plantuml');
+  const statusEl = settingsPanel?.querySelector('#ext-status-plantuml');
+  const progEl = settingsPanel?.querySelector('#ext-progress-plantuml');
+  const bar = progEl?.querySelector('.ext-progress-bar');
+  if (!cb || !statusEl) return;
+
+  let installed = false;
+  try {
+    const st = await backend.extensionStatus('plantuml');
+    installed = !!st.installed;
+  } catch {
+    /* ignore (e.g. browser mode) */
+  }
+  statusEl.textContent = installed ? '導入済み' : '未導入';
+
+  cb.addEventListener('change', async () => {
+    if (!cb.checked) {
+      statusEl.textContent = installed ? '導入済み（無効）' : '未導入';
+      return;
+    }
+    if (installed) {
+      statusEl.textContent = '導入済み';
+      return;
+    }
+    // First enable: download the engine.
+    cb.disabled = true;
+    if (progEl) progEl.style.display = '';
+    if (bar) bar.style.width = '0%';
+    statusEl.textContent = 'ダウンロード中…';
+    await new Promise((resolve) => {
+      backend.installExtension(
+        'plantuml',
+        (p, t) => {
+          const pct = t ? Math.round((p / t) * 100) : 0;
+          if (bar) bar.style.width = `${pct}%`;
+          statusEl.textContent = `ダウンロード中… ${pct}%`;
+        },
+        () => {
+          installed = true;
+          statusEl.textContent = '導入済み';
+          if (progEl) progEl.style.display = 'none';
+          cb.disabled = false;
+          resolve();
+        },
+        (err) => {
+          statusEl.textContent = `失敗: ${err.message}`;
+          if (progEl) progEl.style.display = 'none';
+          cb.checked = false;
+          cb.disabled = false;
+          resolve();
+        },
+      );
+    });
+  });
 }
 
 async function saveSettings() {
@@ -142,6 +211,7 @@ async function saveSettings() {
     features: {
       ai_copilot: document.querySelector('#setting-ai-copilot')?.checked || false,
       diff_highlight: document.querySelector('#setting-diff-highlight')?.checked || false,
+      plantuml_preview: document.querySelector('#setting-plantuml')?.checked || false,
     },
     font_size: parseInt(document.querySelector('#setting-fontsize')?.value || '14', 10),
     key_mode: document.querySelector('#setting-keymode')?.value || 'normal',
@@ -158,6 +228,8 @@ async function saveSettings() {
       config.openrouter_api_key = null;
     }
     await backend.saveConfig(config);
+    // Let the app live-apply changes (e.g. enable PlantUML preview) without restart.
+    window.dispatchEvent(new CustomEvent('fude:config-saved', { detail: config }));
   } catch (e) {
     console.error('Failed to save config:', e);
     // Show user-visible error

@@ -63,6 +63,7 @@ pub struct Session {
 pub struct Features {
     pub ai_copilot: bool,
     pub diff_highlight: bool,
+    pub plantuml_preview: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,6 +212,7 @@ impl Default for Config {
             features: Features {
                 ai_copilot: false,
                 diff_highlight: true,
+                plantuml_preview: false,
             },
             font_size: 14,
             vim_mode: false,
@@ -231,6 +233,7 @@ impl Default for Features {
         Features {
             ai_copilot: false,
             diff_highlight: true,
+            plantuml_preview: false,
         }
     }
 }
@@ -1051,6 +1054,338 @@ fn parse_open_args(args: &[String]) -> (Option<String>, Option<String>) {
     (path, remote)
 }
 
+// ─── Downloadable extensions ───────────────────────────────
+
+/// URL of the extension catalogue. Pinned in-app; fetched over HTTPS.
+const EXTENSION_MANIFEST_URL: &str =
+    "https://raw.githubusercontent.com/dobachi/fude-extensions/main/manifest.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtensionFile {
+    pub rel: String,
+    pub url: String,
+    pub sha256: String,
+    #[serde(default)]
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtensionEntry {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub total_size: u64,
+    pub files: Vec<ExtensionFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtensionManifest {
+    #[serde(default)]
+    pub schema: u32,
+    pub extensions: Vec<ExtensionEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExtensionStatus {
+    pub installed: bool,
+    pub version: Option<String>,
+    pub dir: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DownloadEvent {
+    status: String, // "progress" | "done" | "error"
+    progress: u64,
+    total: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+/// Root directory for installed extensions: `<config>/extensions`.
+fn extensions_root() -> Result<PathBuf, String> {
+    let dir = config_dir()?.join("extensions");
+    if !dir.exists() {
+        fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed to create extensions directory: {}", e))?;
+    }
+    Ok(dir)
+}
+
+/// Reject ids/versions that could escape the extensions directory.
+fn is_safe_component(s: &str) -> bool {
+    !s.is_empty()
+        && s != "."
+        && s != ".."
+        && !s.contains('/')
+        && !s.contains('\\')
+        && !s.contains(':')
+}
+
+/// Find an installed version of `id` (a `<id>/<version>` dir holding `.complete`).
+fn find_installed(id: &str) -> Option<(String, PathBuf)> {
+    let root = extensions_root().ok()?;
+    let id_dir = root.join(id);
+    let entries = fs::read_dir(&id_dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() && path.join(".complete").exists() {
+            if let Some(ver) = path.file_name().and_then(|s| s.to_str()) {
+                return Some((ver.to_string(), path));
+            }
+        }
+    }
+    None
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
+
+/// Fetch the extension catalogue JSON (raw text) from the pinned URL.
+#[tauri::command]
+async fn fetch_extension_manifest() -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(EXTENSION_MANIFEST_URL)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch extension manifest: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("Manifest request failed: HTTP {}", resp.status()));
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("Failed to read manifest body: {}", e))
+}
+
+/// Report whether `id` is installed and where.
+#[tauri::command]
+fn extension_status(id: String) -> Result<ExtensionStatus, String> {
+    if !is_safe_component(&id) {
+        return Err(format!("Invalid extension id '{}'", id));
+    }
+    match find_installed(&id) {
+        Some((version, dir)) => Ok(ExtensionStatus {
+            installed: true,
+            version: Some(version),
+            dir: Some(dir.to_string_lossy().to_string()),
+        }),
+        None => Ok(ExtensionStatus {
+            installed: false,
+            version: None,
+            dir: None,
+        }),
+    }
+}
+
+/// Return the absolute path to an installed extension file, e.g. ("plantuml",
+/// "plantuml.js"). Used by the frontend to build an asset:// URL.
+#[tauri::command]
+fn extension_file_path(id: String, rel: String) -> Result<String, String> {
+    if !is_safe_component(&id) || rel.contains("..") {
+        return Err("Invalid extension path".to_string());
+    }
+    let (_ver, dir) =
+        find_installed(&id).ok_or_else(|| format!("Extension '{}' not installed", id))?;
+    let path = dir.join(&rel);
+    if !path.exists() {
+        return Err(format!("Extension file '{}' not found", rel));
+    }
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Remove an installed extension entirely.
+#[tauri::command]
+fn uninstall_extension(id: String) -> Result<(), String> {
+    if !is_safe_component(&id) {
+        return Err(format!("Invalid extension id '{}'", id));
+    }
+    let id_dir = extensions_root()?.join(&id);
+    if id_dir.exists() {
+        fs::remove_dir_all(&id_dir)
+            .map_err(|e| format!("Failed to remove extension '{}': {}", id, e))?;
+    }
+    Ok(())
+}
+
+/// Download + verify + install the extension identified by `id`. Files are
+/// fetched into a temp dir, sha256-verified against the manifest, and only then
+/// promoted to `<id>/<version>`. Progress is emitted on `ext-download-<request_id>`.
+#[tauri::command]
+async fn install_extension(
+    app: tauri::AppHandle,
+    id: String,
+    request_id: String,
+) -> Result<(), String> {
+    let event = format!("ext-download-{}", request_id);
+    let result = install_extension_inner(&app, &id, &event).await;
+    if let Err(ref e) = result {
+        let _ = app.emit(
+            &event,
+            DownloadEvent {
+                status: "error".to_string(),
+                progress: 0,
+                total: 0,
+                error: Some(e.clone()),
+            },
+        );
+    }
+    result
+}
+
+async fn install_extension_inner(
+    app: &tauri::AppHandle,
+    id: &str,
+    event: &str,
+) -> Result<(), String> {
+    if !is_safe_component(id) {
+        return Err(format!("Invalid extension id '{}'", id));
+    }
+
+    // Resolve the manifest entry.
+    let manifest_text = fetch_extension_manifest().await?;
+    let manifest: ExtensionManifest = serde_json::from_str(&manifest_text)
+        .map_err(|e| format!("Invalid manifest JSON: {}", e))?;
+    let entry = manifest
+        .extensions
+        .into_iter()
+        .find(|e| e.id == id)
+        .ok_or_else(|| format!("Extension '{}' not found in manifest", id))?;
+    if !is_safe_component(&entry.version) {
+        return Err(format!("Invalid extension version '{}'", entry.version));
+    }
+
+    let total: u64 = if entry.total_size > 0 {
+        entry.total_size
+    } else {
+        entry.files.iter().map(|f| f.size).sum()
+    };
+
+    let id_dir = extensions_root()?.join(id);
+    fs::create_dir_all(&id_dir).map_err(|e| format!("Failed to create '{}': {}", id, e))?;
+    let tmp_dir = id_dir.join(format!("{}.tmp", entry.version));
+    if tmp_dir.exists() {
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+    fs::create_dir_all(&tmp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
+
+    // Cleanup helper for rollback on any failure.
+    let cleanup = |tmp: &Path| {
+        let _ = fs::remove_dir_all(tmp);
+    };
+
+    let client = reqwest::Client::new();
+    let mut downloaded: u64 = 0;
+
+    for file in &entry.files {
+        if file.rel.contains("..") || file.rel.contains('\\') {
+            cleanup(&tmp_dir);
+            return Err(format!("Invalid file path '{}'", file.rel));
+        }
+        let resp = match client.get(&file.url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                cleanup(&tmp_dir);
+                return Err(format!("Download failed for '{}': {}", file.rel, e));
+            }
+        };
+        if !resp.status().is_success() {
+            cleanup(&tmp_dir);
+            return Err(format!(
+                "Download failed for '{}': HTTP {}",
+                file.rel,
+                resp.status()
+            ));
+        }
+
+        let mut stream = resp.bytes_stream();
+        let mut buf: Vec<u8> = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => {
+                    cleanup(&tmp_dir);
+                    return Err(format!("Stream error on '{}': {}", file.rel, e));
+                }
+            };
+            buf.extend_from_slice(&chunk);
+            downloaded += chunk.len() as u64;
+            let _ = app.emit(
+                event,
+                DownloadEvent {
+                    status: "progress".to_string(),
+                    progress: downloaded,
+                    total,
+                    error: None,
+                },
+            );
+        }
+
+        // Integrity check.
+        let actual = sha256_hex(&buf);
+        if !file.sha256.is_empty() && actual.to_lowercase() != file.sha256.to_lowercase() {
+            cleanup(&tmp_dir);
+            return Err(format!(
+                "Checksum mismatch for '{}': expected {}, got {}",
+                file.rel, file.sha256, actual
+            ));
+        }
+
+        let dest = tmp_dir.join(&file.rel);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                cleanup(&tmp_dir);
+                format!("Failed to create '{}': {}", parent.display(), e)
+            })?;
+        }
+        if let Err(e) = fs::write(&dest, &buf) {
+            cleanup(&tmp_dir);
+            return Err(format!("Failed to write '{}': {}", file.rel, e));
+        }
+    }
+
+    // Promote temp dir to the final versioned dir (replace any previous copy).
+    let final_dir = id_dir.join(&entry.version);
+    if final_dir.exists() {
+        let _ = fs::remove_dir_all(&final_dir);
+    }
+    if let Err(e) = fs::rename(&tmp_dir, &final_dir) {
+        cleanup(&tmp_dir);
+        return Err(format!("Failed to finalize extension: {}", e));
+    }
+    // Mark complete.
+    if let Err(e) = fs::write(final_dir.join(".complete"), entry.version.as_bytes()) {
+        return Err(format!("Failed to mark extension complete: {}", e));
+    }
+
+    // Remove other (older) versions to save space.
+    if let Ok(entries) = fs::read_dir(&id_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() && p != final_dir {
+                let _ = fs::remove_dir_all(&p);
+            }
+        }
+    }
+
+    let _ = app.emit(
+        event,
+        DownloadEvent {
+            status: "done".to_string(),
+            progress: total,
+            total,
+            error: None,
+        },
+    );
+    Ok(())
+}
+
 pub fn run() {
     let mut builder = tauri::Builder::default();
 
@@ -1081,6 +1416,11 @@ pub fn run() {
             write_file,
             copy_image_to_assets,
             save_image_bytes,
+            fetch_extension_manifest,
+            extension_status,
+            extension_file_path,
+            install_extension,
+            uninstall_extension,
             read_dir_tree,
             load_session,
             save_session,
@@ -1344,6 +1684,7 @@ mod tests {
             features: Features {
                 ai_copilot: true,
                 diff_highlight: false,
+                plantuml_preview: true,
             },
             font_size: 18,
             vim_mode: true,
@@ -1567,6 +1908,53 @@ mod tests {
         // Nonexistent relative path: canonicalize fails, returns lexical join.
         let r = resolve_cli_path("notes/a.md", Some(PathBuf::from("/work/dir")));
         assert_eq!(r, "/work/dir/notes/a.md");
+    }
+
+    // --- extension helpers ---
+
+    #[test]
+    fn sha256_hex_matches_known_vector() {
+        // SHA-256("abc")
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn is_safe_component_rejects_traversal() {
+        assert!(is_safe_component("plantuml"));
+        assert!(is_safe_component("1.2026.5"));
+        assert!(!is_safe_component(""));
+        assert!(!is_safe_component("."));
+        assert!(!is_safe_component(".."));
+        assert!(!is_safe_component("a/b"));
+        assert!(!is_safe_component("a\\b"));
+        assert!(!is_safe_component("c:evil"));
+    }
+
+    #[test]
+    fn extension_manifest_parses() {
+        let json = r#"{
+            "schema": 1,
+            "extensions": [{
+                "id": "plantuml",
+                "name": "PlantUML Preview",
+                "version": "1.2026.1",
+                "total_size": 100,
+                "files": [
+                    { "rel": "plantuml.js", "url": "https://x/plantuml.js", "sha256": "ab", "size": 60 }
+                ]
+            }]
+        }"#;
+        let m: ExtensionManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(m.extensions.len(), 1);
+        assert_eq!(m.extensions[0].id, "plantuml");
+        assert_eq!(m.extensions[0].files[0].rel, "plantuml.js");
     }
 
     #[cfg(not(windows))]

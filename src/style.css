@@ -1812,6 +1812,54 @@ body {
   font-size: calc(var(--font-size) + 1px);
 }
 
+/* Extensions settings */
+.ext-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ext-status {
+  font-size: calc(var(--font-size) - 2px);
+  color: var(--fg-secondary);
+}
+
+.ext-progress {
+  flex: 1 1 100%;
+  height: 6px;
+  background: var(--bg-input);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.ext-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--fg-accent);
+  transition: width 0.15s ease;
+}
+
+/* Rendered PlantUML diagrams in preview */
+.puml-diagram {
+  margin: 8px 0;
+  text-align: center;
+  overflow-x: auto;
+}
+
+.puml-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.puml-diagram.puml-error {
+  text-align: left;
+  color: #a4262c;
+  font-family: var(--font-mono, monospace);
+  font-size: calc(var(--font-size) - 1px);
+  white-space: pre-wrap;
+}
+
 .ai-composer-custom {
   display: flex;
   gap: 6px;

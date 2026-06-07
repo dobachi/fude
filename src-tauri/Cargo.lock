@@ -1236,11 +1236,13 @@ version = "0.3.8"
 dependencies = [
  "dirs 5.0.1",
  "futures-util",
+ "hex",
  "keyring",
  "notify",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-cli",

@@ -134,6 +134,61 @@ export async function unwatchFile(path) {
   return doInvoke('unwatch_file', { path });
 }
 
+// ── Downloadable extensions ────────────────────────────────
+
+export async function fetchExtensionManifest() {
+  return doInvoke('fetch_extension_manifest');
+}
+
+export async function extensionStatus(id) {
+  return doInvoke('extension_status', { id });
+}
+
+export async function extensionFilePath(id, rel) {
+  return doInvoke('extension_file_path', { id, rel });
+}
+
+export async function uninstallExtension(id) {
+  return doInvoke('uninstall_extension', { id });
+}
+
+/**
+ * Download + install an extension, reporting byte progress.
+ * Tauri only (relies on the native downloader).
+ * @param {string} id
+ * @param {(progress: number, total: number) => void} onProgress
+ * @param {() => void} onDone
+ * @param {(err: Error) => void} onError
+ */
+export async function installExtension(id, onProgress, onDone, onError) {
+  if (!isTauriWebview()) {
+    onError(new Error('Extensions are only available in the desktop app'));
+    return;
+  }
+  try {
+    const internals = await waitForInternals();
+    if (!internals?.invoke) throw new Error('Tauri IPC not available');
+    const { listen } = await import('@tauri-apps/api/event');
+    const requestId = `ext_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+    const unlisten = await listen(`ext-download-${requestId}`, (event) => {
+      const { status, progress, total, error } = event.payload;
+      if (status === 'progress') onProgress(progress, total);
+      else if (status === 'done') {
+        unlisten();
+        onDone();
+      } else if (status === 'error') {
+        unlisten();
+        onError(new Error(error || 'Download failed'));
+      }
+    });
+
+    await internals.invoke('install_extension', { id, requestId });
+  } catch (err) {
+    onError(err instanceof Error ? err : new Error(String(err)));
+  }
+}
+
 export async function aiChat(messages, model) {
   return doInvoke('ai_chat', { messages, model });
 }
