@@ -1200,6 +1200,20 @@ fn extension_file_path(id: String, rel: String) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+/// Return the text contents of an installed extension file. The frontend turns
+/// this into a blob URL inside the sandboxed runner iframe, avoiding cross-origin
+/// module-import (CORS) issues with the asset:// protocol.
+#[tauri::command]
+fn read_extension_file(id: String, rel: String) -> Result<String, String> {
+    if !is_safe_component(&id) || rel.contains("..") || rel.contains('\\') {
+        return Err("Invalid extension path".to_string());
+    }
+    let (_ver, dir) =
+        find_installed(&id).ok_or_else(|| format!("Extension '{}' not installed", id))?;
+    let path = dir.join(&rel);
+    fs::read_to_string(&path).map_err(|e| format!("Failed to read '{}': {}", rel, e))
+}
+
 /// Remove an installed extension entirely.
 #[tauri::command]
 fn uninstall_extension(id: String) -> Result<(), String> {
@@ -1419,6 +1433,7 @@ pub fn run() {
             fetch_extension_manifest,
             extension_status,
             extension_file_path,
+            read_extension_file,
             install_extension,
             uninstall_extension,
             read_dir_tree,

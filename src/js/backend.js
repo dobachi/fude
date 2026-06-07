@@ -148,6 +148,10 @@ export async function extensionFilePath(id, rel) {
   return doInvoke('extension_file_path', { id, rel });
 }
 
+export async function readExtensionFile(id, rel) {
+  return doInvoke('read_extension_file', { id, rel });
+}
+
 export async function uninstallExtension(id) {
   return doInvoke('uninstall_extension', { id });
 }

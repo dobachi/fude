@@ -1,10 +1,15 @@
 // adapter.js - PlantUML rendering via a sandboxed iframe running the downloaded
-// engine (plantuml.js TeaVM build + viz-global.js). The engine is untrusted
-// downloaded code, so it runs in an `allow-scripts`-only iframe (opaque origin,
-// no access to the app); we exchange text/SVG over postMessage and sanitize the
-// SVG before it ever touches the app DOM.
-import { convertFileSrc } from '@tauri-apps/api/core';
-import { extensionFilePath } from '../../backend.js';
+// engine. The engine is the official PlantUML JS build (TeaVM): `plantuml.js`
+// is an ES module exporting `renderToString(lines)` (returns SVG), and
+// `viz-global.js` is a classic script providing the Graphviz (dot) engine used
+// by class/component diagrams.
+//
+// The engine is untrusted downloaded code, so it runs in an `allow-scripts`
+// iframe (opaque origin, no app access). We pass the file *contents* (read via a
+// Rust command) and load them from blob: URLs inside the iframe — this avoids
+// cross-origin module-import (CORS) problems with the asset:// protocol. The
+// returned SVG is sanitized before it ever touches the app DOM.
+import { readExtensionFile } from '../../backend.js';
 
 const EXT_ID = 'plantuml';
 const RENDER_TIMEOUT_MS = 20000;
@@ -15,39 +20,43 @@ let seq = 0;
 const pending = new Map(); // id -> { resolve, reject }
 const cache = new Map(); // diagram text -> sanitized svg
 
-// Minimal runner page. Loaded via srcdoc so nothing extra has to be bundled to
-// dist. It loads the engine scripts (passed as asset:// URLs), then answers
-// render requests. The PlantUML TeaVM build exposes its entry as a global; we
-// probe the known names so this survives small build differences.
 const RUNNER_HTML = `<!doctype html><html><head><meta charset="utf-8"></head><body><script>
-  var ready = false;
-  function loadScript(src){return new Promise(function(res,rej){
-    var s=document.createElement('script');s.src=src;s.onload=res;
-    s.onerror=function(){rej(new Error('failed to load '+src));};
+  var renderFn = null;
+  function loadClassic(code){return new Promise(function(res,rej){
+    var url=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
+    var s=document.createElement('script');
+    s.src=url;
+    s.onload=function(){URL.revokeObjectURL(url);res();};
+    s.onerror=function(){URL.revokeObjectURL(url);rej(new Error('failed to load classic script'));};
     document.head.appendChild(s);
   });}
-  function renderUml(text){
-    if (typeof umlToSvg==='function') return umlToSvg(text);
-    if (typeof window.umlToSvg==='function') return window.umlToSvg(text);
-    if (window.plantuml){
-      if (typeof window.plantuml.renderSvg==='function') return window.plantuml.renderSvg(text);
-      if (typeof window.plantuml.umlToSvg==='function') return window.plantuml.umlToSvg(text);
-    }
-    throw new Error('PlantUML engine entry point not found');
+  async function loadModule(code){
+    var url=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
+    try{ return await import(url); } finally { URL.revokeObjectURL(url); }
   }
   window.addEventListener('message', function(e){
     var msg=e.data||{};
     if(msg.type==='init'){
       (async function(){
-        try{ for(var i=0;i<msg.scripts.length;i++){ await loadScript(msg.scripts[i]); }
-          ready=true; parent.postMessage({type:'ready'},'*');
+        try{
+          if(msg.viz) await loadClassic(msg.viz);
+          var mod=await loadModule(msg.plantuml);
+          renderFn = mod.renderToString || (mod.default && mod.default.renderToString);
+          if(typeof renderFn!=='function') throw new Error('renderToString export not found');
+          parent.postMessage({type:'ready'},'*');
         }catch(err){ parent.postMessage({type:'init-error',error:String(err&&err.message||err)},'*'); }
       })();
     } else if(msg.type==='render'){
       try{
-        if(!ready) throw new Error('engine not ready');
-        var svg=renderUml(msg.text);
-        parent.postMessage({type:'result',id:msg.id,svg:svg},'*');
+        if(!renderFn) throw new Error('engine not ready');
+        var lines=msg.text.split(/\\r\\n|\\r|\\n/);
+        var svg=renderFn(lines);
+        if(svg && typeof svg.then==='function'){
+          svg.then(function(s){parent.postMessage({type:'result',id:msg.id,svg:s},'*');})
+             .catch(function(er){parent.postMessage({type:'result',id:msg.id,error:String(er&&er.message||er)},'*');});
+        } else {
+          parent.postMessage({type:'result',id:msg.id,svg:svg},'*');
+        }
       }catch(err){ parent.postMessage({type:'result',id:msg.id,error:String(err&&err.message||err)},'*'); }
     }
   });
@@ -99,12 +108,12 @@ function ensureResultListener() {
 async function ensureEngine() {
   if (enginePromise) return enginePromise;
   enginePromise = (async () => {
-    const plantumlUrl = convertFileSrc(await extensionFilePath(EXT_ID, 'plantuml.js'));
-    let vizUrl = null;
+    const plantumlText = await readExtensionFile(EXT_ID, 'plantuml.js');
+    let vizText = null;
     try {
-      vizUrl = convertFileSrc(await extensionFilePath(EXT_ID, 'viz-global.js'));
+      vizText = await readExtensionFile(EXT_ID, 'viz-global.js');
     } catch {
-      /* viz-global.js optional; only needed for dot-based diagrams */
+      /* viz optional; only needed for dot-based diagrams */
     }
 
     ensureResultListener();
@@ -135,13 +144,10 @@ async function ensureEngine() {
       document.body.appendChild(iframe);
     });
 
-    // viz must load before plantuml so the dot engine is available.
-    const scripts = vizUrl ? [vizUrl, plantumlUrl] : [plantumlUrl];
-    iframe.contentWindow.postMessage({ type: 'init', scripts }, '*');
+    iframe.contentWindow.postMessage({ type: 'init', viz: vizText, plantuml: plantumlText }, '*');
     await ready;
   })().catch((err) => {
-    // Allow a later retry (e.g. after reinstall).
-    enginePromise = null;
+    enginePromise = null; // allow retry after reinstall
     throw err;
   });
   return enginePromise;
