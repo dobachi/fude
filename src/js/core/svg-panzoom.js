@@ -96,7 +96,7 @@ function makeControls(pz, onExpand) {
   let html =
     '<button type="button" data-z="in" title="拡大">＋</button>' +
     '<button type="button" data-z="out" title="縮小">−</button>' +
-    '<button type="button" data-z="reset" title="リセット">⤢</button>';
+    '<button type="button" data-z="reset" title="元のスケールに戻す">⟲</button>';
   if (onExpand) html += '<button type="button" data-z="full" title="全画面">⛶</button>';
   controls.innerHTML = html;
   controls.addEventListener('pointerdown', (e) => e.stopPropagation());
