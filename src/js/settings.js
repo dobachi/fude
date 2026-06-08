@@ -31,8 +31,14 @@ export async function openSettings() {
         <div class="setting-group">
           <label>Theme</label>
           <select id="setting-theme">
-            <option value="dark"${getCurrentTheme() === 'dark' ? ' selected' : ''}>Dark</option>
-            <option value="light"${getCurrentTheme() === 'light' ? ' selected' : ''}>Light</option>
+            <optgroup label="Classic">
+              <option value="dark"${getCurrentTheme() === 'dark' ? ' selected' : ''}>Dark</option>
+              <option value="light"${getCurrentTheme() === 'light' ? ' selected' : ''}>Light</option>
+            </optgroup>
+            <optgroup label="Cyber">
+              <option value="cyber-dark"${getCurrentTheme() === 'cyber-dark' ? ' selected' : ''}>Cyber Dark</option>
+              <option value="cyber-light"${getCurrentTheme() === 'cyber-light' ? ' selected' : ''}>Cyber Light</option>
+            </optgroup>
           </select>
         </div>
         <div class="setting-group">

@@ -29,7 +29,13 @@ import {
   deleteGroupForward,
 } from '@codemirror/commands';
 import { searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
-import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
+import {
+  syntaxHighlighting,
+  defaultHighlightStyle,
+  bracketMatching,
+  HighlightStyle,
+} from '@codemirror/language';
+import { tags as t } from '@lezer/highlight';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { openExternal } from './external-link.js';
 
@@ -74,6 +80,99 @@ const lightTheme = EditorView.theme({
 });
 
 const darkTheme = oneDark;
+
+// ===== Cyber Dark: neon-on-near-black =====
+const cyberDarkHighlight = HighlightStyle.define([
+  { tag: [t.heading, t.heading1, t.heading2, t.heading3], color: '#00e5ff', fontWeight: 'bold' },
+  { tag: [t.heading4, t.heading5, t.heading6], color: '#22d3ee', fontWeight: 'bold' },
+  { tag: t.strong, color: '#ff2bd6', fontWeight: 'bold' },
+  { tag: t.emphasis, color: '#a6ffea', fontStyle: 'italic' },
+  { tag: [t.link, t.url], color: '#3ee6ff', textDecoration: 'underline' },
+  { tag: [t.monospace], color: '#7df9ff' },
+  { tag: [t.list, t.processingInstruction], color: '#ff2bd6' },
+  { tag: t.quote, color: '#7aa2c4', fontStyle: 'italic' },
+  { tag: [t.keyword, t.modifier], color: '#ff2bd6' },
+  { tag: [t.string, t.regexp], color: '#9dff8f' },
+  { tag: [t.comment], color: '#4a6479', fontStyle: 'italic' },
+  { tag: [t.number, t.bool, t.atom], color: '#ffb86c' },
+  { tag: [t.typeName, t.className], color: '#00e5ff' },
+  { tag: [t.variableName, t.propertyName], color: '#d6f0ff' },
+]);
+
+const cyberDarkTheme = [
+  EditorView.theme(
+    {
+      '&': { color: '#d6f0ff', backgroundColor: '#0a0e17' },
+      '.cm-content': { caretColor: '#00e5ff' },
+      '&.cm-focused .cm-cursor': { borderLeftColor: '#00e5ff' },
+      '.cm-gutters': { backgroundColor: '#0a0e17', color: '#3d566c', border: 'none' },
+      '.cm-activeLine': { backgroundColor: 'rgba(0,229,255,0.05)' },
+      '.cm-activeLineGutter': { backgroundColor: 'rgba(0,229,255,0.08)', color: '#7df9ff' },
+      '.cm-selectionBackground, .cm-content ::selection': {
+        backgroundColor: 'rgba(0,229,255,0.18)',
+      },
+      '&.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(255,43,214,0.22)' },
+      '.cm-searchMatch': { backgroundColor: 'rgba(255,43,214,0.25)' },
+      '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'rgba(0,229,255,0.35)' },
+    },
+    { dark: true },
+  ),
+  syntaxHighlighting(cyberDarkHighlight),
+];
+
+// ===== Cyber Light: deep green on white (high contrast, flat) =====
+const cyberLightHighlight = HighlightStyle.define([
+  { tag: [t.heading, t.heading1, t.heading2, t.heading3], color: '#067016', fontWeight: 'bold' },
+  { tag: [t.heading4, t.heading5, t.heading6], color: '#066314', fontWeight: 'bold' },
+  { tag: t.strong, color: '#054d0f', fontWeight: 'bold' },
+  { tag: t.emphasis, color: '#1e7a28', fontStyle: 'italic' },
+  { tag: [t.link, t.url], color: '#066314', textDecoration: 'underline' },
+  { tag: [t.monospace], color: '#0a5c30' },
+  { tag: [t.list, t.processingInstruction], color: '#067016' },
+  { tag: t.quote, color: '#33623a', fontStyle: 'italic' },
+  { tag: [t.keyword, t.modifier], color: '#054d0f' },
+  { tag: [t.string, t.regexp], color: '#0f7026' },
+  { tag: [t.comment], color: '#5a7d60', fontStyle: 'italic' },
+  { tag: [t.number, t.bool, t.atom], color: '#0a5c10' },
+  { tag: [t.typeName, t.className], color: '#067016' },
+  { tag: [t.variableName, t.propertyName], color: '#06340e' },
+]);
+
+const cyberLightTheme = [
+  EditorView.theme(
+    {
+      '&': { color: '#06340e', backgroundColor: '#ffffff' },
+      '.cm-content': { caretColor: '#067016' },
+      '&.cm-focused .cm-cursor': { borderLeftColor: '#067016' },
+      '.cm-gutters': { backgroundColor: '#ffffff', color: '#5a7d60', border: 'none' },
+      '.cm-activeLine': { backgroundColor: 'rgba(7,90,20,0.08)' },
+      '.cm-activeLineGutter': { backgroundColor: 'rgba(7,90,20,0.14)', color: '#067016' },
+      '.cm-selectionBackground, .cm-content ::selection': {
+        backgroundColor: 'rgba(7,90,20,0.18)',
+      },
+      '&.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(7,90,20,0.26)' },
+      '.cm-searchMatch': { backgroundColor: 'rgba(7,90,20,0.22)' },
+      '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'rgba(15,157,42,0.38)' },
+    },
+    { dark: false },
+  ),
+  syntaxHighlighting(cyberLightHighlight),
+];
+
+// Map a data-theme name to the CodeMirror theme extension(s) it should use.
+function themeExtensionFor(name) {
+  switch (name) {
+    case 'light':
+      return lightTheme;
+    case 'cyber-dark':
+      return cyberDarkTheme;
+    case 'cyber-light':
+      return cyberLightTheme;
+    case 'dark':
+    default:
+      return darkTheme;
+  }
+}
 
 function autoListExtension() {
   return keymap.of([
@@ -331,9 +430,7 @@ export function createEditor(
     boldKeymap(),
     listKeymap(),
     baseTheme,
-    themeCompartment.of(
-      document.documentElement.getAttribute('data-theme') === 'light' ? lightTheme : darkTheme,
-    ),
+    themeCompartment.of(themeExtensionFor(document.documentElement.getAttribute('data-theme'))),
     EditorView.lineWrapping,
     EditorView.domEventHandlers({
       paste(event, view) {
@@ -485,8 +582,7 @@ export function getContent(view) {
 
 export function setTheme(view, theme) {
   if (!view._themeCompartment) return;
-  const themeExt = theme === 'dark' ? darkTheme : lightTheme;
-  view.dispatch({ effects: view._themeCompartment.reconfigure(themeExt) });
+  view.dispatch({ effects: view._themeCompartment.reconfigure(themeExtensionFor(theme)) });
 }
 
 export function getCursor(view) {

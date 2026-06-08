@@ -85,6 +85,147 @@
   --split-handle: #0066b8;
 }
 
+/* ===== Cyber Dark Theme (neon-on-near-black) ===== */
+[data-theme='cyber-dark'] {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #0d131f;
+  --bg-tertiary: #111a2b;
+  --bg-hover: #16223a;
+  --bg-active: #1c2c49;
+  --bg-input: #0c1320;
+
+  --fg-primary: #d6f0ff;
+  --fg-secondary: #7da2bd;
+  --fg-muted: #4a6479;
+  --fg-accent: #22d3ee;
+  --fg-link: #3ee6ff;
+
+  --border: rgba(34, 211, 238, 0.14);
+  --border-focus: #00e5ff;
+
+  --accent: #00e5ff;
+
+  --tab-bg: #0d131f;
+  --tab-bg-active: #0a0e17;
+  --tab-fg: #6f93ad;
+  --tab-fg-active: #7df9ff;
+  --tab-dirty: #ff2bd6;
+
+  --scrollbar-bg: transparent;
+  --scrollbar-thumb: #1c3349;
+  --scrollbar-thumb-hover: #2a4d6b;
+
+  --preview-bg: #0a0e17;
+  --preview-code-bg: #111a2b;
+  --preview-blockquote-border: #ff2bd6;
+  --preview-table-border: rgba(34, 211, 238, 0.18);
+  --preview-table-stripe: rgba(34, 211, 238, 0.04);
+
+  --focus-ring: rgba(0, 229, 255, 0.5);
+  --split-handle: #00e5ff;
+}
+
+/* ===== Cyber Light Theme (deep green on white; high contrast, flat) ===== */
+[data-theme='cyber-light'] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #e9f1e9;
+  --bg-tertiary: #dbe7db;
+  --bg-hover: #e2efe2;
+  --bg-active: #cce3cc;
+  --bg-input: #ffffff;
+
+  --fg-primary: #06340e;
+  --fg-secondary: #1e5a26;
+  --fg-muted: #5a7d60;
+  --fg-accent: #067016;
+  --fg-link: #066314;
+
+  --border: rgba(7, 90, 20, 0.45);
+  --border-focus: #067016;
+
+  --accent: #0f9d2a;
+
+  --tab-bg: #e6efe6;
+  --tab-bg-active: #ffffff;
+  --tab-fg: #33623a;
+  --tab-fg-active: #067016;
+  --tab-dirty: #0f9d2a;
+
+  --scrollbar-bg: transparent;
+  --scrollbar-thumb: #a8c4ad;
+  --scrollbar-thumb-hover: #7a9a80;
+
+  --preview-bg: #ffffff;
+  --preview-code-bg: #eaf2ea;
+  --preview-blockquote-border: #067016;
+  --preview-table-border: rgba(7, 90, 20, 0.4);
+  --preview-table-stripe: rgba(7, 90, 20, 0.05);
+
+  --focus-ring: rgba(7, 90, 20, 0.5);
+  --split-handle: #0f9d2a;
+}
+
+/* ===== Cyber theme accents (shared dark + light enhancements) ===== */
+[data-theme^='cyber'] .sidebar-title,
+[data-theme^='cyber'] .ai-panel-title {
+  color: var(--accent);
+}
+
+/* Active tab gets a neon underline instead of a flat fill. */
+[data-theme^='cyber'] .tab.active {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* Headings in preview underlined with the neon accent. */
+[data-theme^='cyber'] .preview-pane h1,
+[data-theme^='cyber'] .preview-pane h2 {
+  border-bottom-color: var(--accent);
+}
+
+/* Accent buttons glow on hover. */
+[data-theme^='cyber'] .btn-save-settings:hover,
+[data-theme^='cyber'] .ai-chat-send:hover {
+  opacity: 1;
+  box-shadow: 0 0 10px var(--accent);
+}
+
+/* ===== Cyber Light: retro green-console accents (FLAT — no depth/glow) =====
+   Old phosphor terminals were monochrome and flat: strong green, hard edges,
+   no shadows. Strengthen the green by giving the chrome solid green borders and
+   filled active states instead of glows. */
+[data-theme='cyber-light'] {
+  --pane-border: 1px solid var(--border);
+}
+
+/* Section labels read as bright terminal headers. */
+[data-theme='cyber-light'] .sidebar-title,
+[data-theme='cyber-light'] .ai-panel-title {
+  color: var(--fg-accent);
+}
+
+/* Active tab: solid green underline, flat (the shared rule already sets the
+   inset underline; here we also tint the label green). */
+[data-theme='cyber-light'] .tab.active {
+  color: var(--fg-accent);
+}
+
+/* Flat green focus outline on inputs — a hard ring, not a soft glow. */
+[data-theme='cyber-light'] .ai-chat-textarea:focus,
+[data-theme='cyber-light'] .model-picker-input:focus,
+[data-theme='cyber-light'] .ai-composer-custom-input:focus,
+[data-theme='cyber-light'] .setting-group select:focus,
+[data-theme='cyber-light'] .setting-group input:focus {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Inline code / preview code blocks get a hard green frame for terminal feel. */
+[data-theme='cyber-light'] .preview-pane code,
+[data-theme='cyber-light'] .preview-pane pre {
+  border: 1px solid var(--border);
+}
+
 /* ===== Reset & Base ===== */
 *,
 *::before,
