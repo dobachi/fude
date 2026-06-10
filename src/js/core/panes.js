@@ -283,12 +283,44 @@ export function closeActivePane() {
 
   // Focus the remaining pane's editor
   const remaining = getActivePane();
-  if (remaining && remaining.editorView) {
-    remaining.editorView.focus();
+  if (remaining) {
+    focusEditorView(remaining.editorView);
   }
 }
 
 // ── Focus navigation ──────────────────────────────────────
+
+/**
+ * Move keyboard focus to an EditorView, robustly.
+ *
+ * `EditorView.focus()` alone is unreliable when the previously focused element
+ * is another contentEditable (the other pane's editor): some engines — notably
+ * WebKitGTK, which Tauri uses on Linux/WSL — silently defer or drop a focus
+ * requested from a timer, leaving the caret in the source pane even though the
+ * active-pane highlight already moved. We assert focus immediately and again on
+ * the next animation frame, falling back to focusing the contentDOM directly.
+ */
+export function focusEditorView(view) {
+  if (!view) return;
+
+  const assert = () => {
+    if (view.hasFocus) return;
+    view.focus();
+    // If the EditorView still didn't take focus, push it onto the contentDOM.
+    if (!view.hasFocus && view.contentDOM && typeof view.contentDOM.focus === 'function') {
+      view.contentDOM.focus({ preventScroll: true });
+    }
+  };
+
+  assert();
+  // Re-assert after layout to beat racing blur/focusout handlers and engines
+  // that defer focus until the element has been measured.
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(assert);
+  } else {
+    setTimeout(assert, 0);
+  }
+}
 
 export function focusPane(direction) {
   if (panes.length <= 1) return;
@@ -305,10 +337,7 @@ export function focusPane(direction) {
 
   if (targetIndex !== currentIndex) {
     setActivePaneById(panes[targetIndex].id);
-    const target = panes[targetIndex];
-    if (target.editorView) {
-      setTimeout(() => target.editorView.focus(), 0);
-    }
+    focusEditorView(panes[targetIndex].editorView);
   }
 }
 

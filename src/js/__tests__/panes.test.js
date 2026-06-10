@@ -128,6 +128,49 @@ describe('panes module', () => {
     expect(mod.getActivePane().id).toBe(paneId);
   });
 
+  // Regression: the active-pane highlight used to move while keyboard focus
+  // stayed in the source pane (WebKitGTK dropping setTimeout-based focus).
+  // focusPane must actually move focus into the target pane's editor.
+  const mockView = (hasFocus = false) => ({
+    hasFocus,
+    focus: vi.fn(),
+    contentDOM: { focus: vi.fn() },
+  });
+
+  it('focusPane moves keyboard focus into the target pane editor', () => {
+    mod.initPanes();
+    mod.splitVertical();
+    const [a, b] = mod.getAllPanes();
+    a.editorView = mockView();
+    b.editorView = mockView();
+
+    // Active is the new pane (b); move left to a.
+    mod.focusPane('left');
+
+    expect(mod.getActivePane().id).toBe(a.id);
+    expect(a.editorView.focus).toHaveBeenCalled();
+    expect(b.editorView.focus).not.toHaveBeenCalled();
+  });
+
+  it('focusEditorView falls back to contentDOM when focus() does not take', () => {
+    const view = mockView(false); // .focus() never flips hasFocus
+    mod.focusEditorView(view);
+    expect(view.focus).toHaveBeenCalled();
+    expect(view.contentDOM.focus).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
+  it('focusEditorView is a no-op when the view already has focus', () => {
+    const view = mockView(true);
+    mod.focusEditorView(view);
+    expect(view.focus).not.toHaveBeenCalled();
+    expect(view.contentDOM.focus).not.toHaveBeenCalled();
+  });
+
+  it('focusEditorView tolerates a null/absent view', () => {
+    expect(() => mod.focusEditorView(null)).not.toThrow();
+    expect(() => mod.focusEditorView(undefined)).not.toThrow();
+  });
+
   it('getAllPanes returns a copy of the panes array', () => {
     mod.initPanes();
     const panes = mod.getAllPanes();
