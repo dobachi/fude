@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { extractHeadings } from '../core/outline.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { extractHeadings, initOutline, focusOutline } from '../core/outline.js';
 
 describe('extractHeadings', () => {
   it('returns empty array for empty/falsy input', () => {
@@ -55,5 +55,23 @@ describe('extractHeadings', () => {
   it('allows up to three leading spaces of indentation', () => {
     expect(extractHeadings('   ## Indented')).toEqual([{ level: 2, text: 'Indented', line: 1 }]);
     expect(extractHeadings('    ## Over')).toEqual([]);
+  });
+});
+
+describe('focusOutline', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="outline-list" tabindex="-1"></div>';
+  });
+
+  it('moves focus to the outline container', () => {
+    const ol = document.getElementById('outline-list');
+    initOutline(ol, {});
+    focusOutline();
+    expect(document.activeElement).toBe(ol);
+  });
+
+  it('does not throw when the outline container is absent', () => {
+    document.body.innerHTML = '';
+    expect(() => focusOutline()).not.toThrow();
   });
 });

@@ -5,7 +5,7 @@ describe('sidebar module', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    document.body.innerHTML = '<div id="app"><div id="file-tree"></div></div>';
+    document.body.innerHTML = '<div id="app"><div id="file-tree" tabindex="-1"></div></div>';
     mod = await import('../core/sidebar.js');
   });
 
@@ -54,5 +54,41 @@ describe('sidebar module', () => {
     const active = container.querySelector('.tree-item-label.active');
     expect(active).not.toBeNull();
     expect(active.dataset.path).toBe('/b.md');
+  });
+
+  it('show/hide/isSidebarVisible drive the sidebar-collapsed class', () => {
+    const app = document.getElementById('app');
+    expect(mod.isSidebarVisible()).toBe(true);
+
+    mod.hideSidebar();
+    expect(app.classList.contains('sidebar-collapsed')).toBe(true);
+    expect(mod.isSidebarVisible()).toBe(false);
+
+    mod.showSidebar();
+    expect(app.classList.contains('sidebar-collapsed')).toBe(false);
+    expect(mod.isSidebarVisible()).toBe(true);
+  });
+
+  it('focusFiler moves focus to the #file-tree container', () => {
+    const ft = document.getElementById('file-tree');
+    mod.focusFiler();
+    expect(document.activeElement).toBe(ft);
+  });
+
+  it('nextSidebarFocusAction picks the right step in the focus cycle', () => {
+    // hidden → reveal + focus filer
+    expect(mod.nextSidebarFocusAction({ visible: false })).toBe('show-filer');
+    // visible, focus in filer → outline
+    expect(
+      mod.nextSidebarFocusAction({ visible: true, focusInFiler: true, focusInOutline: false }),
+    ).toBe('focus-outline');
+    // visible, focus in outline → hide + return to editor
+    expect(
+      mod.nextSidebarFocusAction({ visible: true, focusInFiler: false, focusInOutline: true }),
+    ).toBe('hide-return');
+    // visible, focus elsewhere → focus filer
+    expect(
+      mod.nextSidebarFocusAction({ visible: true, focusInFiler: false, focusInOutline: false }),
+    ).toBe('focus-filer');
   });
 });

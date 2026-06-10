@@ -67,6 +67,12 @@ export function initOutline(container, { onJump } = {}) {
   onJumpCallback = onJump || null;
 }
 
+/** Move keyboard focus into the outline pane. */
+export function focusOutline() {
+  const ol = listContainer || document.getElementById('outline-list');
+  if (ol) ol.focus();
+}
+
 /**
  * Render the outline list from headings. Replaces the current contents.
  */

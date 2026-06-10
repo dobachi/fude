@@ -750,6 +750,16 @@ body {
   outline-offset: -2px;
 }
 
+/* Keyboard focus ring when a side pane (filer / outline) is focused via the
+   Ctrl+Shift+E focus-cycle, so the user can see which pane is active. */
+#file-tree:focus,
+#file-tree:focus-visible,
+#outline-list:focus,
+#outline-list:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 /* Editor & Preview inside a Pane */
 .editor-pane,
 .preview-pane {

@@ -16,7 +16,13 @@ import {
   registerImagePasteHandler,
   registerSaveHandler,
 } from './core/editor.js';
-import { initOutline, updateOutline, setActiveOutlineLine, clearOutline } from './core/outline.js';
+import {
+  initOutline,
+  updateOutline,
+  setActiveOutlineLine,
+  clearOutline,
+  focusOutline,
+} from './core/outline.js';
 import { isImagePath, mimeToExt, insertImageMarkdown } from './core/image-insert.js';
 import { attachPanZoom } from './core/svg-panzoom.js';
 import { convertFileSrc } from '@tauri-apps/api/core';
@@ -61,6 +67,7 @@ const {
   focusPane,
   getActivePane,
   getActivePaneView,
+  focusEditorView,
   setCallbacks,
   createEditorInPane,
   getPaneCount,
@@ -71,6 +78,11 @@ import {
   toggleSidebar,
   highlightFile,
   getShowAllFiles,
+  isSidebarVisible,
+  showSidebar,
+  hideSidebar,
+  focusFiler,
+  nextSidebarFocusAction,
 } from './core/sidebar.js';
 import { scheduleSave, restoreSession } from './core/session.js';
 import { initTheme } from './core/theme.js';
@@ -98,6 +110,8 @@ import {
   toggleAIPanel,
   updateSelectedContext,
   updateDocContext,
+  isAIPanelOpen,
+  focusAIPanelInput,
 } from './features/ai-copilot.js';
 import { initContextMenu } from './features/ai/context-menu.js';
 
@@ -111,6 +125,44 @@ registerPanesModule(panesModule);
 /** Helper: get the active pane's EditorView */
 function currentView() {
   return getActivePaneView();
+}
+
+/** Move keyboard focus back to the active pane's editor (robustly). */
+function focusActiveEditor() {
+  focusEditorView(getActivePaneView());
+}
+
+/**
+ * Ctrl+Shift+E focus-cycle across the sidebar:
+ * hidden → filer → outline → hide+editor. The decision is computed by the pure
+ * nextSidebarFocusAction(); here we just execute the chosen action.
+ */
+function cycleSidebarFocus() {
+  const active = document.activeElement;
+  const fileTree = document.getElementById('file-tree');
+  const outline = document.getElementById('outline-list');
+  const action = nextSidebarFocusAction({
+    visible: isSidebarVisible(),
+    focusInFiler: !!(fileTree && fileTree.contains(active)),
+    focusInOutline: !!(outline && outline.contains(active)),
+  });
+  switch (action) {
+    case 'show-filer':
+      showSidebar();
+      focusFiler();
+      break;
+    case 'focus-outline':
+      focusOutline();
+      break;
+    case 'hide-return':
+      hideSidebar();
+      focusActiveEditor();
+      break;
+    case 'focus-filer':
+    default:
+      focusFiler();
+      break;
+  }
 }
 
 /** Re-render the preview in every pane (used after a live config change). */
@@ -1614,6 +1666,21 @@ function handleGlobalKeys(e) {
     }
   }
 
+  // Escape inside a side pane (filer / outline / AI panel) returns focus to the
+  // editor. Scoped to those panes so the editor's own Escape handling
+  // (Vim/Emacs insert exit, inline-completion dismiss) is never disturbed.
+  if (e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const active = document.activeElement;
+    const sidebar = document.getElementById('sidebar');
+    const aiPanel = document.getElementById('ai-panel');
+    if ((sidebar && sidebar.contains(active)) || (aiPanel && aiPanel.contains(active))) {
+      e.preventDefault();
+      e.stopPropagation();
+      focusActiveEditor();
+    }
+    return;
+  }
+
   const mod = e.ctrlKey || e.metaKey;
   if (!mod) return;
 
@@ -1714,17 +1781,35 @@ function handleGlobalKeys(e) {
     return;
   }
 
-  // AI Chat: Ctrl+Shift+I
+  // AI Chat: Ctrl+Shift+I — open + focus the input; if already focused inside
+  // the panel, close it and return to the editor.
   if (key === 'I' && e.shiftKey) {
     e.preventDefault();
     e.stopPropagation();
+
+    const panel = document.getElementById('ai-panel');
+    const wasOpen = isAIPanelOpen();
+    if (wasOpen && panel && panel.contains(document.activeElement)) {
+      toggleAIPanel(); // close
+      focusActiveEditor();
+      return;
+    }
+
     const view = currentView();
     let selectedText = '';
     if (view) {
       const { from, to } = view.state.selection.main;
       if (from !== to) selectedText = view.state.sliceDoc(from, to);
     }
-    toggleAIPanel(selectedText);
+
+    // Open if closed; if already open (focus elsewhere), keep it open and just
+    // refresh the selection context before moving focus into it.
+    if (!wasOpen) {
+      toggleAIPanel(selectedText);
+    } else if (selectedText) {
+      updateSelectedContext(selectedText);
+    }
+
     const aiPanelContent = document.getElementById('ai-panel-content');
     if (aiPanelContent && !aiPanelContent.hasChildNodes()) {
       initChatPanel(aiPanelContent, {
@@ -1734,7 +1819,10 @@ function handleGlobalKeys(e) {
         if (selectedText) updateSelectedContext(selectedText);
         const activeTab = getActiveTab();
         if (activeTab) updateDocContext(activeTab.path, activeTab.content);
+        focusAIPanelInput();
       });
+    } else {
+      focusAIPanelInput();
     }
     return;
   }
@@ -1788,7 +1876,7 @@ function handleGlobalKeys(e) {
     case 'E':
       e.preventDefault();
       e.stopPropagation();
-      toggleSidebar();
+      cycleSidebarFocus();
       return;
     case 'J':
       e.preventDefault();

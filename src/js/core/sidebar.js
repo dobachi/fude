@@ -193,6 +193,42 @@ export function toggleSidebar() {
   }
 }
 
+export function isSidebarVisible() {
+  const app = document.getElementById('app');
+  return !!app && !app.classList.contains('sidebar-collapsed');
+}
+
+export function showSidebar() {
+  const app = document.getElementById('app');
+  if (app) app.classList.remove('sidebar-collapsed');
+}
+
+export function hideSidebar() {
+  const app = document.getElementById('app');
+  if (app) app.classList.add('sidebar-collapsed');
+}
+
+/** Move keyboard focus into the file-tree pane (filer). */
+export function focusFiler() {
+  const ft = document.getElementById('file-tree');
+  if (ft) ft.focus();
+}
+
+/**
+ * Pure decision for the sidebar focus-cycle key (Ctrl+Shift+E).
+ * Given the current visibility and where focus is, returns the next action:
+ *   hidden            → 'show-filer'  (reveal sidebar, focus filer)
+ *   filer focused     → 'focus-outline'
+ *   outline focused   → 'hide-return' (hide sidebar, return to editor)
+ *   visible elsewhere → 'focus-filer'
+ */
+export function nextSidebarFocusAction({ visible, focusInFiler, focusInOutline }) {
+  if (!visible) return 'show-filer';
+  if (focusInFiler) return 'focus-outline';
+  if (focusInOutline) return 'hide-return';
+  return 'focus-filer';
+}
+
 export function highlightFile(path) {
   activeFilePath = path;
   if (!fileTreeContainer) return;

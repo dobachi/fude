@@ -72,6 +72,18 @@ export function toggleAIPanel(selectedText) {
   }
 }
 
+/** Whether the AI panel is currently open. */
+export function isAIPanelOpen() {
+  const app = document.getElementById('app');
+  return !!app && app.classList.contains('ai-panel-open');
+}
+
+/** Move keyboard focus into the AI chat input. */
+export function focusAIPanelInput() {
+  const input = document.querySelector('.ai-chat-textarea');
+  if (input) input.focus();
+}
+
 /**
  * Forward selection change to the chat module.
  * @param {string} selectedText
