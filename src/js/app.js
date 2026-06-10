@@ -80,7 +80,6 @@ import {
   getShowAllFiles,
   isSidebarVisible,
   showSidebar,
-  hideSidebar,
   focusFiler,
   nextSidebarFocusAction,
 } from './core/sidebar.js';
@@ -133,18 +132,16 @@ function focusActiveEditor() {
 }
 
 /**
- * Ctrl+Shift+E focus-cycle across the sidebar:
- * hidden → filer → outline → hide+editor. The decision is computed by the pure
- * nextSidebarFocusAction(); here we just execute the chosen action.
+ * Ctrl+Shift+E focus-cycle across the sidebar: hidden → filer → outline →
+ * filer (loops, never hides). Esc is the way back to the editor. The decision
+ * is computed by the pure nextSidebarFocusAction(); here we execute it.
  */
 function cycleSidebarFocus() {
   const active = document.activeElement;
   const fileTree = document.getElementById('file-tree');
-  const outline = document.getElementById('outline-list');
   const action = nextSidebarFocusAction({
     visible: isSidebarVisible(),
     focusInFiler: !!(fileTree && fileTree.contains(active)),
-    focusInOutline: !!(outline && outline.contains(active)),
   });
   switch (action) {
     case 'show-filer':
@@ -153,10 +150,6 @@ function cycleSidebarFocus() {
       break;
     case 'focus-outline':
       focusOutline();
-      break;
-    case 'hide-return':
-      hideSidebar();
-      focusActiveEditor();
       break;
     case 'focus-filer':
     default:

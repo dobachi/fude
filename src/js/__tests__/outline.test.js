@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { extractHeadings, initOutline, focusOutline } from '../core/outline.js';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { extractHeadings, initOutline, focusOutline, updateOutline } from '../core/outline.js';
 
 describe('extractHeadings', () => {
   it('returns empty array for empty/falsy input', () => {
@@ -73,5 +73,31 @@ describe('focusOutline', () => {
   it('does not throw when the outline container is absent', () => {
     document.body.innerHTML = '';
     expect(() => focusOutline()).not.toThrow();
+  });
+});
+
+describe('outline keyboard navigation', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="outline-list" tabindex="-1"></div>';
+  });
+
+  it('focusOutline focuses the first heading; arrows move; Enter jumps', () => {
+    const ol = document.getElementById('outline-list');
+    const onJump = vi.fn();
+    initOutline(ol, { onJump });
+    updateOutline(['# A', '## B', '## C'].join('\n'));
+
+    const items = ol.querySelectorAll('.outline-item');
+    expect(items.length).toBe(3);
+    expect(items[0].tabIndex).toBe(-1);
+
+    focusOutline();
+    expect(document.activeElement).toBe(items[0]);
+
+    ol.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement).toBe(items[1]);
+
+    ol.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(onJump).toHaveBeenCalledWith(2); // '## B' is on line 2
   });
 });

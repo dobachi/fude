@@ -1,5 +1,7 @@
 // sidebar.js - Directory tree sidebar
 
+import { createListKeyHandler } from './list-nav.js';
+
 let fileTreeContainer = null;
 let onFileSelect = null;
 let activeFilePath = null;
@@ -31,7 +33,51 @@ export function initSidebar(container, fileSelectCallback, opts) {
     if (opts.onContextMenu) onContextMenu = opts.onContextMenu;
   }
 
+  if (container) {
+    container.addEventListener(
+      'keydown',
+      createListKeyHandler(container, '.tree-item-label', { extra: treeNavExtra }),
+    );
+  }
+
   initPopover();
+}
+
+/**
+ * Tree-specific keys for the filer: Right expands a collapsed directory, Left
+ * collapses an open directory or jumps to the parent directory. Returns true
+ * when the event is handled.
+ */
+function treeNavExtra(e, focused) {
+  if (!focused || (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft')) return false;
+  const item = focused.closest('.tree-item');
+  const isDir = !!item && item.classList.contains('tree-dir');
+
+  if (e.key === 'ArrowRight') {
+    if (isDir && !item.classList.contains('open')) {
+      e.preventDefault();
+      focused.click(); // expand
+      return true;
+    }
+    return false;
+  }
+
+  // ArrowLeft
+  if (isDir && item.classList.contains('open')) {
+    e.preventDefault();
+    focused.click(); // collapse
+    return true;
+  }
+  const parentDir = item && item.parentElement ? item.parentElement.closest('.tree-dir') : null;
+  if (parentDir) {
+    const parentLabel = parentDir.querySelector(':scope > .tree-item-label');
+    if (parentLabel) {
+      e.preventDefault();
+      parentLabel.focus();
+      return true;
+    }
+  }
+  return false;
 }
 
 function initPopover() {
@@ -135,6 +181,7 @@ function buildTreeItem(entry) {
     item.classList.add('tree-dir');
     const label = document.createElement('div');
     label.className = 'tree-item-label';
+    label.tabIndex = -1; // focusable for keyboard navigation
     label.innerHTML = `<span class="tree-icon">\u25b6</span><span>${escapeHtml(entry.name)}</span>`;
     label.addEventListener('click', () => {
       item.classList.toggle('open');
@@ -159,6 +206,7 @@ function buildTreeItem(entry) {
   } else {
     const label = document.createElement('div');
     label.className = 'tree-item-label';
+    label.tabIndex = -1; // focusable for keyboard navigation
     label.dataset.path = entry.path;
     label.innerHTML = `<span class="tree-icon">\u{1f4c4}</span><span>${escapeHtml(entry.name)}</span>`;
 
@@ -208,24 +256,30 @@ export function hideSidebar() {
   if (app) app.classList.add('sidebar-collapsed');
 }
 
-/** Move keyboard focus into the file-tree pane (filer). */
+/**
+ * Move keyboard focus into the file-tree pane (filer): the active file if
+ * present, else the first item, else the container itself (empty tree).
+ */
 export function focusFiler() {
   const ft = document.getElementById('file-tree');
-  if (ft) ft.focus();
+  if (!ft) return;
+  const target =
+    ft.querySelector('.tree-item-label.active') || ft.querySelector('.tree-item-label') || ft;
+  target.focus();
 }
 
 /**
  * Pure decision for the sidebar focus-cycle key (Ctrl+Shift+E).
- * Given the current visibility and where focus is, returns the next action:
- *   hidden            → 'show-filer'  (reveal sidebar, focus filer)
+ * The cycle never hides the sidebar — it loops filer ⇄ outline, and Esc is the
+ * way back to the editor. Given the current visibility and where focus is:
+ *   hidden            → 'show-filer'   (reveal sidebar, focus filer)
  *   filer focused     → 'focus-outline'
- *   outline focused   → 'hide-return' (hide sidebar, return to editor)
+ *   outline focused   → 'focus-filer'  (loop back, stays open)
  *   visible elsewhere → 'focus-filer'
  */
-export function nextSidebarFocusAction({ visible, focusInFiler, focusInOutline }) {
+export function nextSidebarFocusAction({ visible, focusInFiler }) {
   if (!visible) return 'show-filer';
   if (focusInFiler) return 'focus-outline';
-  if (focusInOutline) return 'hide-return';
   return 'focus-filer';
 }
 

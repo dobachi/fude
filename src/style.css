@@ -750,12 +750,17 @@ body {
   outline-offset: -2px;
 }
 
-/* Keyboard focus ring when a side pane (filer / outline) is focused via the
-   Ctrl+Shift+E focus-cycle, so the user can see which pane is active. */
+/* Keyboard focus ring for the side panes (filer / outline) reached via the
+   Ctrl+Shift+E focus-cycle: the focused item, or the empty container as a
+   fallback, so the user can always see where keyboard focus is. */
 #file-tree:focus,
 #file-tree:focus-visible,
 #outline-list:focus,
-#outline-list:focus-visible {
+#outline-list:focus-visible,
+.tree-item-label:focus,
+.tree-item-label:focus-visible,
+.outline-item:focus,
+.outline-item:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }

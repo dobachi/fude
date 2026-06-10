@@ -75,20 +75,44 @@ describe('sidebar module', () => {
     expect(document.activeElement).toBe(ft);
   });
 
-  it('nextSidebarFocusAction picks the right step in the focus cycle', () => {
+  it('nextSidebarFocusAction loops filer ⇄ outline without hiding', () => {
     // hidden → reveal + focus filer
     expect(mod.nextSidebarFocusAction({ visible: false })).toBe('show-filer');
     // visible, focus in filer → outline
-    expect(
-      mod.nextSidebarFocusAction({ visible: true, focusInFiler: true, focusInOutline: false }),
-    ).toBe('focus-outline');
-    // visible, focus in outline → hide + return to editor
-    expect(
-      mod.nextSidebarFocusAction({ visible: true, focusInFiler: false, focusInOutline: true }),
-    ).toBe('hide-return');
-    // visible, focus elsewhere → focus filer
-    expect(
-      mod.nextSidebarFocusAction({ visible: true, focusInFiler: false, focusInOutline: false }),
-    ).toBe('focus-filer');
+    expect(mod.nextSidebarFocusAction({ visible: true, focusInFiler: true })).toBe('focus-outline');
+    // visible, focus in outline (not filer) → back to filer (never 'hide')
+    expect(mod.nextSidebarFocusAction({ visible: true, focusInFiler: false })).toBe('focus-filer');
+  });
+
+  it('focusFiler focuses the active file item when present', () => {
+    const container = document.getElementById('file-tree');
+    mod.initSidebar(container, vi.fn());
+    mod.loadDirectory([
+      { name: 'a.md', path: '/a.md', is_dir: false, children: null },
+      { name: 'b.md', path: '/b.md', is_dir: false, children: null },
+    ]);
+    mod.highlightFile('/b.md');
+
+    mod.focusFiler();
+
+    expect(document.activeElement.dataset.path).toBe('/b.md');
+  });
+
+  it('Down arrow moves focus to the next file item; Enter opens it', () => {
+    const container = document.getElementById('file-tree');
+    const onSelect = vi.fn();
+    mod.initSidebar(container, onSelect);
+    mod.loadDirectory([
+      { name: 'a.md', path: '/a.md', is_dir: false, children: null },
+      { name: 'b.md', path: '/b.md', is_dir: false, children: null },
+    ]);
+    mod.focusFiler(); // first item (a.md)
+    expect(document.activeElement.dataset.path).toBe('/a.md');
+
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement.dataset.path).toBe('/b.md');
+
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(onSelect).toHaveBeenCalledWith('/b.md');
   });
 });

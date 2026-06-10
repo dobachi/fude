@@ -2,6 +2,8 @@
 // buffer. Extracts ATX headings, renders a clickable list in the sidebar,
 // and tracks the current section based on editor scroll position.
 
+import { createListKeyHandler } from './list-nav.js';
+
 /**
  * Extract ATX headings ("# ...", "## ...", etc.) from markdown source.
  * Lines inside fenced code blocks (``` or ~~~) are ignored so heading-like
@@ -65,12 +67,21 @@ let lastRenderedHeadings = [];
 export function initOutline(container, { onJump } = {}) {
   listContainer = container;
   onJumpCallback = onJump || null;
+  if (container) {
+    container.addEventListener('keydown', createListKeyHandler(container, '.outline-item'));
+  }
 }
 
-/** Move keyboard focus into the outline pane. */
+/**
+ * Move keyboard focus into the outline pane: the active heading if present,
+ * else the first heading, else the container itself (empty outline).
+ */
 export function focusOutline() {
   const ol = listContainer || document.getElementById('outline-list');
-  if (ol) ol.focus();
+  if (!ol) return;
+  const target =
+    ol.querySelector('.outline-item.active') || ol.querySelector('.outline-item') || ol;
+  target.focus();
 }
 
 /**
@@ -95,6 +106,7 @@ export function renderOutline(headings) {
     item.dataset.line = String(h.line);
     item.textContent = h.text;
     item.title = h.text; // tooltip for truncated long titles
+    item.tabIndex = -1; // focusable for keyboard navigation
     item.addEventListener('click', () => {
       if (onJumpCallback) onJumpCallback(h.line);
     });
