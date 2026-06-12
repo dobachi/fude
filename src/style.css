@@ -955,6 +955,87 @@ body {
   margin-bottom: 0;
 }
 
+/* ===== Quarto (.qmd) preview ===== */
+
+/* Title block built from YAML front matter. */
+.preview-pane .quarto-title-block {
+  margin: 0 0 1.5em 0;
+  padding-bottom: 0.6em;
+  border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+}
+.preview-pane .quarto-title-block .quarto-title {
+  margin: 0 0 0.1em 0;
+  border-bottom: none;
+}
+.preview-pane .quarto-title-block .quarto-subtitle {
+  margin: 0 0 0.3em 0;
+  font-size: 1.1em;
+  color: var(--fg-secondary);
+}
+.preview-pane .quarto-title-block .quarto-meta {
+  margin: 0;
+  font-size: 0.85em;
+  color: var(--fg-secondary);
+}
+
+/* Callout boxes (::: {.callout-note} … :::). */
+.preview-pane .callout {
+  --callout-accent: #4a9eff;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  border-left: 4px solid var(--callout-accent);
+  border-radius: 6px;
+  margin: 0 0 1em 0;
+  overflow: hidden;
+}
+.preview-pane .callout-header {
+  font-weight: 600;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--callout-accent) 14%, transparent);
+  color: var(--callout-accent);
+}
+.preview-pane .callout-body {
+  padding: 8px 12px;
+}
+.preview-pane .callout-body > :last-child {
+  margin-bottom: 0;
+}
+.preview-pane .callout-note {
+  --callout-accent: #4a9eff;
+}
+.preview-pane .callout-tip {
+  --callout-accent: #36b37e;
+}
+.preview-pane .callout-warning {
+  --callout-accent: #e0a800;
+}
+.preview-pane .callout-caution {
+  --callout-accent: #f06a3f;
+}
+.preview-pane .callout-important {
+  --callout-accent: #e5484d;
+}
+
+/* Executable cells (```{python} …```) — shown, not run. */
+.preview-pane pre.quarto-cell {
+  position: relative;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  border-left: 3px solid var(--fg-accent, #569cd6);
+  padding-top: 26px;
+}
+.preview-pane pre.quarto-cell .quarto-cell-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: 0.72em;
+  font-family: var(--font-mono, monospace);
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  padding: 2px 8px;
+  border-bottom-right-radius: 6px;
+  background: color-mix(in srgb, var(--fg-accent, #569cd6) 18%, transparent);
+  color: var(--fg-accent, #569cd6);
+}
+
 .preview-pane ul,
 .preview-pane ol {
   padding-left: 2em;

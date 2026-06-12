@@ -4,6 +4,12 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { attachPanZoom } from './svg-panzoom.js';
 import { isLocalTauri } from '../backend.js';
 import { openExternal, isExternalUrl } from './external-link.js';
+import {
+  isQuartoFile,
+  applyQuartoExtensions,
+  parseFrontMatter,
+  renderFrontMatterHeader,
+} from '../features/quarto/quarto-md.js';
 
 // Build a URL-friendly slug from heading text. Lowercased, non-alphanumerics
 // collapsed to "-". Used to give headings stable ids so internal links like
@@ -17,13 +23,26 @@ function slugify(text) {
 }
 
 let md = null;
+let qmdMd = null;
 let currentBasePath = '';
 let gPending = false;
+let qmdFrontMatterHtml = '';
 
 function ensureMd() {
   if (md) return;
+  md = createMd();
+  // A second instance for .qmd files, carrying the same base rules plus the
+  // Quarto extensions (front matter, callouts, executable-cell display).
+  qmdMd = createMd();
+  applyQuartoExtensions(qmdMd, {
+    onFrontMatter: (fm) => {
+      qmdFrontMatterHtml = renderFrontMatterHeader(parseFrontMatter(fm));
+    },
+  });
+}
 
-  md = markdownIt({
+function createMd() {
+  const md = markdownIt({
     html: false,
     linkify: true,
     typographer: true,
@@ -124,6 +143,8 @@ function ensureMd() {
     }
     return self.renderToken(tokens, idx, options);
   };
+
+  return md;
 }
 
 function escapeHtml(s) {
@@ -244,6 +265,19 @@ export function renderMarkdown(text, basePath = '', container = null) {
   container.innerHTML = html;
 }
 
+/**
+ * Render a Quarto (.qmd) document: same as renderMarkdown but with the Quarto
+ * extensions, and the parsed front-matter title block prepended to the body.
+ */
+export function renderQuartoMarkdown(text, basePath = '', container = null) {
+  ensureMd();
+  if (!container) return;
+  currentBasePath = basePath;
+  qmdFrontMatterHtml = ''; // reset; set by the front-matter callback during render
+  const body = qmdMd.render(text);
+  container.innerHTML = qmdFrontMatterHtml + body;
+}
+
 // ── PlantUML extension hook ────────────────────────────────
 
 let plantumlEnabled = false;
@@ -290,7 +324,8 @@ function renderPlantumlDocument(content, container, baseDir) {
 /**
  * Render a document into the preview, choosing the right renderer: a standalone
  * PlantUML file (when the extension is enabled) is drawn as a single diagram;
- * everything else is Markdown (with ```plantuml fences enhanced afterwards).
+ * a Quarto (.qmd) file gets the Quarto extensions; everything else is plain
+ * Markdown (with ```plantuml fences enhanced afterwards).
  * @param {string} content
  * @param {string} basePath
  * @param {HTMLElement} container
@@ -302,7 +337,11 @@ export function renderPreview(content, basePath, container, filePath) {
     renderPlantumlDocument(content, container, basePath);
     return;
   }
-  renderMarkdown(content, basePath, container);
+  if (isQuartoFile(filePath)) {
+    renderQuartoMarkdown(content, basePath, container);
+  } else {
+    renderMarkdown(content, basePath, container);
+  }
   enhancePreview(container);
 }
 
