@@ -133,4 +133,31 @@ describe('applyQuartoExtensions (markdown-it integration)', () => {
     expect(html).not.toContain('Hello');
     expect(html).toContain('Body');
   });
+
+  it('applies Pandoc/Quarto heading attributes ({#id .class}) instead of showing them', () => {
+    const { md } = makeMd();
+    const html = md.render('# Introduction {#sec-intro .unnumbered}\n');
+    expect(html).toContain('id="sec-intro"');
+    expect(html).toContain('class="unnumbered"');
+    expect(html).not.toContain('{#sec-intro'); // braces consumed, not displayed
+  });
+
+  it('keeps callout kind and exec-cell lang despite attrs consuming the braces', () => {
+    const { md } = makeMd();
+    // Regression: markdown-it-attrs strips the `{…}` from the fence/callout
+    // marker; the kind/lang must still be captured (not fall back to defaults).
+    const callout = md.render('::: {.callout-warning}\nhi\n:::\n');
+    expect(callout).toContain('callout-warning');
+    expect(callout).not.toContain('callout-note');
+
+    const cell = md.render('```{r}\nx <- 1\n```\n');
+    expect(cell).toContain('data-exec-lang="r"');
+    expect(cell).toContain('class="language-r"');
+  });
+
+  it('drops non-id/class attributes (no event-handler injection)', () => {
+    const { md } = makeMd();
+    const html = md.render('# H {onclick="alert(1)"}\n');
+    expect(html).not.toContain('onclick');
+  });
 });

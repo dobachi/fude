@@ -8,6 +8,7 @@
 
 import frontMatterPlugin from 'markdown-it-front-matter';
 import containerPlugin from 'markdown-it-container';
+import attrsPlugin from 'markdown-it-attrs';
 
 const QUARTO_EXT = /\.qmd$/i;
 
@@ -120,8 +121,9 @@ export function applyQuartoExtensions(md, { onFrontMatter } = {}) {
     render: (tokens, idx) => {
       const token = tokens[idx];
       if (token.nesting === 1) {
-        const kind = calloutKind(token.info) || 'note';
-        const title = calloutTitle(token.info) || CALLOUT_LABEL[kind];
+        const meta = token.meta || {};
+        const kind = meta.calloutKind || calloutKind(token.info) || 'note';
+        const title = meta.calloutTitle || calloutTitle(token.info) || CALLOUT_LABEL[kind];
         const line = token.map ? ` data-source-line="${token.map[0] + 1}"` : '';
         return (
           `<div class="callout callout-${kind}"${line}>` +
@@ -133,12 +135,39 @@ export function applyQuartoExtensions(md, { onFrontMatter } = {}) {
     },
   });
 
+  // Pandoc/Quarto attribute syntax: `# Heading {#sec-intro .unnumbered}`,
+  // `![fig](x){#fig-y}`. Without this the `{…}` block leaks into the rendered
+  // text. Restricted to id/class so a malicious file can't inject event-handler
+  // attributes (markdown-it-attrs writes attributes directly, which
+  // `html:false` does not guard against).
+  md.use(attrsPlugin, { allowedAttributes: ['id', 'class'] });
+
+  // markdown-it-attrs' `curlyAttrs` core rule consumes the `{…}` block from a
+  // fence info (```{python}) and a callout marker (::: {.callout-tip}) before
+  // our renderers run. Capture the lang/kind into token.meta in a core rule
+  // placed right after `inline` — i.e. before `curlyAttrs` — so it survives.
+  md.core.ruler.after('inline', 'quarto_capture', (state) => {
+    for (const token of state.tokens) {
+      if (token.type === 'fence') {
+        const cell = parseCellInfo(token.info);
+        if (cell) token.meta = { ...(token.meta || {}), execLang: cell.lang };
+      } else if (token.type === 'container_callout_open') {
+        token.meta = {
+          ...(token.meta || {}),
+          calloutKind: calloutKind(token.info) || 'note',
+          calloutTitle: calloutTitle(token.info),
+        };
+      }
+    }
+  });
+
   const baseFence = md.renderer.rules.fence;
   md.renderer.rules.fence = (tokens, idx, options, env, self) => {
-    const cell = parseCellInfo(tokens[idx].info);
-    if (cell) {
-      const line = tokens[idx].attrGet('data-source-line') || '';
-      return renderExecCell(tokens[idx], cell.lang, line);
+    const token = tokens[idx];
+    const lang = (token.meta && token.meta.execLang) || (parseCellInfo(token.info) || {}).lang;
+    if (lang) {
+      const line = token.attrGet('data-source-line') || '';
+      return renderExecCell(token, lang, line);
     }
     return baseFence(tokens, idx, options, env, self);
   };

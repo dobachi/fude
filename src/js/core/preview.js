@@ -128,10 +128,12 @@ function createMd() {
   // the click handler scrolls in-page.
   const seenIds = new WeakMap();
   md.renderer.rules.heading_open = function (tokens, idx, options, env, self) {
+    // Respect an explicit id from Pandoc/Quarto attrs ({#sec-intro}); only
+    // auto-generate a slug id when the heading doesn't already have one.
     const inline = tokens[idx + 1];
     const text = inline && inline.type === 'inline' ? inline.content : '';
     let slug = slugify(text);
-    if (slug) {
+    if (slug && !tokens[idx].attrGet('id')) {
       // Disambiguate duplicates per render env so repeated headings still
       // get unique ids ("foo", "foo-2", "foo-3", ...).
       const counts = seenIds.get(env) || new Map();

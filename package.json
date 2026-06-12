@@ -39,6 +39,7 @@
     "@tauri-apps/plugin-updater": "^2.10.0",
     "codemirror": "^6.0.2",
     "markdown-it": "^14.1.1",
+    "markdown-it-attrs": "^5.0.0",
     "markdown-it-container": "^4.0.0",
     "markdown-it-front-matter": "^0.2.4"
   },
