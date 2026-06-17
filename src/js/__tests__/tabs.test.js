@@ -143,4 +143,33 @@ describe('tabs module', () => {
     expect(tab.name).toBe('Untitled');
     expect(tab.path).toBeNull();
   });
+
+  it('openTab defaults viewMode to split', () => {
+    const tab = mod.openTab('/v.md', 'x');
+    expect(tab.viewMode).toBe('split');
+  });
+
+  it('openTab honors an explicit viewMode option', () => {
+    const tab = mod.openTab('/v.md', 'x', { viewMode: 'preview' });
+    expect(tab.viewMode).toBe('preview');
+  });
+
+  it('setTabViewMode / getTabViewMode update and read a tab view mode', () => {
+    const tab = mod.openTab('/v.md', 'x');
+    mod.setTabViewMode(tab.id, 'editor');
+    expect(mod.getTabViewMode(tab.id)).toBe('editor');
+  });
+
+  it('getTabViewMode falls back to split for unknown tabs', () => {
+    expect(mod.getTabViewMode('nope')).toBe('split');
+  });
+
+  it('getTabsForSession includes each tab view_mode', () => {
+    mod.openTab('/a.md', 'a', { viewMode: 'editor' });
+    mod.openTab('/b.md', 'b', { viewMode: 'preview' });
+    const session = mod.getTabsForSession();
+    expect(session).toHaveLength(2);
+    expect(session[0]).toMatchObject({ path: '/a.md', view_mode: 'editor' });
+    expect(session[1]).toMatchObject({ path: '/b.md', view_mode: 'preview' });
+  });
 });

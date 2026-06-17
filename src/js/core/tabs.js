@@ -80,6 +80,8 @@ export function openTab(path, content = '', opts = {}) {
     scroll: { top: 0, left: 0 },
     // 'text' (editable) or 'image' (read-only viewer).
     kind: opts.kind || 'text',
+    // Per-tab view mode: 'split' | 'editor' | 'preview'.
+    viewMode: opts.viewMode || 'split',
   };
 
   tabs.push(tab);
@@ -235,6 +237,18 @@ export function updateTabScroll(id, scroll) {
   if (tab) tab.scroll = scroll;
 }
 
+/** Set a tab's view mode ('split' | 'editor' | 'preview'). */
+export function setTabViewMode(id, mode) {
+  const tab = tabs.find((t) => t.id === id);
+  if (tab) tab.viewMode = mode;
+}
+
+/** Get a tab's view mode, falling back to 'split'. */
+export function getTabViewMode(id) {
+  const tab = tabs.find((t) => t.id === id);
+  return tab ? tab.viewMode || 'split' : 'split';
+}
+
 function renderTabBar() {
   const tabBar = document.getElementById('tab-bar');
   if (!tabBar) return;
@@ -294,6 +308,7 @@ export function getTabsForSession() {
       cursor_line: 0,
       cursor_col: 0,
       scroll_top: t.scroll ? t.scroll.top : 0,
+      view_mode: t.viewMode || 'split',
     }))
     .filter((t) => t.path);
 }

@@ -150,6 +150,11 @@ export async function unwatchFile(path) {
   return doInvoke('unwatch_file', { path });
 }
 
+/** Open a new editor window, optionally loading `path`. Tauri-only. */
+export async function newWindow(path) {
+  return doInvoke('new_window', { path: path || null, remote: null });
+}
+
 // ── Downloadable extensions ────────────────────────────────
 
 export async function fetchExtensionManifest() {

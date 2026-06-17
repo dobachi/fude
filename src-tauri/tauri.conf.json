@@ -84,6 +84,13 @@
           "takesValue": true,
           "required": false,
           "description": "Connect to a remote Fude server URL (e.g., http://localhost:3000)"
+        },
+        {
+          "name": "new-window",
+          "short": "n",
+          "takesValue": false,
+          "required": false,
+          "description": "Open the file in a new window instead of reusing the existing one"
         }
       ]
     }
