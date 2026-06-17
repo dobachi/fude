@@ -57,6 +57,8 @@ import {
   getTabsForSession,
   getActiveTabIndex,
   getAllTabs,
+  setTabViewMode,
+  getTabViewMode,
 } from './core/tabs.js';
 import * as panesModule from './core/panes.js';
 const {
@@ -114,7 +116,29 @@ import {
 } from './features/ai-copilot.js';
 import { initContextMenu } from './features/ai/context-menu.js';
 
-let viewMode = 'split';
+// Default view mode for newly opened tabs and the fallback when no tab is
+// active. Per-tab view modes live on each tab (see tabs.js setTabViewMode).
+// Seeded from the restored session for backward compatibility.
+let defaultViewMode = 'split';
+
+/** View mode of the currently active tab (falls back to the default). */
+function currentViewMode() {
+  const tab = getActiveTab();
+  return tab ? getTabViewMode(tab.id) : defaultViewMode;
+}
+
+/** View mode of the tab a given pane is displaying (falls back to the default). */
+function paneViewMode(pane) {
+  const tab =
+    pane && pane.filePath ? getAllTabs().find((t) => t.path === pane.filePath) : getActiveTab();
+  return tab ? getTabViewMode(tab.id) : defaultViewMode;
+}
+
+// True for the primary "main" window. Only the main window restores and
+// persists the global session; additional windows (label "win-*") open empty
+// or with a file handed to them, and never overwrite session.json.
+let isMainWindow = true;
+
 let vaultPath = '';
 let config = {};
 
@@ -160,9 +184,10 @@ function cycleSidebarFocus() {
 
 /** Re-render the preview in every pane (used after a live config change). */
 function rerenderPreviews() {
-  if (viewMode !== 'split' && viewMode !== 'preview') return;
   for (const p of panesModule.getAllPanes()) {
     if (!p.previewContainer) continue;
+    const mode = paneViewMode(p);
+    if (mode !== 'split' && mode !== 'preview') continue;
     const basePath = dirnameOf(p.filePath);
     renderPreview(p.content || '', basePath, p.previewContainer, p.filePath);
   }
@@ -514,7 +539,9 @@ async function init() {
       const ver = await getVersion();
       setAppVersion(ver);
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      await getCurrentWindow().setTitle(`Fude v${ver}`);
+      const appWindow = getCurrentWindow();
+      isMainWindow = appWindow.label === 'main';
+      await appWindow.setTitle(`Fude v${ver}`);
     } catch (e) {
       console.warn('Could not read/set app version:', e);
       setAppVersion('?');
@@ -635,11 +662,23 @@ async function init() {
   const sidebarOpen = document.getElementById('sidebar-open');
   if (sidebarOpen) sidebarOpen.addEventListener('click', toggleSidebar);
 
-  // Try restore session
-  const session = await restoreSession();
+  // Additional windows are handed a file to open via take_open_request; the
+  // main window relies on the cli-args event instead (so this stays null there).
+  let pendingOpen = null;
+  if (isLocalTauri()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      pendingOpen = await invoke('take_open_request');
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Try restore session — only the main window restores the global session.
+  const session = isMainWindow ? await restoreSession() : null;
   if (session && session.open_tabs && session.open_tabs.length > 0) {
     vaultPath = session.vault_path || '';
-    viewMode = session.view_mode || 'split';
+    defaultViewMode = session.view_mode || 'split';
     applyViewMode();
 
     if (vaultPath) {
@@ -663,12 +702,13 @@ async function init() {
     // First, open all tabs with saved content
     for (const tabInfo of session.open_tabs) {
       try {
+        const viewMode = tabInfo.view_mode || defaultViewMode;
         if (isImagePath(tabInfo.path)) {
-          openTab(tabInfo.path, '', { kind: 'image' });
+          openTab(tabInfo.path, '', { kind: 'image', viewMode });
           continue;
         }
         const content = await backend.readFile(tabInfo.path);
-        openTab(tabInfo.path, content);
+        openTab(tabInfo.path, content, { viewMode });
       } catch {
         /* ignore */
       }
@@ -714,6 +754,9 @@ async function init() {
         },
       );
     }
+  } else if (pendingOpen && pendingOpen.path) {
+    // A new window opened with a specific file (e.g. "open in new window").
+    await openPath(pendingOpen.path);
   } else {
     // Check if server specified an initial directory
     if (!isLocalTauri()) {
@@ -924,7 +967,7 @@ function handlePaneContentChange(pane, newContent) {
   // every keystroke.
   scheduleOutlineUpdate(newContent);
 
-  if (viewMode === 'split' || viewMode === 'preview') {
+  if (currentViewMode() === 'split' || currentViewMode() === 'preview') {
     const basePath = dirnameOf(tab.path);
     // Suppress the spurious preview→editor scroll sync caused by innerHTML
     // replacement. When renderMarkdown resets innerHTML the browser drops
@@ -982,7 +1025,7 @@ function handlePaneScroll(pane, info) {
   // typing.
   if (typeof topLine === 'number') setActiveOutlineLine(topLine);
 
-  if (viewMode !== 'split' || !pane.previewContainer) return;
+  if (paneViewMode(pane) !== 'split' || !pane.previewContainer) return;
   // Skip preview sync while we're absorbing the editor-scroll burst that
   // immediately follows a doc-change. Otherwise the preview jitters with
   // every keystroke.
@@ -998,7 +1041,7 @@ function handlePaneScroll(pane, info) {
 }
 
 function handlePreviewScroll(pane) {
-  if (viewMode !== 'split' || !pane.editorView) return;
+  if (paneViewMode(pane) !== 'split' || !pane.editorView) return;
   if (!shouldHandleScroll('preview')) return;
   const line = getLineFromPreview(pane.previewContainer);
   if (line === null) return;
@@ -1022,7 +1065,7 @@ async function handleFileSelect(path) {
       // Open images as a read-only viewer tab (not as editable text).
       openTab(path, '', { kind: 'image' });
       highlightFile(path);
-      if (viewMode === 'preview') setViewMode('split');
+      if (currentViewMode() === 'preview') setViewMode('split');
       return;
     }
     const content = await backend.readFile(path);
@@ -1146,9 +1189,20 @@ async function doDelete(entry) {
   }
 }
 
+function openInNewWindow(path) {
+  backend.newWindow(path).catch((e) => {
+    showToast(`ウィンドウを開けませんでした: ${e?.message || e}`, { type: 'error' });
+  });
+}
+
 function handleFileContextMenu(entry, x, y) {
   const items = [];
-  if (!entry.isDir) items.push({ label: '開く', action: () => handleFileSelect(entry.path) });
+  if (!entry.isDir) {
+    items.push({ label: '開く', action: () => handleFileSelect(entry.path) });
+    if (isLocalTauri()) {
+      items.push({ label: '新しいウィンドウで開く', action: () => openInNewWindow(entry.path) });
+    }
+  }
   items.push(
     { label: 'パスをコピー', action: () => copyText(entry.path) },
     { label: '相対パスをコピー', action: () => copyText(toRelative(entry.path)) },
@@ -1174,8 +1228,11 @@ function handleTabContextMenu(tabId, x, y) {
     { label: 'すべて閉じる', action: () => closeAllTabs() },
   ];
   if (tab.path) {
+    items.push({ separator: true });
+    if (isLocalTauri()) {
+      items.push({ label: '新しいウィンドウで開く', action: () => openInNewWindow(tab.path) });
+    }
     items.push(
-      { separator: true },
       { label: 'パスをコピー', action: () => copyText(tab.path) },
       { label: 'ファイル名をコピー', action: () => copyText(getFilename(tab.path)) },
       { separator: true },
@@ -1251,6 +1308,7 @@ function handleTabChange(tab) {
     pane.editorView = null;
     if (tab.path) highlightFile(tab.path);
     clearOutline();
+    applyViewMode();
     scheduleSessionSave();
     return;
   }
@@ -1270,11 +1328,8 @@ function handleTabChange(tab) {
   if (tab.cursor) setCursor(view, tab.cursor.from || 0, tab.cursor.to || 0);
   if (tab.scroll) setScroll(view, tab.scroll);
 
-  // Render preview
-  if (viewMode === 'split' || viewMode === 'preview') {
-    const basePath = dirnameOf(tab.path);
-    renderPreview(tab.content, basePath, previewContainer, tab.path);
-  }
+  // Apply this tab's view mode (sets pane classes and renders preview as needed)
+  applyViewMode();
 
   if (tab.path) highlightFile(tab.path);
 
@@ -1318,7 +1373,8 @@ function applyReloadToAllPanes(path, content, tabId) {
       setContentFromDisk(p.editorView, content);
       p.content = content;
       // Re-render preview if visible
-      if ((viewMode === 'split' || viewMode === 'preview') && p.previewContainer) {
+      const mode = paneViewMode(p);
+      if ((mode === 'split' || mode === 'preview') && p.previewContainer) {
         const basePath = dirnameOf(path);
         renderPreview(content, basePath, p.previewContainer, path);
       }
@@ -1378,29 +1434,32 @@ async function manualReload() {
 }
 
 // ── View mode ──────────────────────────────────────────────
+// Each pane reflects the view mode of the tab it currently displays, so
+// switching tabs (or focusing a different pane) shows that file's own layout.
 function applyViewMode() {
-  // Apply to all panes
   const allPanes = panesModule.getAllPanes();
   for (const p of allPanes) {
+    const mode = paneViewMode(p);
     p.element.classList.remove('view-split', 'view-preview');
-    if (viewMode === 'split') p.element.classList.add('view-split');
-    else if (viewMode === 'preview') p.element.classList.add('view-preview');
-  }
+    if (mode === 'split') p.element.classList.add('view-split');
+    else if (mode === 'preview') p.element.classList.add('view-preview');
+    // 'editor' => no class (editor-only).
 
-  if (viewMode === 'split' || viewMode === 'preview') {
-    const tab = getActiveTab();
-    if (tab) {
-      const pane = getActivePane();
-      if (pane) {
+    if ((mode === 'split' || mode === 'preview') && p.previewContainer) {
+      const tab = p.filePath ? getAllTabs().find((t) => t.path === p.filePath) : getActiveTab();
+      if (tab) {
         const basePath = dirnameOf(tab.path);
-        renderPreview(tab.content, basePath, pane.previewContainer, tab.path);
+        renderPreview(tab.content, basePath, p.previewContainer, tab.path);
       }
     }
   }
 }
 
 function setViewMode(mode) {
-  viewMode = mode;
+  const tab = getActiveTab();
+  if (tab) setTabViewMode(tab.id, mode);
+  // Remember the most recently chosen mode as the default for new tabs.
+  defaultViewMode = mode;
   applyViewMode();
   scheduleSessionSave();
 }
@@ -1490,11 +1549,14 @@ function showCloseAppDialog(onConfirm) {
 
 // ── Session save ───────────────────────────────────────────
 function scheduleSessionSave() {
+  // Only the main window owns the global session; additional windows must not
+  // overwrite it with their own (transient) state.
+  if (!isMainWindow) return;
   scheduleSave(() => ({
     open_tabs: getTabsForSession(),
     active_tab: getActiveTabIndex(),
     vault_path: vaultPath || null,
-    view_mode: viewMode,
+    view_mode: defaultViewMode,
     sidebar_visible: !document.getElementById('app')?.classList.contains('sidebar-collapsed'),
     pane_layout: null,
   }));
@@ -1856,10 +1918,16 @@ function handleGlobalKeys(e) {
       smartClose();
       return;
     case 'T':
-    case 'N':
       e.preventDefault();
       e.stopPropagation();
       openTab(null, '');
+      return;
+    case 'N':
+      // Ctrl+Shift+N opens a new window (Tauri only); new tab is Ctrl+Shift+T.
+      e.preventDefault();
+      e.stopPropagation();
+      if (isLocalTauri()) openInNewWindow(null);
+      else openTab(null, '');
       return;
     case 'O':
       e.preventDefault();

@@ -5,12 +5,15 @@ use futures_util::StreamExt;
 use key_storage::{create_storage, set_dir_permissions, set_file_permissions, KeyStorage};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 use tauri::Emitter;
 use tauri::Manager;
+use tauri::{State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_cli::CliExt;
 
 static KEY_STORAGE: OnceLock<Box<dyn KeyStorage>> = OnceLock::new();
@@ -34,6 +37,14 @@ pub struct TabInfo {
     pub cursor_line: usize,
     pub cursor_col: usize,
     pub scroll_top: f64,
+    /// Per-tab view mode ("split" | "editor" | "preview"). Defaults to "split"
+    /// so sessions written by older versions deserialize cleanly.
+    #[serde(default = "default_view_mode")]
+    pub view_mode: String,
+}
+
+fn default_view_mode() -> String {
+    "split".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1112,9 +1123,12 @@ fn resolve_cli_path(path: &str, base: Option<PathBuf>) -> String {
     joined.to_string_lossy().to_string()
 }
 
-fn parse_open_args(args: &[String]) -> (Option<String>, Option<String>) {
+/// Returns (path, remote, new_window). `new_window` is true when `--new-window`
+/// / `-n` is present, requesting the target open in a freshly spawned window.
+fn parse_open_args(args: &[String]) -> (Option<String>, Option<String>, bool) {
     let mut path: Option<String> = None;
     let mut remote: Option<String> = None;
+    let mut new_window = false;
     let mut i = 1;
     while i < args.len() {
         let a = &args[i];
@@ -1125,6 +1139,8 @@ fn parse_open_args(args: &[String]) -> (Option<String>, Option<String>) {
             }
         } else if let Some(v) = a.strip_prefix("--remote=") {
             remote = Some(v.to_string());
+        } else if a == "--new-window" || a == "-n" {
+            new_window = true;
         } else if a.starts_with('-') {
             // unknown flag — skip
         } else if path.is_none() {
@@ -1132,7 +1148,93 @@ fn parse_open_args(args: &[String]) -> (Option<String>, Option<String>) {
         }
         i += 1;
     }
-    (path, remote)
+    (path, remote, new_window)
+}
+
+// ─── Multi-window support ──────────────────────────────────
+
+/// A file path or remote URL queued for a window that is about to load. The
+/// frontend pulls this via `take_open_request` during init.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OpenRequest {
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub remote: Option<String>,
+}
+
+/// Pending open requests keyed by window label.
+#[derive(Default)]
+struct PendingOpens(Mutex<HashMap<String, OpenRequest>>);
+
+/// Monotonic counter for additional window labels (`win-1`, `win-2`, ...).
+static WINDOW_SEQ: AtomicUsize = AtomicUsize::new(1);
+
+/// Spawn an additional editor window. When `remote` is set the window loads the
+/// remote URL directly; otherwise it loads the bundled app and (if `path` is
+/// given) the resolved path is queued for the new window to pull on init.
+/// `base` is the working directory used to resolve a relative `path`.
+fn spawn_window(
+    app: &tauri::AppHandle,
+    path: Option<String>,
+    remote: Option<String>,
+    base: Option<PathBuf>,
+) -> Result<(), String> {
+    let seq = WINDOW_SEQ.fetch_add(1, Ordering::SeqCst);
+    let label = format!("win-{}", seq);
+
+    if let Some(r) = remote.as_deref().filter(|r| !r.is_empty()) {
+        let url = r
+            .parse()
+            .map_err(|e| format!("Invalid remote URL '{}': {}", r, e))?;
+        WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
+            .title("Fude")
+            .inner_size(1200.0, 800.0)
+            .resizable(true)
+            .build()
+            .map_err(|e| format!("Failed to create window: {}", e))?;
+        return Ok(());
+    }
+
+    if let Some(p) = path.filter(|p| !p.is_empty()) {
+        let resolved = resolve_cli_path(&p, base.or_else(|| std::env::current_dir().ok()));
+        if let Ok(mut map) = app.state::<PendingOpens>().0.lock() {
+            map.insert(
+                label.clone(),
+                OpenRequest {
+                    path: Some(resolved),
+                    remote: None,
+                },
+            );
+        }
+    }
+
+    WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+        .title("Fude")
+        .inner_size(1200.0, 800.0)
+        .resizable(true)
+        .build()
+        .map_err(|e| format!("Failed to create window: {}", e))?;
+    Ok(())
+}
+
+/// Open a new editor window from the frontend (menu / shortcut / context menu).
+#[tauri::command]
+fn new_window(
+    app: tauri::AppHandle,
+    path: Option<String>,
+    remote: Option<String>,
+) -> Result<(), String> {
+    spawn_window(&app, path, remote, None)
+}
+
+/// Pull (and clear) the open request queued for the calling window, if any.
+#[tauri::command]
+fn take_open_request(
+    window: tauri::Window,
+    pending: State<'_, PendingOpens>,
+) -> Option<OpenRequest> {
+    pending.0.lock().ok()?.remove(window.label())
 }
 
 // ─── Downloadable extensions ───────────────────────────────
@@ -1487,15 +1589,27 @@ pub fn run() {
     #[cfg(desktop)]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            let (path, remote, new_window) = parse_open_args(&argv);
+            let base = Some(PathBuf::from(&cwd));
+
+            // `--new-window` (or no usable main window) spawns a fresh window;
+            // otherwise reuse and focus the existing main window.
+            if new_window {
+                let _ = spawn_window(app, path, remote, base);
+                return;
+            }
+
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.show();
                 let _ = window.set_focus();
-            }
-            let (path, _) = parse_open_args(&argv);
-            if let Some(p) = path {
-                let resolved = resolve_cli_path(&p, Some(PathBuf::from(&cwd)));
-                let _ = app.emit("cli-args", serde_json::json!({ "path": resolved }));
+                if let Some(p) = path {
+                    let resolved = resolve_cli_path(&p, base);
+                    // Target the main window only so other open windows are unaffected.
+                    let _ = window.emit("cli-args", serde_json::json!({ "path": resolved }));
+                }
+            } else {
+                let _ = spawn_window(app, path, remote, base);
             }
         }));
     }
@@ -1506,7 +1620,10 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
+        .manage(PendingOpens::default())
         .invoke_handler(tauri::generate_handler![
+            new_window,
+            take_open_request,
             read_file,
             write_file,
             rename_path,
@@ -1580,7 +1697,7 @@ pub fn run() {
             // the bare path argument.
             if cli_path.is_none() && cli_remote.is_none() {
                 let raw: Vec<String> = std::env::args().collect();
-                let (p, r) = parse_open_args(&raw);
+                let (p, r, _new_window) = parse_open_args(&raw);
                 cli_path = p;
                 cli_remote = r;
             }
@@ -1596,7 +1713,9 @@ pub fn run() {
                 let payload = serde_json::json!({ "path": resolved });
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(500));
-                    let _ = handle.emit("cli-args", payload);
+                    if let Some(window) = handle.get_webview_window("main") {
+                        let _ = window.emit("cli-args", payload);
+                    }
                 });
             }
             Ok(())
@@ -1769,6 +1888,7 @@ mod tests {
                 cursor_line: 10,
                 cursor_col: 5,
                 scroll_top: 120.5,
+                view_mode: "preview".to_string(),
             }],
             active_tab: 0,
             vault_path: Some("/home/user/vault".to_string()),
@@ -1789,6 +1909,7 @@ mod tests {
         assert_eq!(restored.open_tabs.len(), 1);
         assert_eq!(restored.open_tabs[0].path, "/tmp/test.md");
         assert_eq!(restored.open_tabs[0].cursor_line, 10);
+        assert_eq!(restored.open_tabs[0].view_mode, "preview");
         assert_eq!(restored.active_tab, 0);
         assert_eq!(restored.vault_path.as_deref(), Some("/home/user/vault"));
         assert_eq!(restored.view_mode, "editor");
@@ -1796,6 +1917,21 @@ mod tests {
         let layout = restored.pane_layout.unwrap();
         assert_eq!(layout.direction, "horizontal");
         assert_eq!(layout.panes.len(), 1);
+    }
+
+    #[test]
+    fn tab_info_view_mode_defaults_when_absent() {
+        // Sessions written by older versions have no `view_mode` on tabs.
+        let json = r#"{"path":"/tmp/old.md","cursor_line":0,"cursor_col":0,"scroll_top":0.0}"#;
+        let tab: TabInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(tab.view_mode, "split");
+    }
+
+    #[test]
+    fn tab_info_view_mode_roundtrip() {
+        let json = r#"{"path":"/tmp/n.md","cursor_line":0,"cursor_col":0,"scroll_top":0.0,"view_mode":"editor"}"#;
+        let tab: TabInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(tab.view_mode, "editor");
     }
 
     #[test]
@@ -1954,63 +2090,83 @@ mod tests {
 
     #[test]
     fn parse_open_args_extracts_path_from_positional_arg() {
-        let (path, remote) = parse_open_args(&args(&["fude.exe", "C:\\Users\\me\\note.md"]));
+        let (path, remote, _) = parse_open_args(&args(&["fude.exe", "C:\\Users\\me\\note.md"]));
         assert_eq!(path.as_deref(), Some("C:\\Users\\me\\note.md"));
         assert!(remote.is_none());
     }
 
     #[test]
     fn parse_open_args_handles_unix_path() {
-        let (path, remote) = parse_open_args(&args(&["fude", "/home/user/notes.md"]));
+        let (path, remote, _) = parse_open_args(&args(&["fude", "/home/user/notes.md"]));
         assert_eq!(path.as_deref(), Some("/home/user/notes.md"));
         assert!(remote.is_none());
     }
 
     #[test]
     fn parse_open_args_parses_remote_short_flag() {
-        let (path, remote) = parse_open_args(&args(&["fude", "-r", "http://localhost:3000"]));
+        let (path, remote, _) = parse_open_args(&args(&["fude", "-r", "http://localhost:3000"]));
         assert!(path.is_none());
         assert_eq!(remote.as_deref(), Some("http://localhost:3000"));
     }
 
     #[test]
     fn parse_open_args_parses_remote_long_flag() {
-        let (path, remote) = parse_open_args(&args(&["fude", "--remote", "http://example.com"]));
+        let (path, remote, _) = parse_open_args(&args(&["fude", "--remote", "http://example.com"]));
         assert_eq!(remote.as_deref(), Some("http://example.com"));
         assert!(path.is_none());
     }
 
     #[test]
     fn parse_open_args_parses_remote_equals_form() {
-        let (path, remote) = parse_open_args(&args(&["fude", "--remote=http://x.test"]));
+        let (path, remote, _) = parse_open_args(&args(&["fude", "--remote=http://x.test"]));
         assert_eq!(remote.as_deref(), Some("http://x.test"));
         assert!(path.is_none());
     }
 
     #[test]
     fn parse_open_args_returns_none_when_only_executable() {
-        let (path, remote) = parse_open_args(&args(&["fude"]));
+        let (path, remote, _) = parse_open_args(&args(&["fude"]));
         assert!(path.is_none());
         assert!(remote.is_none());
     }
 
     #[test]
     fn parse_open_args_returns_none_for_empty() {
-        let (path, remote) = parse_open_args(&[]);
+        let (path, remote, _) = parse_open_args(&[]);
         assert!(path.is_none());
         assert!(remote.is_none());
     }
 
     #[test]
     fn parse_open_args_takes_first_path_only() {
-        let (path, _) = parse_open_args(&args(&["fude", "/a.md", "/b.md"]));
+        let (path, _, _) = parse_open_args(&args(&["fude", "/a.md", "/b.md"]));
         assert_eq!(path.as_deref(), Some("/a.md"));
     }
 
     #[test]
     fn parse_open_args_skips_unknown_flags() {
-        let (path, _) = parse_open_args(&args(&["fude", "--debug", "/a.md"]));
+        let (path, _, _) = parse_open_args(&args(&["fude", "--debug", "/a.md"]));
         assert_eq!(path.as_deref(), Some("/a.md"));
+    }
+
+    #[test]
+    fn parse_open_args_detects_new_window_long_flag() {
+        let (path, _, new_window) = parse_open_args(&args(&["fude", "--new-window", "/a.md"]));
+        assert_eq!(path.as_deref(), Some("/a.md"));
+        assert!(new_window);
+    }
+
+    #[test]
+    fn parse_open_args_detects_new_window_short_flag() {
+        let (path, _, new_window) = parse_open_args(&args(&["fude", "-n", "/a.md"]));
+        assert_eq!(path.as_deref(), Some("/a.md"));
+        assert!(new_window);
+    }
+
+    #[test]
+    fn parse_open_args_new_window_defaults_false() {
+        let (_, _, new_window) = parse_open_args(&args(&["fude", "/a.md"]));
+        assert!(!new_window);
     }
 
     // --- resolve_cli_path tests ---
