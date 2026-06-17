@@ -584,13 +584,18 @@ async function init() {
   if (outlineList) {
     initOutline(outlineList, {
       onJump: (line) => {
-        const view = currentView();
-        if (!view) return;
         // Jumping is a user-initiated move; skip the editor→preview lockout
         // that typing installs, but suppress the bounce-back from the editor
         // scroll event we are about to dispatch.
         recordScrollSync('editor');
-        jumpToLine(view, line);
+        const view = currentView();
+        if (view) jumpToLine(view, line);
+        // In preview-only mode the editor is hidden and the editor→preview
+        // scroll sync only runs in split mode, so scroll the preview directly.
+        if (currentViewMode() === 'preview') {
+          const pane = getActivePane();
+          if (pane && pane.previewContainer) syncPreviewToLine(pane.previewContainer, line);
+        }
       },
     });
   }
@@ -1324,12 +1329,19 @@ function handleTabChange(tab) {
   // Apply vim mode
   reapplyMode();
 
-  // Restore cursor and scroll
-  if (tab.cursor) setCursor(view, tab.cursor.from || 0, tab.cursor.to || 0);
-  if (tab.scroll) setScroll(view, tab.scroll);
-
-  // Apply this tab's view mode (sets pane classes and renders preview as needed)
+  // Apply this tab's view mode FIRST (sets pane classes / editor width and
+  // renders preview). Scroll geometry depends on the editor width (line wrap),
+  // so the width must be settled before we restore the scroll position.
   applyViewMode();
+
+  // Restore cursor immediately; restore scroll after the layout reflow that the
+  // view-mode (width) change above triggers, otherwise a line-based scroll is
+  // computed against the wrong width and the view lands on a different line.
+  if (tab.cursor) setCursor(view, tab.cursor.from || 0, tab.cursor.to || 0);
+  if (tab.scroll && view) {
+    const scroll = tab.scroll;
+    requestAnimationFrame(() => setScroll(view, scroll));
+  }
 
   if (tab.path) highlightFile(tab.path);
 

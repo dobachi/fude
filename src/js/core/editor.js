@@ -598,14 +598,33 @@ export function setCursor(view, from, to = from) {
 }
 
 export function getScroll(view) {
-  return { top: view.scrollDOM.scrollTop, left: view.scrollDOM.scrollLeft };
+  const scrollTop = view.scrollDOM.scrollTop;
+  // Capture the (fractional, 1-based) top line in addition to pixels. Pixel
+  // scrollTop is width-dependent (line wrap), so restoring it after a view-mode
+  // change lands on the wrong line; the line number is width-independent.
+  let line = 1;
+  try {
+    const block = view.lineBlockAtHeight(scrollTop);
+    const lineNum = view.state.doc.lineAt(block.from).number;
+    const blockHeight = block.bottom - block.top;
+    const fraction = blockHeight > 0 ? (scrollTop - block.top) / blockHeight : 0;
+    line = lineNum + Math.max(0, Math.min(1, fraction));
+  } catch {
+    /* layout race — fall back to line 1 */
+  }
+  return { top: scrollTop, left: view.scrollDOM.scrollLeft, line };
 }
 
 export function setScroll(view, scroll) {
-  if (scroll) {
-    view.scrollDOM.scrollTop = scroll.top || 0;
-    view.scrollDOM.scrollLeft = scroll.left || 0;
+  if (!view || !scroll) return;
+  // Prefer width-independent line-based restore when available.
+  if (typeof scroll.line === 'number') {
+    scrollEditorToLine(view, scroll.line);
+    if (scroll.left) view.scrollDOM.scrollLeft = scroll.left;
+    return;
   }
+  view.scrollDOM.scrollTop = scroll.top || 0;
+  view.scrollDOM.scrollLeft = scroll.left || 0;
 }
 
 /**
