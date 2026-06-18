@@ -1174,6 +1174,13 @@ static WINDOW_SEQ: AtomicUsize = AtomicUsize::new(1);
 /// remote URL directly; otherwise it loads the bundled app and (if `path` is
 /// given) the resolved path is queued for the new window to pull on init.
 /// `base` is the working directory used to resolve a relative `path`.
+///
+/// IMPORTANT: `WebviewWindowBuilder::build()` deadlocks on Windows when called
+/// on the main thread (e.g. directly from a synchronous command or the
+/// single-instance handler, both of which run on the event-loop thread, which
+/// is exactly the thread `build()` needs). We therefore resolve the URL and
+/// queue any pending open synchronously, then run `build()` on a separate
+/// thread so the caller's thread stays free to service the request.
 fn spawn_window(
     app: &tauri::AppHandle,
     path: Option<String>,
@@ -1183,38 +1190,38 @@ fn spawn_window(
     let seq = WINDOW_SEQ.fetch_add(1, Ordering::SeqCst);
     let label = format!("win-{}", seq);
 
-    if let Some(r) = remote.as_deref().filter(|r| !r.is_empty()) {
-        let url = r
+    let url = if let Some(r) = remote.as_deref().filter(|r| !r.is_empty()) {
+        let parsed = r
             .parse()
             .map_err(|e| format!("Invalid remote URL '{}': {}", r, e))?;
-        WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
+        WebviewUrl::External(parsed)
+    } else {
+        if let Some(p) = path.filter(|p| !p.is_empty()) {
+            let resolved = resolve_cli_path(&p, base.or_else(|| std::env::current_dir().ok()));
+            if let Ok(mut map) = app.state::<PendingOpens>().0.lock() {
+                map.insert(
+                    label.clone(),
+                    OpenRequest {
+                        path: Some(resolved),
+                        remote: None,
+                    },
+                );
+            }
+        }
+        WebviewUrl::App("index.html".into())
+    };
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = WebviewWindowBuilder::new(&app, &label, url)
             .title("Fude")
             .inner_size(1200.0, 800.0)
             .resizable(true)
             .build()
-            .map_err(|e| format!("Failed to create window: {}", e))?;
-        return Ok(());
-    }
-
-    if let Some(p) = path.filter(|p| !p.is_empty()) {
-        let resolved = resolve_cli_path(&p, base.or_else(|| std::env::current_dir().ok()));
-        if let Ok(mut map) = app.state::<PendingOpens>().0.lock() {
-            map.insert(
-                label.clone(),
-                OpenRequest {
-                    path: Some(resolved),
-                    remote: None,
-                },
-            );
+        {
+            eprintln!("Failed to create window '{}': {}", label, e);
         }
-    }
-
-    WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
-        .title("Fude")
-        .inner_size(1200.0, 800.0)
-        .resizable(true)
-        .build()
-        .map_err(|e| format!("Failed to create window: {}", e))?;
+    });
     Ok(())
 }
 
