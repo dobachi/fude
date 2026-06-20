@@ -2094,6 +2094,51 @@ body {
   background: var(--border);
 }
 
+/* Table insert grid popover */
+.table-grid-picker {
+  position: fixed;
+  z-index: 4000;
+  padding: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  user-select: none;
+}
+
+.table-grid-label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--fg-secondary);
+  text-align: center;
+}
+
+.table-grid {
+  display: grid;
+  gap: 3px;
+}
+
+.table-grid-cell {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--bg-primary);
+  cursor: pointer;
+}
+
+.table-grid-cell.active {
+  background: var(--accent, #4a9eff);
+  border-color: var(--accent, #4a9eff);
+}
+
+.table-grid-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--fg-secondary);
+  text-align: center;
+}
+
 /* Extensions settings */
 .ext-row {
   display: flex;

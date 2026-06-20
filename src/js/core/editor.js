@@ -38,6 +38,7 @@ import {
 import { tags as t } from '@lezer/highlight';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { openExternal } from './external-link.js';
+import { findTableAt, navigateTable, formatTableText, delimitedToModel } from './table.js';
 
 let currentFontSize = 14;
 
@@ -372,6 +373,57 @@ function boldKeymap() {
   ]);
 }
 
+// ── Table editing ──────────────────────────────────────────
+// All table logic lives in table.js (pure, tested). These thin wrappers map
+// between document offsets and the table block, then dispatch the change.
+
+/** Char range [from, to] of the table block at the cursor, or null. */
+function tableBlockRange(state) {
+  const { from, to } = state.selection.main;
+  if (from !== to) return null; // only a collapsed cursor navigates cells
+  const lineIdx = state.doc.lineAt(from).number - 1;
+  const block = findTableAt(state.doc.toString(), lineIdx);
+  if (!block) return null;
+  const startLine = state.doc.line(block.startLine + 1);
+  const endLine = state.doc.line(block.endLine + 1);
+  return { block, from: startLine.from, to: endLine.to, cursor: from };
+}
+
+/** Move between table cells (direction: 'next' | 'prev' | 'down'), reformatting. */
+function tableNav(view, direction) {
+  const range = tableBlockRange(view.state);
+  if (!range) return false;
+  const blockText = view.state.sliceDoc(range.from, range.to);
+  const res = navigateTable(blockText, range.cursor - range.from, direction);
+  if (!res) return false;
+  view.dispatch({
+    changes: { from: range.from, to: range.to, insert: res.text },
+    selection: { anchor: range.from + res.cursor },
+    scrollIntoView: true,
+  });
+  return true;
+}
+
+/** Reformat (align) the table at the cursor without moving cells. */
+function tableFormat(view) {
+  const range = tableBlockRange(view.state);
+  if (!range) return false;
+  const formatted = formatTableText(range.block.model);
+  if (formatted !== view.state.sliceDoc(range.from, range.to)) {
+    view.dispatch({ changes: { from: range.from, to: range.to, insert: formatted } });
+  }
+  return true;
+}
+
+function tableKeymap() {
+  return keymap.of([
+    { key: 'Tab', run: (v) => tableNav(v, 'next') },
+    { key: 'Shift-Tab', run: (v) => tableNav(v, 'prev') },
+    { key: 'Enter', run: (v) => tableNav(v, 'down') },
+    { key: 'Mod-Shift-f', run: tableFormat },
+  ]);
+}
+
 /**
  * Create a new EditorView in the given container.
  * Each call creates an independent view; previous views are NOT destroyed.
@@ -429,29 +481,51 @@ export function createEditor(
     autoListExtension(),
     boldKeymap(),
     listKeymap(),
+    // Prec.high so the table's Tab/Enter run before indentWithTab / the default
+    // keymap (which otherwise win), but still below vim/emacs (Prec.highest).
+    // The handlers return false outside a table, falling through to those.
+    Prec.high(tableKeymap()),
     baseTheme,
     themeCompartment.of(themeExtensionFor(document.documentElement.getAttribute('data-theme'))),
     EditorView.lineWrapping,
     EditorView.domEventHandlers({
       paste(event, view) {
-        if (!_imagePasteHandler) return false;
         const items = event.clipboardData?.items;
-        if (!items) return false;
-        // Extract the image files synchronously: clipboardData (and getAsFile)
-        // become invalid once this handler returns, so async code can't read
-        // them later. We capture File objects here and hand them off.
-        const images = [];
-        for (const it of items) {
-          if (it.type?.startsWith('image/')) {
-            const f = it.getAsFile();
-            if (f) images.push({ file: f, type: it.type });
+        // 1. Image paste (existing behavior). Extract File objects synchronously:
+        // clipboardData (and getAsFile) become invalid once this handler returns.
+        if (_imagePasteHandler && items) {
+          const images = [];
+          for (const it of items) {
+            if (it.type?.startsWith('image/')) {
+              const f = it.getAsFile();
+              if (f) images.push({ file: f, type: it.type });
+            }
+          }
+          if (images.length > 0) {
+            event.preventDefault();
+            _imagePasteHandler(view, images);
+            return true;
           }
         }
-        if (images.length === 0) return false;
-        // Consume the event so the raw image data isn't pasted as garbage text.
-        event.preventDefault();
-        _imagePasteHandler(view, images);
-        return true;
+        // 2. Tabular text (TSV / CSV) -> Markdown table.
+        const text = event.clipboardData?.getData('text/plain');
+        if (text) {
+          const model = delimitedToModel(text);
+          if (model) {
+            const { state } = view;
+            const { from, to } = state.selection.main;
+            const line = state.doc.lineAt(from);
+            const before = state.sliceDoc(line.from, from);
+            const after = state.sliceDoc(to, state.doc.lineAt(to).to);
+            let insert = formatTableText(model);
+            if (before.trim() !== '') insert = '\n' + insert;
+            if (after.trim() !== '') insert = insert + '\n';
+            event.preventDefault();
+            view.dispatch(state.replaceSelection(insert), { scrollIntoView: true });
+            return true;
+          }
+        }
+        return false;
       },
     }),
   ];

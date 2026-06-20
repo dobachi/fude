@@ -28,6 +28,8 @@ import { attachPanZoom } from './core/svg-panzoom.js';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
 import { showMenu } from './core/menu.js';
+import { showTableGridPicker } from './core/table-grid.js';
+import { emptyTableModel, formatTableText } from './core/table.js';
 import { promptDialog, confirmDialog } from './core/dialog.js';
 import {
   initPreview,
@@ -1560,6 +1562,41 @@ function showCloseAppDialog(onConfirm) {
 }
 
 // ── Session save ───────────────────────────────────────────
+// ── Table insertion ────────────────────────────────────────
+/** Open the grid popover near the caret and insert the chosen table. */
+function openTableGridPicker() {
+  const view = currentView();
+  if (!view) return;
+  const coords = view.coordsAtPos(view.state.selection.main.head);
+  const x = coords ? coords.left : window.innerWidth / 2;
+  const y = coords ? coords.bottom + 4 : window.innerHeight / 2;
+  showTableGridPicker(x, y, (rows, cols) => insertTable(view, rows, cols));
+}
+
+/** Insert a blank, aligned table (rows includes the header row) at the cursor. */
+function insertTable(view, rows, cols) {
+  const text = formatTableText(emptyTableModel(rows - 1, cols));
+  const { state } = view;
+  const { from, to } = state.selection.main;
+  const before = state.sliceDoc(state.doc.lineAt(from).from, from);
+  const after = state.sliceDoc(to, state.doc.lineAt(to).to);
+  let insert = text;
+  let lead = 0;
+  if (before.trim() !== '') {
+    insert = '\n' + insert;
+    lead = 1;
+  }
+  if (after.trim() !== '') insert = insert + '\n';
+  // Place the cursor in the first header cell (after the leading "| ").
+  const cursorPos = from + lead + 2;
+  view.dispatch({
+    changes: { from, to, insert },
+    selection: { anchor: cursorPos },
+    scrollIntoView: true,
+  });
+  view.focus();
+}
+
 function scheduleSessionSave() {
   // Only the main window owns the global session; additional windows must not
   // overwrite it with their own (transient) state.
@@ -1965,6 +2002,12 @@ function handleGlobalKeys(e) {
       e.preventDefault();
       e.stopPropagation();
       setViewMode('preview');
+      return;
+    case 'G':
+      // Ctrl+Shift+G: insert a Markdown table via the grid-size popover.
+      e.preventDefault();
+      e.stopPropagation();
+      openTableGridPicker();
       return;
 
     // ── Other shortcuts unchanged ──────────────────────────
