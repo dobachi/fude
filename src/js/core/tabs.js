@@ -18,14 +18,35 @@ function showConfirmDialog(message, onConfirm) {
   `;
   document.body.appendChild(overlay);
 
-  overlay.querySelector('.btn-cancel').addEventListener('click', () => overlay.remove());
-  overlay.querySelector('.btn-confirm').addEventListener('click', () => {
+  const close = () => {
     overlay.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const confirm = () => {
+    close();
     onConfirm();
-  });
+  };
+  // Keyboard support: Enter confirms, Escape cancels. Capture phase so it works
+  // regardless of which element holds focus. Focus the confirm button so the
+  // dialog is operable by keyboard (Tab between buttons, Space/Enter to activate).
+  const onKey = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      confirm();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+    }
+  };
+  document.addEventListener('keydown', onKey, true);
+
+  overlay.querySelector('.btn-cancel').addEventListener('click', close);
+  overlay.querySelector('.btn-confirm').addEventListener('click', confirm);
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.remove();
+    if (e.target === overlay) close();
   });
+
+  overlay.querySelector('.btn-confirm').focus();
 }
 
 let tabs = [];

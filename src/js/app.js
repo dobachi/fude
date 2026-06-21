@@ -1525,14 +1525,32 @@ function showConfirmDialog(message, onConfirm, confirmLabel = '実行') {
   overlay.querySelector('.btn-confirm').textContent = confirmLabel;
   document.body.appendChild(overlay);
 
-  overlay.querySelector('.btn-cancel').addEventListener('click', () => overlay.remove());
-  overlay.querySelector('.btn-confirm').addEventListener('click', () => {
+  const close = () => {
     overlay.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const confirm = () => {
+    close();
     onConfirm();
-  });
+  };
+  const onKey = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      confirm();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+    }
+  };
+  document.addEventListener('keydown', onKey, true);
+
+  overlay.querySelector('.btn-cancel').addEventListener('click', close);
+  overlay.querySelector('.btn-confirm').addEventListener('click', confirm);
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.remove();
+    if (e.target === overlay) close();
   });
+
+  overlay.querySelector('.btn-confirm').focus();
 }
 
 function showCloseAppDialog(onConfirm) {
@@ -1554,11 +1572,29 @@ function showCloseAppDialog(onConfirm) {
   `;
   document.body.appendChild(overlay);
 
-  overlay.querySelector('.btn-cancel').addEventListener('click', () => overlay.remove());
-  overlay.querySelector('.btn-confirm').addEventListener('click', () => {
+  const close = () => {
     overlay.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const confirm = () => {
+    close();
     onConfirm();
-  });
+  };
+  const onKey = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      confirm();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+    }
+  };
+  document.addEventListener('keydown', onKey, true);
+
+  overlay.querySelector('.btn-cancel').addEventListener('click', close);
+  overlay.querySelector('.btn-confirm').addEventListener('click', confirm);
+
+  overlay.querySelector('.btn-confirm').focus();
 }
 
 // ── Session save ───────────────────────────────────────────
