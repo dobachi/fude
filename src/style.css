@@ -271,24 +271,33 @@ body {
 
 /* ===== App Layout (CSS Grid) ===== */
 #app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* The three-column workspace sits below the (optional) menu bar. */
+#app-body {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr 0px;
   grid-template-rows: 1fr;
-  height: 100vh;
-  width: 100vw;
   overflow: hidden;
   transition: grid-template-columns var(--transition-speed) ease;
 }
 
-#app.sidebar-collapsed {
+#app.sidebar-collapsed #app-body {
   grid-template-columns: 0px 1fr 0px;
 }
 
-#app.ai-panel-open {
+#app.ai-panel-open #app-body {
   grid-template-columns: var(--sidebar-width) 1fr var(--ai-panel-width);
 }
 
-#app.sidebar-collapsed.ai-panel-open {
+#app.sidebar-collapsed.ai-panel-open #app-body {
   grid-template-columns: 0px 1fr var(--ai-panel-width);
 }
 
@@ -1161,7 +1170,7 @@ body {
 
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
-  #app {
+  #app-body {
     grid-template-columns: 0px 1fr 0px;
   }
 
@@ -1169,7 +1178,7 @@ body {
     visibility: hidden;
   }
 
-  #app.sidebar-expanded-mobile {
+  #app.sidebar-expanded-mobile #app-body {
     grid-template-columns: var(--sidebar-width) 1fr 0px;
   }
 
@@ -2092,6 +2101,49 @@ body {
   height: 1px;
   margin: 4px 6px;
   background: var(--border);
+}
+
+/* ===== Menu bar ===== */
+#menu-bar {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  height: 30px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#menu-bar.hidden {
+  display: none;
+}
+
+.menu-bar-item {
+  padding: 0 12px;
+  background: none;
+  border: none;
+  color: var(--fg-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.menu-bar-item:hover,
+.menu-bar-item.open {
+  background: var(--bg-tertiary);
+}
+
+/* Shortcut hint shown on the right side of a context-menu item */
+.context-menu-shortcut {
+  margin-left: 24px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.context-menu-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 /* Table insert grid popover */

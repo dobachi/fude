@@ -8,101 +8,108 @@
   </head>
   <body>
     <div id="app">
-      <div id="sidebar">
-        <div id="sidebar-header">
-          <span class="sidebar-title">Files</span>
-          <button id="sidebar-settings-btn" class="icon-btn" aria-label="File settings">
-            &#x2699;
-          </button>
-          <div id="sidebar-settings-popover" class="sidebar-popover hidden">
-            <div class="sidebar-popover-section">
-              <div class="sidebar-popover-label">Sort by</div>
-              <label class="sidebar-popover-radio"
-                ><input type="radio" name="sidebar-sort" value="name_asc" checked /> Name
-                (A-Z)</label
-              >
-              <label class="sidebar-popover-radio"
-                ><input type="radio" name="sidebar-sort" value="name_desc" /> Name (Z-A)</label
-              >
-              <label class="sidebar-popover-radio"
-                ><input type="radio" name="sidebar-sort" value="modified_desc" /> Modified
-                (newest)</label
-              >
-              <label class="sidebar-popover-radio"
-                ><input type="radio" name="sidebar-sort" value="modified_asc" /> Modified
-                (oldest)</label
-              >
-              <label class="sidebar-popover-radio"
-                ><input type="radio" name="sidebar-sort" value="created_desc" /> Created
-                (newest)</label
-              >
-              <label class="sidebar-popover-radio"
-                ><input type="radio" name="sidebar-sort" value="created_asc" /> Created
-                (oldest)</label
-              >
-              <label class="sidebar-popover-radio"
-                ><input type="radio" name="sidebar-sort" value="size_desc" /> Size (largest)</label
-              >
-              <label class="sidebar-popover-radio"
-                ><input type="radio" name="sidebar-sort" value="size_asc" /> Size (smallest)</label
-              >
+      <div id="menu-bar" class="hidden" role="menubar"></div>
+      <div id="app-body">
+        <div id="sidebar">
+          <div id="sidebar-header">
+            <span class="sidebar-title">Files</span>
+            <button id="sidebar-settings-btn" class="icon-btn" aria-label="File settings">
+              &#x2699;
+            </button>
+            <div id="sidebar-settings-popover" class="sidebar-popover hidden">
+              <div class="sidebar-popover-section">
+                <div class="sidebar-popover-label">Sort by</div>
+                <label class="sidebar-popover-radio"
+                  ><input type="radio" name="sidebar-sort" value="name_asc" checked /> Name
+                  (A-Z)</label
+                >
+                <label class="sidebar-popover-radio"
+                  ><input type="radio" name="sidebar-sort" value="name_desc" /> Name (Z-A)</label
+                >
+                <label class="sidebar-popover-radio"
+                  ><input type="radio" name="sidebar-sort" value="modified_desc" /> Modified
+                  (newest)</label
+                >
+                <label class="sidebar-popover-radio"
+                  ><input type="radio" name="sidebar-sort" value="modified_asc" /> Modified
+                  (oldest)</label
+                >
+                <label class="sidebar-popover-radio"
+                  ><input type="radio" name="sidebar-sort" value="created_desc" /> Created
+                  (newest)</label
+                >
+                <label class="sidebar-popover-radio"
+                  ><input type="radio" name="sidebar-sort" value="created_asc" /> Created
+                  (oldest)</label
+                >
+                <label class="sidebar-popover-radio"
+                  ><input type="radio" name="sidebar-sort" value="size_desc" /> Size
+                  (largest)</label
+                >
+                <label class="sidebar-popover-radio"
+                  ><input type="radio" name="sidebar-sort" value="size_asc" /> Size
+                  (smallest)</label
+                >
+              </div>
+              <div class="sidebar-popover-divider"></div>
+              <div class="sidebar-popover-section">
+                <div class="sidebar-popover-label">Show files</div>
+                <label class="sidebar-popover-check"
+                  ><input type="checkbox" id="sidebar-show-all" /> All files (not just .md)</label
+                >
+              </div>
             </div>
-            <div class="sidebar-popover-divider"></div>
-            <div class="sidebar-popover-section">
-              <div class="sidebar-popover-label">Show files</div>
-              <label class="sidebar-popover-check"
-                ><input type="checkbox" id="sidebar-show-all" /> All files (not just .md)</label
-              >
+          </div>
+          <div id="file-tree" tabindex="-1" aria-label="File tree"></div>
+          <div
+            id="sidebar-resizer"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize file tree / outline"
+          ></div>
+          <div id="outline-section">
+            <div id="outline-header">
+              <span class="sidebar-title">Outline</span>
+            </div>
+            <div id="outline-list" tabindex="-1" aria-label="Outline"></div>
+          </div>
+          <div
+            id="sidebar-width-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize sidebar width"
+          ></div>
+        </div>
+
+        <div id="main">
+          <div id="tab-bar">
+            <button id="sidebar-open" class="icon-btn sidebar-open-btn" aria-label="Open sidebar">
+              &#x2630;
+            </button>
+          </div>
+          <div id="workspace">
+            <div class="pane active view-split" data-pane-id="default">
+              <div class="editor-pane"></div>
+              <div
+                class="editor-preview-resizer"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize editor / preview"
+              ></div>
+              <div class="preview-pane"></div>
             </div>
           </div>
         </div>
-        <div id="file-tree" tabindex="-1" aria-label="File tree"></div>
-        <div
-          id="sidebar-resizer"
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Resize file tree / outline"
-        ></div>
-        <div id="outline-section">
-          <div id="outline-header">
-            <span class="sidebar-title">Outline</span>
-          </div>
-          <div id="outline-list" tabindex="-1" aria-label="Outline"></div>
-        </div>
-        <div
-          id="sidebar-width-resizer"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize sidebar width"
-        ></div>
-      </div>
 
-      <div id="main">
-        <div id="tab-bar">
-          <button id="sidebar-open" class="icon-btn sidebar-open-btn" aria-label="Open sidebar">
-            &#x2630;
-          </button>
-        </div>
-        <div id="workspace">
-          <div class="pane active view-split" data-pane-id="default">
-            <div class="editor-pane"></div>
-            <div
-              class="editor-preview-resizer"
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize editor / preview"
-            ></div>
-            <div class="preview-pane"></div>
+        <div id="ai-panel">
+          <div id="ai-panel-header">
+            <span class="ai-panel-title">AI Copilot</span>
+            <button id="ai-panel-close" class="icon-btn" aria-label="Close AI panel">
+              &times;
+            </button>
           </div>
+          <div id="ai-panel-content"></div>
         </div>
-      </div>
-
-      <div id="ai-panel">
-        <div id="ai-panel-header">
-          <span class="ai-panel-title">AI Copilot</span>
-          <button id="ai-panel-close" class="icon-btn" aria-label="Close AI panel">&times;</button>
-        </div>
-        <div id="ai-panel-content"></div>
       </div>
     </div>
 
