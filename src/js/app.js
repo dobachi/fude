@@ -15,6 +15,10 @@ import {
   registerPanesModule,
   registerImagePasteHandler,
   registerSaveHandler,
+  toggleBold,
+  toggleBullet,
+  toggleNumbered,
+  openSearch,
 } from './core/editor.js';
 import {
   initOutline,
@@ -29,6 +33,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
+import { initMenuBar, toggleMenuBar } from './core/menubar.js';
 import { emptyTableModel, formatTableText } from './core/table.js';
 import { promptDialog, confirmDialog } from './core/dialog.js';
 import {
@@ -668,6 +673,10 @@ async function init() {
   if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
   const sidebarOpen = document.getElementById('sidebar-open');
   if (sidebarOpen) sidebarOpen.addEventListener('click', toggleSidebar);
+
+  // Menu bar (hidden by default; toggled with Ctrl+Shift+B).
+  const menuBarEl = document.getElementById('menu-bar');
+  if (menuBarEl) initMenuBar(menuBarEl, buildMenuDefinition());
 
   // Additional windows are handed a file to open via take_open_request; the
   // main window relies on the cli-args event instead (so this stays null there).
@@ -1525,14 +1534,32 @@ function showConfirmDialog(message, onConfirm, confirmLabel = '実行') {
   overlay.querySelector('.btn-confirm').textContent = confirmLabel;
   document.body.appendChild(overlay);
 
-  overlay.querySelector('.btn-cancel').addEventListener('click', () => overlay.remove());
-  overlay.querySelector('.btn-confirm').addEventListener('click', () => {
+  const close = () => {
     overlay.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const confirm = () => {
+    close();
     onConfirm();
-  });
+  };
+  const onKey = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      confirm();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+    }
+  };
+  document.addEventListener('keydown', onKey, true);
+
+  overlay.querySelector('.btn-cancel').addEventListener('click', close);
+  overlay.querySelector('.btn-confirm').addEventListener('click', confirm);
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.remove();
+    if (e.target === overlay) close();
   });
+
+  overlay.querySelector('.btn-confirm').focus();
 }
 
 function showCloseAppDialog(onConfirm) {
@@ -1554,14 +1581,126 @@ function showCloseAppDialog(onConfirm) {
   `;
   document.body.appendChild(overlay);
 
-  overlay.querySelector('.btn-cancel').addEventListener('click', () => overlay.remove());
-  overlay.querySelector('.btn-confirm').addEventListener('click', () => {
+  const close = () => {
     overlay.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const confirm = () => {
+    close();
     onConfirm();
-  });
+  };
+  const onKey = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      confirm();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+    }
+  };
+  document.addEventListener('keydown', onKey, true);
+
+  overlay.querySelector('.btn-cancel').addEventListener('click', close);
+  overlay.querySelector('.btn-confirm').addEventListener('click', confirm);
+
+  overlay.querySelector('.btn-confirm').focus();
 }
 
 // ── Session save ───────────────────────────────────────────
+// ── Menu bar ───────────────────────────────────────────────
+/**
+ * Build the menu bar definition. Every item delegates to an existing action so
+ * the menu and the keyboard shortcuts stay in sync. Editor commands receive the
+ * active view; they no-op when there's no editor.
+ */
+function buildMenuDefinition() {
+  const withView = (fn) => () => {
+    const v = currentView();
+    if (v) fn(v);
+  };
+  return [
+    {
+      label: 'ファイル',
+      items: [
+        { label: '新規タブ', shortcut: 'Ctrl+Shift+T', action: () => openTab(null, '') },
+        {
+          label: '新しいウィンドウ',
+          shortcut: 'Ctrl+Shift+N',
+          action: () => backend.newWindow(null),
+        },
+        { label: 'フォルダを開く', shortcut: 'Ctrl+Shift+O', action: handleOpenFolder },
+        { separator: true },
+        { label: '保存', shortcut: 'Ctrl+S', action: () => performSave({}) },
+        {
+          label: '名前を付けて保存',
+          shortcut: 'Ctrl+Shift+S',
+          action: () => performSave({ forceDialog: true }),
+        },
+        { label: '再読込', shortcut: 'Ctrl+Shift+R', action: manualReload },
+        { separator: true },
+        { label: '閉じる', shortcut: 'Ctrl+Shift+W', action: smartClose },
+      ],
+    },
+    {
+      label: '編集',
+      items: [
+        { label: '太字', shortcut: 'Ctrl+B', action: withView(toggleBold) },
+        { label: '箇条書き', shortcut: 'Ctrl+Shift+8', action: withView(toggleBullet) },
+        { label: '番号付きリスト', shortcut: 'Ctrl+Shift+7', action: withView(toggleNumbered) },
+        { separator: true },
+        { label: '検索・置換', shortcut: 'Ctrl+F', action: withView(openSearch) },
+      ],
+    },
+    {
+      label: '挿入',
+      items: [{ label: '表…', shortcut: 'Ctrl+Shift+G', action: openTableGridPicker }],
+    },
+    {
+      label: '表示',
+      items: [
+        { label: 'エディタのみ', shortcut: 'Ctrl+Shift+J', action: () => setViewMode('editor') },
+        { label: '分割', shortcut: 'Ctrl+Shift+K', action: () => setViewMode('split') },
+        { label: 'プレビューのみ', shortcut: 'Ctrl+Shift+L', action: () => setViewMode('preview') },
+        { separator: true },
+        { label: '縦分割', shortcut: 'Ctrl+Shift+D', action: splitVertical },
+        { label: '横分割', shortcut: 'Ctrl+Shift+H', action: splitHorizontal },
+        { separator: true },
+        { label: 'サイドバー表示切替', action: toggleSidebar },
+        {
+          label: '文字を拡大',
+          shortcut: 'Ctrl++',
+          action: () => setFontSize(Math.min(32, getFontSize() + 1)),
+        },
+        {
+          label: '文字を縮小',
+          shortcut: 'Ctrl+-',
+          action: () => setFontSize(Math.max(10, getFontSize() - 1)),
+        },
+      ],
+    },
+    {
+      label: 'AI',
+      items: [
+        { label: 'AIチャット', shortcut: 'Ctrl+Shift+I', action: () => toggleAIPanel() },
+        {
+          label: 'AIコンポーザー',
+          shortcut: 'Ctrl+Shift+C',
+          action: withView(openComposerForView),
+        },
+      ],
+    },
+    {
+      label: 'ヘルプ',
+      items: [
+        { label: '設定', shortcut: 'Ctrl+,', action: openSettings },
+        { label: 'モード切替', shortcut: 'Ctrl+Shift+M', action: cycleMode },
+        { separator: true },
+        { label: 'ヘルプ', shortcut: 'Ctrl+?', action: openHelp },
+      ],
+    },
+  ];
+}
+
 // ── Table insertion ────────────────────────────────────────
 /** Open the grid popover near the caret and insert the chosen table. */
 function openTableGridPicker() {
@@ -2008,6 +2147,12 @@ function handleGlobalKeys(e) {
       e.preventDefault();
       e.stopPropagation();
       openTableGridPicker();
+      return;
+    case 'B':
+      // Ctrl+Shift+B: toggle the (normally hidden) menu bar.
+      e.preventDefault();
+      e.stopPropagation();
+      toggleMenuBar();
       return;
 
     // ── Other shortcuts unchanged ──────────────────────────

@@ -99,6 +99,44 @@ describe('tabs module', () => {
     expect(tabBar.querySelector('.tab.dirty')).toBeNull();
   });
 
+  it('closing a dirty tab shows a confirm dialog with the confirm button focused', () => {
+    const tab = mod.openTab('/dirty.md', 'x');
+    mod.markDirty(tab.id);
+
+    mod.closeTab(tab.id);
+
+    // Dialog appears and the tab is NOT yet closed (awaiting confirmation).
+    const overlay = document.querySelector('.settings-overlay');
+    expect(overlay).not.toBeNull();
+    expect(mod.getAllTabs().length).toBe(1);
+
+    // The confirm button must be focused so the dialog is keyboard-operable.
+    const confirmBtn = overlay.querySelector('.btn-confirm');
+    expect(document.activeElement).toBe(confirmBtn);
+  });
+
+  it('Enter confirms closing a dirty tab from the keyboard', () => {
+    const tab = mod.openTab('/dirty.md', 'x');
+    mod.markDirty(tab.id);
+    mod.closeTab(tab.id);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+
+    expect(document.querySelector('.settings-overlay')).toBeNull();
+    expect(mod.getAllTabs().length).toBe(0);
+  });
+
+  it('Escape cancels closing a dirty tab from the keyboard', () => {
+    const tab = mod.openTab('/dirty.md', 'x');
+    mod.markDirty(tab.id);
+    mod.closeTab(tab.id);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(document.querySelector('.settings-overlay')).toBeNull();
+    expect(mod.getAllTabs().length).toBe(1); // tab survives
+  });
+
   it('nextTab and prevTab cycle through tabs', () => {
     const tab1 = mod.openTab('/a.md');
     const tab2 = mod.openTab('/b.md');

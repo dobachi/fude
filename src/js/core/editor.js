@@ -339,38 +339,67 @@ function listKeymap() {
   ]);
 }
 
-function boldKeymap() {
-  return keymap.of([
-    {
-      key: 'Ctrl-b',
-      run(view) {
-        const { state } = view;
-        const { from, to } = state.selection.main;
-        const selected = state.sliceDoc(from, to);
+/**
+ * Toggle bold (`**...**`) around the selection. Exposed so the menu bar and the
+ * Ctrl-B keybinding share one implementation.
+ */
+export function toggleBold(view) {
+  if (!view) return false;
+  const { state } = view;
+  const { from, to } = state.selection.main;
+  const selected = state.sliceDoc(from, to);
 
-        if (selected.startsWith('**') && selected.endsWith('**') && selected.length >= 4) {
-          view.dispatch({ changes: { from, to, insert: selected.slice(2, -2) } });
-        } else if (
-          from >= 2 &&
-          state.sliceDoc(from - 2, from) === '**' &&
-          state.sliceDoc(to, to + 2) === '**'
-        ) {
-          view.dispatch({
-            changes: [
-              { from: from - 2, to: from, insert: '' },
-              { from: to, to: to + 2, insert: '' },
-            ],
-          });
-        } else {
-          view.dispatch({
-            changes: { from, to, insert: `**${selected}**` },
-            selection: { anchor: from + 2, head: to + 2 },
-          });
-        }
-        return true;
-      },
-    },
-  ]);
+  if (selected.startsWith('**') && selected.endsWith('**') && selected.length >= 4) {
+    view.dispatch({ changes: { from, to, insert: selected.slice(2, -2) } });
+  } else if (
+    from >= 2 &&
+    state.sliceDoc(from - 2, from) === '**' &&
+    state.sliceDoc(to, to + 2) === '**'
+  ) {
+    view.dispatch({
+      changes: [
+        { from: from - 2, to: from, insert: '' },
+        { from: to, to: to + 2, insert: '' },
+      ],
+    });
+  } else {
+    view.dispatch({
+      changes: { from, to, insert: `**${selected}**` },
+      selection: { anchor: from + 2, head: to + 2 },
+    });
+  }
+  view.focus();
+  return true;
+}
+
+/** Toggle a bullet list on the selected lines (menu + keymap shared). */
+export function toggleBullet(view) {
+  if (!view) return false;
+  const tr = computeBulletToggle(view.state);
+  if (!tr) return false;
+  view.dispatch(tr);
+  view.focus();
+  return true;
+}
+
+/** Toggle a numbered list on the selected lines (menu + keymap shared). */
+export function toggleNumbered(view) {
+  if (!view) return false;
+  const tr = computeNumberedToggle(view.state);
+  if (!tr) return false;
+  view.dispatch(tr);
+  view.focus();
+  return true;
+}
+
+/** Open the search/replace panel for the given view. */
+export function openSearch(view) {
+  if (!view) return false;
+  return openSearchPanel(view);
+}
+
+function boldKeymap() {
+  return keymap.of([{ key: 'Ctrl-b', run: toggleBold }]);
 }
 
 // ── Table editing ──────────────────────────────────────────

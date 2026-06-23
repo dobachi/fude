@@ -36,7 +36,16 @@ export function showMenu(x, y, items) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'context-menu-item' + (item.danger ? ' danger' : '');
-    btn.textContent = item.label;
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'context-menu-label';
+    labelSpan.textContent = item.label;
+    btn.appendChild(labelSpan);
+    if (item.shortcut) {
+      const sc = document.createElement('span');
+      sc.className = 'context-menu-shortcut';
+      sc.textContent = item.shortcut;
+      btn.appendChild(sc);
+    }
     if (item.disabled) btn.disabled = true;
     btn.addEventListener('click', () => {
       closeMenu();
