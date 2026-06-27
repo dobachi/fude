@@ -1675,7 +1675,6 @@ pub fn run() {
                 eprintln!("File watcher init failed: {}", e);
             }
 
-            let handle = app.handle().clone();
             let mut cli_path: Option<String> = None;
             let mut cli_remote: Option<String> = None;
 
@@ -1716,14 +1715,22 @@ pub fn run() {
                     }
                 }
             } else if let Some(path) = cli_path {
+                // Queue the resolved path for the main window's `take_open_request`
+                // call in init(). The previous 500ms-delayed `cli-args` emit raced
+                // the frontend listener registration on slow webview startups
+                // (notably Linux/WebKitGTK cold start), causing the event to be
+                // dropped — Tauri events are not buffered. Queueing avoids the
+                // race entirely.
                 let resolved = resolve_cli_path(&path, std::env::current_dir().ok());
-                let payload = serde_json::json!({ "path": resolved });
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    if let Some(window) = handle.get_webview_window("main") {
-                        let _ = window.emit("cli-args", payload);
-                    }
-                });
+                if let Ok(mut map) = app.state::<PendingOpens>().0.lock() {
+                    map.insert(
+                        "main".to_string(),
+                        OpenRequest {
+                            path: Some(resolved),
+                            remote: None,
+                        },
+                    );
+                }
             }
             Ok(())
         })
@@ -2168,6 +2175,37 @@ mod tests {
         let (path, _, new_window) = parse_open_args(&args(&["fude", "-n", "/a.md"]));
         assert_eq!(path.as_deref(), Some("/a.md"));
         assert!(new_window);
+    }
+
+    // --- PendingOpens main-window queue (cold-start CLI path delivery) ---
+
+    #[test]
+    fn pending_opens_queue_for_main_round_trips() {
+        let state = PendingOpens::default();
+        {
+            let mut map = state.0.lock().unwrap();
+            map.insert(
+                "main".to_string(),
+                OpenRequest {
+                    path: Some("/tmp/note.md".to_string()),
+                    remote: None,
+                },
+            );
+        }
+
+        // First take returns the entry and clears it (simulates `take_open_request`).
+        let taken = state.0.lock().unwrap().remove("main");
+        assert_eq!(taken.and_then(|r| r.path).as_deref(), Some("/tmp/note.md"));
+
+        // Subsequent take returns None.
+        let again = state.0.lock().unwrap().remove("main");
+        assert!(again.is_none());
+    }
+
+    #[test]
+    fn pending_opens_default_is_empty() {
+        let state = PendingOpens::default();
+        assert!(state.0.lock().unwrap().is_empty());
     }
 
     #[test]

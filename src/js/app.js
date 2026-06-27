@@ -770,6 +770,12 @@ async function init() {
         },
       );
     }
+
+    // A CLI launch path arrives alongside a restored session: open it as an
+    // additional tab on top, matching the pre-queue (`cli-args` event) behavior.
+    if (pendingOpen && pendingOpen.path) {
+      await openPath(pendingOpen.path);
+    }
   } else if (pendingOpen && pendingOpen.path) {
     // A new window opened with a specific file (e.g. "open in new window").
     await openPath(pendingOpen.path);
