@@ -97,6 +97,34 @@ describe('settings module', () => {
     expect(hint.textContent).toContain('OS Keychain');
   });
 
+  it('App Font Size slider updates --ui-font-size live', async () => {
+    await mod.openSettings();
+    const slider = document.querySelector('#setting-ui-fontsize');
+    const value = document.querySelector('#setting-ui-fontsize-value');
+    expect(slider).not.toBeNull();
+
+    slider.value = '20';
+    slider.dispatchEvent(new Event('input'));
+
+    expect(document.documentElement.style.getPropertyValue('--ui-font-size')).toBe('20px');
+    expect(value.textContent).toBe('20px');
+  });
+
+  it('save persists ui_font_size in the config', async () => {
+    const backend = await import('../backend.js');
+    await mod.openSettings();
+
+    const slider = document.querySelector('#setting-ui-fontsize');
+    slider.value = '18';
+    slider.dispatchEvent(new Event('input'));
+
+    document.querySelector('.btn-save-settings').click();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const savedConfig = backend.saveConfig.mock.calls.at(-1)[0];
+    expect(savedConfig.ui_font_size).toBe(18);
+  });
+
   it('save calls setApiKey when API key is provided', async () => {
     const backend = await import('../backend.js');
     await mod.openSettings();

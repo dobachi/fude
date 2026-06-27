@@ -68,6 +68,7 @@ import {
   getTabViewMode,
 } from './core/tabs.js';
 import { tabActionForKey } from './core/tab-keys.js';
+import { setUiFontSize, getUiFontSize } from './core/ui-font.js';
 import * as panesModule from './core/panes.js';
 const {
   initPanes,
@@ -524,6 +525,7 @@ async function init() {
       theme: 'dark',
       features: { ai_copilot: false, diff_highlight: true },
       font_size: 14,
+      ui_font_size: 14,
       key_mode: 'normal',
     };
   }
@@ -536,6 +538,7 @@ async function init() {
     const saved = e.detail || {};
     config = saved;
     setPlantumlEnabled(saved.features?.plantuml_preview);
+    if (saved.ui_font_size) setUiFontSize(saved.ui_font_size);
     rerenderPreviews();
   });
 
@@ -559,6 +562,7 @@ async function init() {
   // Restore the keymode (normal / vim / emacs). Backward compat: legacy `vim_mode: true`.
   await initKeymode(config.key_mode || (config.vim_mode ? 'vim' : 'normal'));
   if (config.font_size) setFontSize(config.font_size);
+  if (config.ui_font_size) setUiFontSize(config.ui_font_size);
 
   // Init preview for the default pane
   const previewEl = document.querySelector('.pane[data-pane-id="default"] .preview-pane');
@@ -2190,7 +2194,21 @@ function handleGlobalKeys(e) {
         splitHorizontal();
       }
       return;
-    // Font size (Ctrl±) and pane focus (Ctrl+Arrows) and settings (Ctrl+,)
+    // App (UI) font size: Ctrl+Shift+= / Ctrl+Shift+- (the '+' / '_' keys with
+    // Shift). Editor font size lives on bare Ctrl+= / Ctrl+- above.
+    case '+':
+    case '=':
+      e.preventDefault();
+      e.stopPropagation();
+      setUiFontSize(getUiFontSize() + 1);
+      return;
+    case '_':
+    case '-':
+      e.preventDefault();
+      e.stopPropagation();
+      setUiFontSize(getUiFontSize() - 1);
+      return;
+    // Editor font size (Ctrl±) and pane focus (Ctrl+Arrows) and settings (Ctrl+,)
     // live on bare Ctrl above — not duplicated here.
   }
 }

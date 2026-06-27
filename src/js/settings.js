@@ -1,6 +1,7 @@
 // settings.js - Settings panel UI
 import { applyTheme, getCurrentTheme } from './core/theme.js';
 import { setFontSize, getFontSize } from './core/editor.js';
+import { setUiFontSize, getUiFontSize, UI_FONT_MIN, UI_FONT_MAX } from './core/ui-font.js';
 import { setMode, getMode } from './core/keymode.js';
 import * as backend from './backend.js';
 import { openModelPicker } from './features/ai/model-picker-modal.js';
@@ -42,8 +43,12 @@ export async function openSettings() {
           </select>
         </div>
         <div class="setting-group">
-          <label>Font Size: <span id="setting-fontsize-value">${getFontSize()}px</span></label>
+          <label>Editor Font Size: <span id="setting-fontsize-value">${getFontSize()}px</span></label>
           <input type="range" id="setting-fontsize" min="10" max="32" value="${getFontSize()}" />
+        </div>
+        <div class="setting-group">
+          <label>App Font Size: <span id="setting-ui-fontsize-value">${getUiFontSize()}px</span></label>
+          <input type="range" id="setting-ui-fontsize" min="${UI_FONT_MIN}" max="${UI_FONT_MAX}" value="${getUiFontSize()}" />
         </div>
         <div class="setting-group">
           <label>Key Mode</label>
@@ -125,6 +130,13 @@ export async function openSettings() {
     const size = parseInt(e.target.value, 10);
     setFontSize(size);
     fontValue.textContent = `${size}px`;
+  });
+
+  const uiFontSlider = settingsPanel.querySelector('#setting-ui-fontsize');
+  const uiFontValue = settingsPanel.querySelector('#setting-ui-fontsize-value');
+  uiFontSlider.addEventListener('input', (e) => {
+    const size = setUiFontSize(parseInt(e.target.value, 10));
+    uiFontValue.textContent = `${size}px`;
   });
 
   settingsPanel
@@ -283,6 +295,7 @@ async function saveSettings() {
       plantuml_preview: document.querySelector('#setting-plantuml')?.checked || false,
     },
     font_size: parseInt(document.querySelector('#setting-fontsize')?.value || '14', 10),
+    ui_font_size: parseInt(document.querySelector('#setting-ui-fontsize')?.value || '14', 10),
     key_mode: document.querySelector('#setting-keymode')?.value || 'normal',
     openrouter_api_key: apiKeyValue || null,
   };

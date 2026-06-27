@@ -83,6 +83,8 @@ pub struct Config {
     pub theme: String,
     pub features: Features,
     pub font_size: u32,
+    /// App (chrome) font size, independent of the editor `font_size`.
+    pub ui_font_size: u32,
     /// Deprecated: use `key_mode`. Kept for backward compatibility.
     pub vim_mode: bool,
     /// "normal" | "vim" | "emacs"
@@ -108,6 +110,7 @@ pub struct ConfigResponse {
     pub theme: String,
     pub features: Features,
     pub font_size: u32,
+    pub ui_font_size: u32,
     pub key_mode: String,
     pub has_api_key: bool,
     pub api_key_storage: String,
@@ -226,6 +229,7 @@ impl Default for Config {
                 plantuml_preview: false,
             },
             font_size: 14,
+            ui_font_size: 14,
             vim_mode: false,
             key_mode: None,
             openrouter_api_key: None,
@@ -685,6 +689,7 @@ fn get_config() -> Result<ConfigResponse, String> {
         theme: config.theme,
         features: config.features,
         font_size: config.font_size,
+        ui_font_size: config.ui_font_size,
         key_mode,
         has_api_key,
         api_key_storage: storage_type.to_string(),
@@ -1958,6 +1963,7 @@ mod tests {
                 plantuml_preview: true,
             },
             font_size: 18,
+            ui_font_size: 16,
             vim_mode: true,
             key_mode: Some("vim".to_string()),
             openrouter_api_key: Some("sk-test-key".to_string()),
@@ -1976,6 +1982,7 @@ mod tests {
         assert!(restored.features.ai_copilot);
         assert!(!restored.features.diff_highlight);
         assert_eq!(restored.font_size, 18);
+        assert_eq!(restored.ui_font_size, 16);
         assert!(restored.vim_mode);
         assert_eq!(restored.openrouter_api_key.as_deref(), Some("sk-test-key"));
         assert_eq!(restored.ai_model.as_deref(), Some("openai/gpt-4o"));
