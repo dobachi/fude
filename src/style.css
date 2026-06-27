@@ -1625,21 +1625,22 @@ body {
 }
 
 /* ===== Apply-to-document button on assistant code blocks ===== */
-.ai-msg.assistant pre {
-  position: relative;
-}
+/* The toolbar is inserted as a sibling AFTER the <pre>, so it is not
+   affected by the code block's horizontal scrolling and stays reachable
+   even for wide code. */
 .ai-code-toolbar {
   display: flex;
   justify-content: flex-end;
-  margin-top: 4px;
+  margin: 4px 0 8px 0;
 }
 .ai-code-apply {
-  padding: 3px 10px;
+  padding: 6px 14px;
   background: var(--accent, #007acc);
   color: #fff;
   border: none;
-  border-radius: 3px;
-  font-size: 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.2;
   cursor: pointer;
 }
 .ai-code-apply:hover {

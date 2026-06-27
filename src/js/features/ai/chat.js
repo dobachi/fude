@@ -296,7 +296,10 @@ function enhanceCodeBlocksForApply(wrapper) {
       }
     });
     toolbar.appendChild(applyBtn);
-    pre.appendChild(toolbar);
+    // Insert the toolbar AFTER the <pre>, not inside it. Placing it inside
+    // a horizontally-scrolling <pre> would push the button off-screen when
+    // the code is wider than the chat panel, and also widen the scroll area.
+    pre.parentNode.insertBefore(toolbar, pre.nextSibling);
   });
 }
 
