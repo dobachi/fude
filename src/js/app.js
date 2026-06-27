@@ -67,6 +67,7 @@ import {
   setTabViewMode,
   getTabViewMode,
 } from './core/tabs.js';
+import { tabActionForKey } from './core/tab-keys.js';
 import * as panesModule from './core/panes.js';
 const {
   initPanes,
@@ -1933,6 +1934,22 @@ function handleGlobalKeys(e) {
   const mod = e.ctrlKey || e.metaKey;
   if (!mod) return;
 
+  // Tab switching, handled up-front and uniformly so it works in every editor
+  // mode (Normal/Vim/Emacs). The key→action mapping lives in the pure
+  // tabActionForKey() so it stays testable. Ctrl+PageDown/PageUp are kept as
+  // focus-neutral aliases of Ctrl+Tab / Ctrl+Shift+Tab because on Linux
+  // (WebKitGTK) Ctrl+Shift+Tab is swallowed as backward focus navigation and
+  // never reaches JS — PageUp/PageDown always do (matches browsers / VS Code).
+  const tabAction = tabActionForKey(e);
+  if (tabAction) {
+    e.preventDefault();
+    e.stopPropagation();
+    saveActivePaneTabState();
+    if (tabAction === 'next') nextTab();
+    else prevTab();
+    return;
+  }
+
   // Bare Ctrl+letter is reserved for the editor (CodeMirror / Vim / Emacs).
   // We preventDefault on keys whose browser default would be intrusive
   // (Save Page, refresh, close window, etc.) but otherwise let CodeMirror handle.
@@ -1956,12 +1973,6 @@ function handleGlobalKeys(e) {
         e.preventDefault();
         e.stopPropagation();
         setFontSize(Math.min(32, getFontSize() + 1));
-        return;
-      case 'Tab':
-        e.preventDefault();
-        e.stopPropagation();
-        saveActivePaneTabState();
-        nextTab();
         return;
       case 'ArrowLeft':
         e.preventDefault();
@@ -2162,12 +2173,7 @@ function handleGlobalKeys(e) {
       return;
 
     // ── Other shortcuts unchanged ──────────────────────────
-    case 'Tab':
-      e.preventDefault();
-      e.stopPropagation();
-      saveActivePaneTabState();
-      e.shiftKey ? prevTab() : nextTab();
-      return;
+    // (Ctrl+Tab / Ctrl+Shift+Tab handled up-front via tabActionForKey.)
     case '|':
     case 'D':
       if (e.shiftKey) {

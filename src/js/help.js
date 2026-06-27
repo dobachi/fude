@@ -27,8 +27,8 @@ const sections = [
     title: 'ファイル・タブ',
     items: [
       ['Ctrl+Shift+T / Ctrl+Shift+N', '新規タブ'],
-      ['Ctrl+Tab', '次のタブ'],
-      ['Ctrl+Shift+Tab', '前のタブ'],
+      ['Ctrl+Tab / Ctrl+PageDown', '次のタブ'],
+      ['Ctrl+Shift+Tab / Ctrl+PageUp', '前のタブ（Linuxでは Ctrl+PageUp 推奨）'],
       ['Ctrl+S', '保存（Emacsモードは C-x C-s）'],
       ['Ctrl+Shift+S', '名前を付けて保存'],
       ['Ctrl+Shift+O', 'フォルダを開く'],
