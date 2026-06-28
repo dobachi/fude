@@ -65,9 +65,16 @@ export async function openSettings() {
           <label><input type="checkbox" id="setting-diff-highlight" ${config.features?.diff_highlight ? 'checked' : ''} /> Diff Highlight</label>
         </div>
         <div class="setting-group">
+          <label><input type="checkbox" id="setting-code-highlight" ${config.features?.code_highlight ? 'checked' : ''} /> Code Highlight (preview)</label>
+        </div>
+        <div class="setting-group">
+          <label><input type="checkbox" id="setting-source-code-mode" ${config.features?.source_code_mode ? 'checked' : ''} /> Open Source Files (code mode)</label>
+          <small class="setting-hint">Non-Markdown files open with language highlighting, editor-only.</small>
+        </div>
+        <div class="setting-group">
           <label>OpenRouter API Key</label>
           <input type="password" id="setting-api-key" value="" placeholder="${config.has_api_key ? '••••••••  (saved)' : 'sk-or-...'}" />
-          ${config.has_api_key ? `<small class="setting-hint">Stored in: ${config.api_key_storage === 'keychain' ? 'OS Keychain' : 'Config file'}</small>` : ''}
+          ${config.has_api_key ? `<small class="setting-hint key-storage-hint">Stored in: ${config.api_key_storage === 'keychain' ? 'OS Keychain' : 'Config file'}</small>` : ''}
         </div>
         <div class="setting-group setting-models">
           <label>AI Models</label>
@@ -292,6 +299,8 @@ async function saveSettings() {
     features: {
       ai_copilot: document.querySelector('#setting-ai-copilot')?.checked || false,
       diff_highlight: document.querySelector('#setting-diff-highlight')?.checked || false,
+      code_highlight: document.querySelector('#setting-code-highlight')?.checked || false,
+      source_code_mode: document.querySelector('#setting-source-code-mode')?.checked || false,
       plantuml_preview: document.querySelector('#setting-plantuml')?.checked || false,
     },
     font_size: parseInt(document.querySelector('#setting-fontsize')?.value || '14', 10),

@@ -48,6 +48,19 @@
   --preview-table-border: #3c3c3c;
   --preview-table-stripe: #2a2a2a;
 
+  /* Preview code syntax-highlight palette (dark default, One Dark-ish). */
+  --code-keyword: #c678dd;
+  --code-string: #98c379;
+  --code-comment: #7f848e;
+  --code-number: #d19a66;
+  --code-type: #e5c07b;
+  --code-function: #61afef;
+  --code-operator: #56b6c2;
+  --code-meta: #e5c07b;
+  --code-invalid: #e06c75;
+  --code-deleted: #e06c75;
+  --code-inserted: #98c379;
+
   --focus-ring: rgba(0, 127, 212, 0.6);
   --split-handle: #007fd4;
 }
@@ -85,6 +98,19 @@
   --preview-blockquote-border: #0066b8;
   --preview-table-border: #d4d4d4;
   --preview-table-stripe: #f5f5f5;
+
+  /* Preview code syntax-highlight palette (light, One Light-ish). */
+  --code-keyword: #a626a4;
+  --code-string: #50a14f;
+  --code-comment: #a0a1a7;
+  --code-number: #b76b01;
+  --code-type: #c18401;
+  --code-function: #4078f2;
+  --code-operator: #0184bc;
+  --code-meta: #c18401;
+  --code-invalid: #e45649;
+  --code-deleted: #e45649;
+  --code-inserted: #50a14f;
 
   --focus-ring: rgba(0, 102, 184, 0.4);
   --split-handle: #0066b8;
@@ -165,6 +191,19 @@
   --preview-blockquote-border: #067016;
   --preview-table-border: rgba(7, 90, 20, 0.4);
   --preview-table-stripe: rgba(7, 90, 20, 0.05);
+
+  /* Preview code syntax-highlight palette (cyber-light → light-ish). */
+  --code-keyword: #a626a4;
+  --code-string: #50a14f;
+  --code-comment: #a0a1a7;
+  --code-number: #b76b01;
+  --code-type: #c18401;
+  --code-function: #4078f2;
+  --code-operator: #0184bc;
+  --code-meta: #c18401;
+  --code-invalid: #e45649;
+  --code-deleted: #e45649;
+  --code-inserted: #50a14f;
 
   --focus-ring: rgba(7, 90, 20, 0.5);
   --split-handle: #0f9d2a;
@@ -958,6 +997,71 @@ body {
   padding: 0;
   font-size: 0.9em;
   line-height: 1.5;
+}
+
+/* Syntax-highlight tokens (Code Highlight feature). Classes come from
+   @lezer/highlight's classHighlighter; colors follow the active theme via
+   the --code-* palette. */
+.preview-pane pre code .tok-keyword,
+.preview-pane pre code .tok-modifier,
+.preview-pane pre code .tok-controlKeyword,
+.preview-pane pre code .tok-operatorKeyword {
+  color: var(--code-keyword);
+}
+.preview-pane pre code .tok-string,
+.preview-pane pre code .tok-string2,
+.preview-pane pre code .tok-special.tok-string {
+  color: var(--code-string);
+}
+.preview-pane pre code .tok-comment,
+.preview-pane pre code .tok-lineComment,
+.preview-pane pre code .tok-blockComment {
+  color: var(--code-comment);
+  font-style: italic;
+}
+.preview-pane pre code .tok-number,
+.preview-pane pre code .tok-bool,
+.preview-pane pre code .tok-atom,
+.preview-pane pre code .tok-literal {
+  color: var(--code-number);
+}
+.preview-pane pre code .tok-typeName,
+.preview-pane pre code .tok-className,
+.preview-pane pre code .tok-namespace {
+  color: var(--code-type);
+}
+.preview-pane pre code .tok-propertyName,
+.preview-pane pre code .tok-definition,
+.preview-pane pre code .tok-function,
+.preview-pane pre code .tok-macroName,
+.preview-pane pre code .tok-labelName {
+  color: var(--code-function);
+}
+.preview-pane pre code .tok-operator,
+.preview-pane pre code .tok-derefOperator,
+.preview-pane pre code .tok-url,
+.preview-pane pre code .tok-link {
+  color: var(--code-operator);
+}
+.preview-pane pre code .tok-meta,
+.preview-pane pre code .tok-processingInstruction {
+  color: var(--code-meta);
+}
+.preview-pane pre code .tok-invalid {
+  color: var(--code-invalid);
+}
+.preview-pane pre code .tok-deleted {
+  color: var(--code-deleted);
+}
+.preview-pane pre code .tok-inserted {
+  color: var(--code-inserted);
+}
+.preview-pane pre code .tok-heading,
+.preview-pane pre code .tok-strong {
+  font-weight: bold;
+}
+.preview-pane pre code .tok-emphasis {
+  font-style: italic;
 }
 
 .preview-pane blockquote {

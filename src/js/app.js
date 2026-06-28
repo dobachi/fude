@@ -19,7 +19,9 @@ import {
   toggleBullet,
   toggleNumbered,
   openSearch,
+  setSourceCodeMode,
 } from './core/editor.js';
+import { shouldOpenAsCode } from './core/file-lang.js';
 import {
   initOutline,
   updateOutline,
@@ -41,6 +43,7 @@ import {
   syncPreviewToLine,
   getLineFromPreview,
   setPlantumlEnabled,
+  setCodeHighlightEnabled,
   renderPreview,
 } from './core/preview.js';
 import {
@@ -129,6 +132,10 @@ import { initContextMenu } from './features/ai/context-menu.js';
 // active. Per-tab view modes live on each tab (see tabs.js setTabViewMode).
 // Seeded from the restored session for backward compatibility.
 let defaultViewMode = 'split';
+
+// Source code mode: when on, non-Markdown files open with their own language as
+// editor-only. Mirrors editor.js's flag so app-level open logic can branch.
+let sourceCodeModeEnabled = false;
 
 /** View mode of the currently active tab (falls back to the default). */
 function currentViewMode() {
@@ -532,12 +539,18 @@ async function init() {
 
   initTheme(config.theme || 'dark');
   setPlantumlEnabled(config.features?.plantuml_preview);
+  setCodeHighlightEnabled(config.features?.code_highlight);
+  sourceCodeModeEnabled = !!config.features?.source_code_mode;
+  setSourceCodeMode(sourceCodeModeEnabled);
 
   // Live-apply config changes saved from the Settings panel.
   window.addEventListener('fude:config-saved', (e) => {
     const saved = e.detail || {};
     config = saved;
     setPlantumlEnabled(saved.features?.plantuml_preview);
+    setCodeHighlightEnabled(saved.features?.code_highlight);
+    sourceCodeModeEnabled = !!saved.features?.source_code_mode;
+    setSourceCodeMode(sourceCodeModeEnabled);
     if (saved.ui_font_size) setUiFontSize(saved.ui_font_size);
     rerenderPreviews();
   });
@@ -1340,13 +1353,20 @@ function handleTabChange(tab) {
     return;
   }
 
-  // Create a new editor in the active pane
-  const view = createEditorInPane(pane, tab.content);
+  // Create a new editor in the active pane (pass the path so source code mode
+  // can pick the right language).
+  const view = createEditorInPane(pane, tab.content, { filePath: tab.path });
 
   // Update pane file tracking
   pane.filePath = tab.path;
   pane.content = tab.content;
   pane.dirty = tab.dirty;
+
+  // Source code mode: a Markdown preview of source code is meaningless, so force
+  // this tab to editor-only on open. The user can still switch views manually.
+  if (shouldOpenAsCode(tab.path, sourceCodeModeEnabled) && getTabViewMode(tab.id) !== 'editor') {
+    setTabViewMode(tab.id, 'editor');
+  }
 
   // Apply vim mode
   reapplyMode();

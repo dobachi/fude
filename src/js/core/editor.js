@@ -39,8 +39,17 @@ import { tags as t } from '@lezer/highlight';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { openExternal } from './external-link.js';
 import { findTableAt, navigateTable, formatTableText, delimitedToModel } from './table.js';
+import { shouldOpenAsCode, languageDescForPath } from './file-lang.js';
 
 let currentFontSize = 14;
+
+// Source code mode: when on, non-Markdown files open with their own language.
+let sourceCodeModeEnabled = false;
+
+/** Toggle source code mode (set from config). Affects editors created after. */
+export function setSourceCodeMode(enabled) {
+  sourceCodeModeEnabled = !!enabled;
+}
 
 // Match http(s) URLs and mailto: addresses inside editor text. The terminators
 // keep us out of trailing markdown punctuation like ")" in [label](url).
@@ -464,11 +473,20 @@ export function createEditor(
   onChange = null,
   onScroll = null,
   onSelectionChange = null,
+  opts = {},
 ) {
   container.innerHTML = '';
 
   const themeCompartment = new Compartment();
   const keymodeCompartment = new Compartment();
+  const languageCompartment = new Compartment();
+
+  // Markdown is the default language. In source code mode, a non-Markdown file
+  // starts as plain text (no Markdown mis-parsing flash) and swaps to its real
+  // language once the parser is lazily loaded below.
+  const markdownLang = markdown({ base: markdownLanguage, codeLanguages: languages });
+  const asCode = shouldOpenAsCode(opts.filePath, sourceCodeModeEnabled);
+  const initialLang = asCode ? [] : markdownLang;
 
   const extensions = [
     // Vim mode FIRST - highest priority for key handling (ESC, Ctrl+[, etc.)
@@ -484,7 +502,7 @@ export function createEditor(
     history(),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     highlightSelectionMatches(),
-    markdown({ base: markdownLanguage, codeLanguages: languages }),
+    languageCompartment.of(initialLang),
     keymap.of([
       {
         key: 'Ctrl-d',
@@ -586,6 +604,24 @@ export function createEditor(
   // Store compartment references on the view for later reconfiguration
   view._themeCompartment = themeCompartment;
   view._keymodeCompartment = keymodeCompartment;
+  view._languageCompartment = languageCompartment;
+
+  // Source code mode: lazily load the file's language parser and swap it into
+  // the language compartment. The editor was created as plain text above, so
+  // there's no Markdown flash; highlighting appears once the parser resolves.
+  if (asCode) {
+    const desc = languageDescForPath(opts.filePath);
+    if (desc) {
+      Promise.resolve(desc.load())
+        .then((support) => {
+          if (!view.dom || !view.dom.isConnected) return;
+          view.dispatch({ effects: languageCompartment.reconfigure(support) });
+        })
+        .catch(() => {
+          /* unknown/failed language → stays plain text */
+        });
+    }
+  }
 
   // Ctrl/Cmd + click on a URL in the source opens it in the OS browser.
   // Listen on the outer dom so coordinates resolve correctly across wrapped

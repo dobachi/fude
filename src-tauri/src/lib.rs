@@ -74,6 +74,8 @@ pub struct Session {
 pub struct Features {
     pub ai_copilot: bool,
     pub diff_highlight: bool,
+    pub code_highlight: bool,
+    pub source_code_mode: bool,
     pub plantuml_preview: bool,
 }
 
@@ -226,6 +228,8 @@ impl Default for Config {
             features: Features {
                 ai_copilot: false,
                 diff_highlight: true,
+                code_highlight: false,
+                source_code_mode: false,
                 plantuml_preview: false,
             },
             font_size: 14,
@@ -248,6 +252,8 @@ impl Default for Features {
         Features {
             ai_copilot: false,
             diff_highlight: true,
+            code_highlight: false,
+            source_code_mode: false,
             plantuml_preview: false,
         }
     }
@@ -1960,6 +1966,8 @@ mod tests {
             features: Features {
                 ai_copilot: true,
                 diff_highlight: false,
+                code_highlight: true,
+                source_code_mode: true,
                 plantuml_preview: true,
             },
             font_size: 18,

@@ -179,7 +179,7 @@ function doSplit(cssClass) {
 
 // ── Creating an editor inside a pane ──────────────────────
 
-export function createEditorInPane(pane, content) {
+export function createEditorInPane(pane, content, opts = {}) {
   // Destroy old view if exists
   if (pane.editorView) {
     pane.editorView.destroy();
@@ -187,6 +187,10 @@ export function createEditorInPane(pane, content) {
   }
 
   pane.content = content;
+
+  // Default the language-selection path to the pane's current file when the
+  // caller doesn't pass one explicitly (e.g. split-pane copy).
+  const editorOpts = { ...opts, filePath: opts.filePath ?? pane.filePath };
 
   const view = createEditor(
     pane.editorContainer,
@@ -213,6 +217,7 @@ export function createEditorInPane(pane, content) {
     (selectedText) => {
       if (onSelectionChangeCallback) onSelectionChangeCallback(selectedText);
     },
+    editorOpts,
   );
 
   pane.editorView = view;

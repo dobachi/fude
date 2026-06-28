@@ -92,7 +92,7 @@ describe('settings module', () => {
     expect(input.value).toBe('');
     expect(input.placeholder).toContain('saved');
     // Should show storage type hint
-    const hint = document.querySelector('.setting-hint');
+    const hint = document.querySelector('.key-storage-hint');
     expect(hint).not.toBeNull();
     expect(hint.textContent).toContain('OS Keychain');
   });

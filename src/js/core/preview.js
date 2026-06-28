@@ -2,6 +2,7 @@
 import markdownIt from 'markdown-it';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { attachPanZoom } from './svg-panzoom.js';
+import { highlightCode } from './code-highlight.js';
 import { isLocalTauri } from '../backend.js';
 import { openExternal, isExternalUrl } from './external-link.js';
 import {
@@ -289,6 +290,15 @@ export function setPlantumlEnabled(enabled) {
   plantumlEnabled = !!enabled;
 }
 
+// ── Code syntax highlighting hook ──────────────────────────
+
+let codeHighlightEnabled = false;
+
+/** Toggle code-block syntax highlighting in the preview (set from config). */
+export function setCodeHighlightEnabled(enabled) {
+  codeHighlightEnabled = !!enabled;
+}
+
 // File extensions whose entire contents are a single PlantUML diagram.
 const PLANTUML_EXTS = ['puml', 'plantuml', 'uml', 'iuml', 'pu', 'wsd'];
 
@@ -348,12 +358,52 @@ export function renderPreview(content, basePath, container, filePath) {
 }
 
 /**
+ * Post-render passes over freshly rendered Markdown: render PlantUML diagrams
+ * and syntax-highlight code blocks. Each sub-pass is a no-op unless its feature
+ * is enabled.
+ * @param {HTMLElement} container
+ */
+export async function enhancePreview(container) {
+  if (!container) return;
+  // PlantUML first: it replaces its <pre> with a diagram, so those blocks are
+  // gone before the syntax-highlight pass scans the remaining code blocks.
+  await renderPlantumlBlocks(container);
+  await highlightCodeBlocks(container);
+}
+
+/**
+ * Post-render pass: syntax-highlight fenced code blocks in place by reusing
+ * the bundled CodeMirror language parsers. No-op unless enabled. Unknown
+ * languages (or parse failures) leave the plain-text block untouched.
+ * @param {HTMLElement} container
+ */
+async function highlightCodeBlocks(container) {
+  if (!codeHighlightEnabled || !container) return;
+  const codes = container.querySelectorAll('pre > code[class*="language-"]');
+  await Promise.all(
+    Array.from(codes).map(async (code) => {
+      if (code.dataset.hlHandled) return;
+      const cls = Array.from(code.classList).find((c) => c.startsWith('language-'));
+      if (!cls) return;
+      const lang = cls.slice('language-'.length);
+      // PlantUML/puml fences are handled by their own renderer (or left plain
+      // when that extension is off); never syntax-highlight them.
+      if (lang === 'plantuml' || lang === 'puml') return;
+      code.dataset.hlHandled = '1';
+      const html = await highlightCode(code.textContent || '', lang);
+      // Re-check connectivity: preview may have re-rendered while awaiting.
+      if (html != null && code.isConnected) code.innerHTML = html;
+    }),
+  );
+}
+
+/**
  * Post-render pass: replace ```plantuml / ```puml code blocks with rendered
  * SVG. No-op unless the extension is enabled. The heavy engine adapter is
  * imported lazily and only when a diagram is actually present.
  * @param {HTMLElement} container
  */
-export async function enhancePreview(container) {
+async function renderPlantumlBlocks(container) {
   if (!plantumlEnabled || !container) return;
   const codes = container.querySelectorAll(
     'pre > code.language-plantuml, pre > code.language-puml',
