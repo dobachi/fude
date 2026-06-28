@@ -112,6 +112,7 @@ import { initKeymode, reapplyMode, cycleMode, setAppVersion, getMode } from './c
 import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
+import { isOpenFileShortcut } from './core/open-shortcuts.js';
 
 import { isLocalTauri } from './backend.js';
 import { openHelp } from './help.js';
@@ -813,7 +814,7 @@ async function init() {
     }
     openTab(
       null,
-      '# Welcome to Fude\n\nOpen a folder with **Ctrl+O** or create a new file with **Ctrl+N**.\n',
+      '# Welcome to Fude\n\nOpen a file with **Ctrl+O**, a folder with **Ctrl+Shift+O**, or start a new tab with **Ctrl+Shift+T**.\n',
     );
     applyViewMode();
   }
@@ -1329,7 +1330,7 @@ function handleTabChange(tab) {
       editorContainer.innerHTML = `
         <div class="empty-state">
           <div class="empty-state-title">Fude</div>
-          <div class="empty-state-hint"><kbd>Ctrl+O</kbd> Open folder &nbsp; <kbd>Ctrl+N</kbd> New file</div>
+          <div class="empty-state-hint"><kbd>Ctrl+O</kbd> Open file &nbsp; <kbd>Ctrl+Shift+O</kbd> Open folder &nbsp; <kbd>Ctrl+Shift+T</kbd> New tab</div>
         </div>`;
     }
     if (previewContainer) previewContainer.innerHTML = '';
@@ -1659,6 +1660,7 @@ function buildMenuDefinition() {
           shortcut: 'Ctrl+Shift+N',
           action: () => backend.newWindow(null),
         },
+        { label: 'ファイルを開く', shortcut: 'Ctrl+O', action: handleOpenFile },
         { label: 'フォルダを開く', shortcut: 'Ctrl+Shift+O', action: handleOpenFolder },
         { separator: true },
         { label: '保存', shortcut: 'Ctrl+S', action: () => performSave({}) },
@@ -1811,6 +1813,31 @@ async function handleSidebarSettingsChange({ sort, showAllFiles: allFiles }) {
 }
 
 // ── Open folder dialog ─────────────────────────────────────
+async function handleOpenFile() {
+  try {
+    if (isLocalTauri()) {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const mdFilter = {
+        name: 'Markdown / Text',
+        extensions: ['md', 'markdown', 'mdown', 'mkd', 'mdx', 'qmd', 'txt'],
+      };
+      const allFilter = { name: 'All Files', extensions: ['*'] };
+      // In source code mode, default to All Files so any source file is pickable.
+      const filters = sourceCodeModeEnabled ? [allFilter, mdFilter] : [mdFilter, allFilter];
+      const selected = await open({ directory: false, multiple: false, filters });
+      if (selected) await handleFileSelect(selected);
+    } else {
+      showToast('このモードではファイルを開く操作に未対応です（フォルダを開いてください）', {
+        type: 'error',
+        duration: 6000,
+      });
+    }
+  } catch (e) {
+    console.error('Failed to open file:', e);
+    showToast(`ファイルを開けませんでした: ${e?.message || e}`, { type: 'error', duration: 8000 });
+  }
+}
+
 async function handleOpenFolder() {
   try {
     if (isLocalTauri()) {
@@ -2026,6 +2053,15 @@ function handleGlobalKeys(e) {
       e.preventDefault();
       e.stopPropagation();
       performSave({ forceDialog: false });
+      return;
+    }
+
+    // Ctrl+O = Open File (normal mode only; vim/emacs keep Ctrl-O for the
+    // editor and use the File menu instead).
+    if (isOpenFileShortcut(e, getMode())) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleOpenFile();
       return;
     }
 
