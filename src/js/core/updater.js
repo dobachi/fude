@@ -1,17 +1,75 @@
-// updater.js - Auto-update check on startup
+// updater.js - Auto-update check (startup + manual "Check for updates")
+import { isLocalTauri } from '../backend.js';
 
-export async function checkForUpdates() {
-  if (!window.__TAURI__) return;
+/**
+ * Decide the user-facing feedback for a manual update check. Pure so it can be
+ * unit tested without the Tauri runtime.
+ *
+ * @param {object} state
+ * @param {boolean} state.isDesktop  running inside the Tauri (desktop) app
+ * @param {object|null} state.update  result of updater check() (null = up to date)
+ * @param {string|null} state.error  error message if the check threw
+ * @returns {{kind: 'unsupported'|'error'|'update'|'latest', message?: string, type?: string, version?: string}}
+ */
+export function describeManualCheck({ isDesktop, update, error }) {
+  if (!isDesktop) {
+    return {
+      kind: 'unsupported',
+      type: 'error',
+      message: 'アップデートの確認はデスクトップ版でのみ利用できます。',
+    };
+  }
+  if (error) {
+    return { kind: 'error', type: 'error', message: `アップデートの確認に失敗しました: ${error}` };
+  }
+  if (update) {
+    return { kind: 'update', version: update.version };
+  }
+  return { kind: 'latest', type: 'info', message: '最新版を使用しています。' };
+}
 
+/**
+ * Check for updates. On startup (manual=false) this is silent: it only surfaces
+ * a dialog when an update exists. When invoked manually it also reports "up to
+ * date", errors, and the unsupported (browser) case via the notify callback.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.manual=false]  manual invocation (show all outcomes)
+ * @param {(message: string, type: string) => void} [opts.notify]  toast sink
+ */
+export async function checkForUpdates(opts = {}) {
+  const manual = !!opts.manual;
+  const notify = opts.notify;
+
+  if (!isLocalTauri()) {
+    if (manual) {
+      const r = describeManualCheck({ isDesktop: false, update: null, error: null });
+      notify?.(r.message, r.type);
+    }
+    return;
+  }
+
+  let update = null;
+  let error = null;
   try {
     const { check } = await import('@tauri-apps/plugin-updater');
-    const update = await check();
-    if (update) {
-      showUpdateDialog(update);
-    }
+    update = await check();
   } catch (e) {
-    console.info('Update check skipped:', e.message || e);
+    error = e?.message || String(e);
   }
+
+  if (update) {
+    showUpdateDialog(update);
+    return;
+  }
+
+  if (!manual) {
+    if (error) console.info('Update check skipped:', error);
+    return;
+  }
+
+  const r = describeManualCheck({ isDesktop: true, update: null, error });
+  notify?.(r.message, r.type);
 }
 
 function showUpdateDialog(update) {

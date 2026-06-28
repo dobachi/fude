@@ -1728,6 +1728,11 @@ function buildMenuDefinition() {
         { label: '設定', shortcut: 'Ctrl+,', action: openSettings },
         { label: 'モード切替', shortcut: 'Ctrl+Shift+M', action: cycleMode },
         { separator: true },
+        {
+          label: '更新を確認',
+          action: () =>
+            checkForUpdates({ manual: true, notify: (msg, type) => showToast(msg, { type }) }),
+        },
         { label: 'ヘルプ', shortcut: 'Ctrl+?', action: openHelp },
       ],
     },
