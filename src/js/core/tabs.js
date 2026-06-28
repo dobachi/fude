@@ -103,6 +103,9 @@ export function openTab(path, content = '', opts = {}) {
     kind: opts.kind || 'text',
     // Per-tab view mode: 'split' | 'editor' | 'preview'.
     viewMode: opts.viewMode || 'split',
+    // SHA-256 of the file content as last synced with disk (open/save/reload).
+    // Used to detect external changes before overwriting on save.
+    diskHash: null,
   };
 
   tabs.push(tab);
@@ -268,6 +271,23 @@ export function setTabViewMode(id, mode) {
 export function getTabViewMode(id) {
   const tab = tabs.find((t) => t.id === id);
   return tab ? tab.viewMode || 'split' : 'split';
+}
+
+/** Record the disk-synced content hash (for external-change detection). */
+export function setTabDiskHash(id, hash) {
+  const tab = tabs.find((t) => t.id === id);
+  if (tab) tab.diskHash = hash;
+}
+
+/** Get the disk-synced content hash, or null. */
+export function getTabDiskHash(id) {
+  const tab = tabs.find((t) => t.id === id);
+  return tab ? tab.diskHash : null;
+}
+
+/** Find a tab by file path (or undefined). */
+export function getTabByPath(path) {
+  return tabs.find((t) => t.path === path);
 }
 
 function renderTabBar() {

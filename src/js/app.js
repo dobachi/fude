@@ -69,7 +69,12 @@ import {
   getAllTabs,
   setTabViewMode,
   getTabViewMode,
+  setTabDiskHash,
+  getTabDiskHash,
+  getTabByPath,
 } from './core/tabs.js';
+import { sha256Hex } from './core/hash.js';
+import { shouldWarnConflict, showConflictDialog } from './core/save-conflict.js';
 import { tabActionForKey } from './core/tab-keys.js';
 import { setUiFontSize, getUiFontSize } from './core/ui-font.js';
 import * as panesModule from './core/panes.js';
@@ -743,7 +748,8 @@ async function init() {
           continue;
         }
         const content = await backend.readFile(tabInfo.path);
-        openTab(tabInfo.path, content, { viewMode });
+        const restored = openTab(tabInfo.path, content, { viewMode });
+        if (restored) await markTabSynced(restored.id, content);
       } catch {
         /* ignore */
       }
@@ -1109,8 +1115,11 @@ async function handleFileSelect(path) {
       if (currentViewMode() === 'preview') setViewMode('split');
       return;
     }
+    const existed = getTabByPath(path);
     const content = await backend.readFile(path);
-    openTab(path, content);
+    const tab = openTab(path, content);
+    // Establish the conflict-detection baseline only for a freshly loaded tab.
+    if (!existed && tab) await markTabSynced(tab.id, content);
     highlightFile(path);
   } catch (e) {
     console.error('Failed to open file:', e);
@@ -1290,8 +1299,10 @@ async function openPath(path) {
     loadDirectory(tree);
   } catch {
     try {
+      const existed = getTabByPath(path);
       const content = await backend.readFile(path);
-      openTab(path, content);
+      const tab = openTab(path, content);
+      if (!existed && tab) await markTabSynced(tab.id, content);
     } catch (e) {
       console.error('Failed to open path:', e);
     }
@@ -1437,6 +1448,8 @@ function applyReloadToAllPanes(path, content, tabId) {
   }
   updateTabContent(tabId, content);
   markClean(tabId);
+  // Editor now matches disk → refresh the baseline for conflict detection.
+  markTabSynced(tabId, content);
   updateDocContext(path, content);
 }
 
@@ -1896,13 +1909,9 @@ async function performSave({ forceDialog }) {
   if (!tab || tab.kind === 'image' || !view) return;
   const content = getContent(view);
 
-  // Quick path: existing path + not forcing dialog → just write
+  // Quick path: existing path + not forcing dialog → save with a conflict check
   if (tab.path && !forceDialog) {
-    const ok = await triggerSave(tab.path, content);
-    if (ok) {
-      markClean(tab.id);
-      refreshSidebar();
-    }
+    await saveWithConflictCheck(tab, content);
     return;
   }
 
@@ -1921,6 +1930,7 @@ async function performSave({ forceDialog }) {
         if (ok) {
           updateTabPath(tab.id, filePath);
           markClean(tab.id);
+          await markTabSynced(tab.id, content);
           refreshSidebar();
         }
       });
@@ -1931,11 +1941,66 @@ async function performSave({ forceDialog }) {
       if (ok) {
         updateTabPath(tab.id, filePath);
         markClean(tab.id);
+        await markTabSynced(tab.id, content);
         refreshSidebar();
       }
     }
   } catch (err) {
     console.error('Save failed:', err);
+  }
+}
+
+/** Set a tab's disk-sync baseline hash to match the given content. */
+async function markTabSynced(tabId, content) {
+  const hash = await sha256Hex(content);
+  if (hash) setTabDiskHash(tabId, hash);
+}
+
+/**
+ * Save to an existing file, but first verify it wasn't changed on disk since we
+ * last synced. On conflict, show a diff and let the user overwrite, reload the
+ * disk version, or cancel. Independent of the async file watcher (and works in
+ * browser mode where there is no watcher).
+ */
+async function saveWithConflictCheck(tab, content) {
+  let diskContent = null;
+  try {
+    diskContent = await backend.readFile(tab.path);
+  } catch {
+    diskContent = null; // missing/unreadable → nothing to conflict with
+  }
+
+  if (diskContent != null) {
+    const currentDiskHash = await sha256Hex(diskContent);
+    const warn = shouldWarnConflict({
+      loadedHash: getTabDiskHash(tab.id),
+      currentDiskHash,
+      diskContent,
+      editorContent: content,
+    });
+    if (warn) {
+      showConflictDialog({
+        fileName: getFilename(tab.path),
+        diskContent,
+        editorContent: content,
+        onOverwrite: () => finalizeSave(tab, content),
+        onReload: () => applyReloadToAllPanes(tab.path, diskContent, tab.id),
+        onCancel: () => {},
+      });
+      return;
+    }
+  }
+
+  await finalizeSave(tab, content);
+}
+
+/** Write content to the tab's path and update clean/baseline state. */
+async function finalizeSave(tab, content) {
+  const ok = await triggerSave(tab.path, content);
+  if (ok) {
+    markClean(tab.id);
+    await markTabSynced(tab.id, content);
+    refreshSidebar();
   }
 }
 
