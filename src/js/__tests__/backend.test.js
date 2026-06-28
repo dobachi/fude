@@ -242,4 +242,30 @@ describe('backend module (HTTP fallback mode)', () => {
 
     delete window.__TAURI_INTERNALS__;
   });
+
+  it('detects Tauri via __TAURI_INTERNALS__ even when the URL is non-tauri (Linux/WSLg WebKitGTK)', async () => {
+    vi.resetModules();
+
+    // Regression: on some Linux/WebKitGTK builds the location is a plain
+    // http://localhost (neither `tauri:` nor `tauri.localhost`), but the IPC
+    // bridge is injected. We must still run in Tauri mode (invoke), not fall
+    // back to HTTP — otherwise config/session/file access silently break.
+    const mockInvoke = vi.fn().mockResolvedValue('tauri-result');
+    window.__TAURI_INTERNALS__ = { invoke: mockInvoke, transformCallback: vi.fn() };
+    globalThis.fetch = vi.fn();
+    delete window.location;
+    window.location = {
+      protocol: 'http:',
+      hostname: 'localhost',
+      origin: 'http://localhost',
+    };
+
+    const mod = await import('../backend.js');
+    expect(mod.isLocalTauri()).toBe(true);
+    await mod.readFile('/via-internals.md');
+    expect(mockInvoke).toHaveBeenCalledWith('read_file', { path: '/via-internals.md' });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+
+    delete window.__TAURI_INTERNALS__;
+  });
 });

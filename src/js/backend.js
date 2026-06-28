@@ -7,8 +7,20 @@
 // If __TAURI_INTERNALS__ is not yet available (Windows timing issue tauri#12990),
 // wait briefly for it to become available before falling back to HTTP.
 
-// Detect Tauri webview by URL protocol (reliable, no runtime dependency)
+// Detect whether we're running inside a Tauri webview.
+//
+// Prefer the runtime-injected globals (`window.isTauri` / `__TAURI_INTERNALS__`),
+// which Tauri sets in every webview regardless of the URL scheme. The URL check
+// is kept only as a fallback: on some Linux/WebKitGTK builds (e.g. WSLg) the
+// location is neither `tauri:` nor `tauri.localhost`, so a URL-only check
+// misfired and dropped the app into HTTP-fallback "browser" mode — breaking
+// file/config/session access and native dialogs even though the Tauri IPC
+// bridge was right there.
 function isTauriWebview() {
+  if (typeof window === 'undefined') return false;
+  if (window.isTauri === true || window.__TAURI_INTERNALS__ || window.__TAURI__) {
+    return true;
+  }
   return window.location.protocol === 'tauri:' || window.location.hostname === 'tauri.localhost';
 }
 
