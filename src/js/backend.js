@@ -162,6 +162,14 @@ export async function unwatchFile(path) {
   return doInvoke('unwatch_file', { path });
 }
 
+export async function watchDirectory(path) {
+  return doInvoke('watch_directory', { path });
+}
+
+export async function unwatchDirectory(path) {
+  return doInvoke('unwatch_directory', { path });
+}
+
 /** Open a new editor window, optionally loading `path`. Tauri-only. */
 export async function newWindow(path) {
   return doInvoke('new_window', { path: path || null, remote: null });

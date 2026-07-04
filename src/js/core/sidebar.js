@@ -6,6 +6,9 @@ let fileTreeContainer = null;
 let onFileSelect = null;
 let activeFilePath = null;
 let currentEntries = [];
+// Directory paths the user has expanded. Persisted across re-renders so an
+// external-change refresh (or sort change) doesn't collapse the whole tree.
+const openDirs = new Set();
 let currentSort = 'name_asc';
 let showAllFiles = false;
 let onSettingsChange = null;
@@ -179,14 +182,20 @@ function buildTreeItem(entry) {
 
   if (entry.is_dir) {
     item.classList.add('tree-dir');
+    item.dataset.path = entry.path;
+    const isOpen = openDirs.has(entry.path);
+    if (isOpen) item.classList.add('open');
     const label = document.createElement('div');
     label.className = 'tree-item-label';
     label.tabIndex = -1; // focusable for keyboard navigation
-    label.innerHTML = `<span class="tree-icon">\u25b6</span><span>${escapeHtml(entry.name)}</span>`;
+    const arrow = isOpen ? '\u25bc' : '\u25b6';
+    label.innerHTML = `<span class="tree-icon">${arrow}</span><span>${escapeHtml(entry.name)}</span>`;
     label.addEventListener('click', () => {
-      item.classList.toggle('open');
+      const open = item.classList.toggle('open');
+      if (open) openDirs.add(entry.path);
+      else openDirs.delete(entry.path);
       const icon = label.querySelector('.tree-icon');
-      icon.textContent = item.classList.contains('open') ? '\u25bc' : '\u25b6';
+      icon.textContent = open ? '\u25bc' : '\u25b6';
     });
     label.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -294,10 +303,12 @@ export function highlightFile(path) {
   fileTreeContainer.querySelectorAll('.tree-item-label[data-path]').forEach((el) => {
     if (el.dataset.path === path) {
       el.classList.add('active');
-      // Expand parent directories
+      // Expand parent directories (and remember them so a later re-render keeps
+      // the path to the active file open).
       let parent = el.closest('.tree-dir');
       while (parent) {
         parent.classList.add('open');
+        if (parent.dataset.path) openDirs.add(parent.dataset.path);
         const icon = parent.querySelector(':scope > .tree-item-label .tree-icon');
         if (icon) icon.textContent = '\u25bc';
         parent = parent.parentElement?.closest('.tree-dir');

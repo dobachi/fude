@@ -1673,6 +1673,8 @@ pub fn run() {
             ai_models,
             file_watcher::watch_file,
             file_watcher::unwatch_file,
+            file_watcher::watch_directory,
+            file_watcher::unwatch_directory,
         ])
         .setup(|app| {
             // Initialize key storage

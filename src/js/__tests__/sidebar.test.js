@@ -98,6 +98,46 @@ describe('sidebar module', () => {
     expect(document.activeElement.dataset.path).toBe('/b.md');
   });
 
+  it('keeps expanded directories open across a re-render (refresh)', () => {
+    const container = document.getElementById('file-tree');
+    mod.initSidebar(container, vi.fn());
+
+    const tree = [
+      {
+        name: 'docs',
+        path: '/docs',
+        is_dir: true,
+        children: [{ name: 'a.md', path: '/docs/a.md', is_dir: false, children: null }],
+      },
+    ];
+    mod.loadDirectory(tree);
+
+    // Expand the directory by clicking its label.
+    const dir = container.querySelector('.tree-dir');
+    expect(dir.classList.contains('open')).toBe(false);
+    dir.querySelector('.tree-item-label').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(dir.classList.contains('open')).toBe(true);
+
+    // A refresh (e.g. external file change) re-renders the whole tree.
+    mod.loadDirectory([
+      {
+        name: 'docs',
+        path: '/docs',
+        is_dir: true,
+        children: [
+          { name: 'a.md', path: '/docs/a.md', is_dir: false, children: null },
+          { name: 'b.md', path: '/docs/b.md', is_dir: false, children: null },
+        ],
+      },
+    ]);
+
+    // The directory stays expanded and the new file is visible.
+    const dirAfter = container.querySelector('.tree-dir');
+    expect(dirAfter.classList.contains('open')).toBe(true);
+    expect(dirAfter.querySelector('.tree-icon').textContent).toBe('▼');
+    expect(container.querySelector('.tree-item-label[data-path="/docs/b.md"]')).not.toBeNull();
+  });
+
   it('Down arrow moves focus to the next file item; Enter opens it', () => {
     const container = document.getElementById('file-tree');
     const onSelect = vi.fn();

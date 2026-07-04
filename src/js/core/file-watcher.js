@@ -34,6 +34,68 @@ export async function initFileWatcher(handler) {
   }
 }
 
+/** @type {(() => void) | null} */
+let onDirectoryChange = null;
+let dirWatcherInitialized = false;
+let dirDebounceTimer = null;
+
+/** The vault currently watched recursively, so we can swap it when it changes. */
+let currentVault = null;
+
+/**
+ * Subscribe to vault-level `directory-changed` events. The handler is debounced
+ * so a burst of filesystem events (e.g. copying many files) triggers a single
+ * tree refresh.
+ * @param {() => void} handler
+ */
+export async function initDirectoryWatcher(handler) {
+  if (dirWatcherInitialized) return;
+  dirWatcherInitialized = true;
+  onDirectoryChange = handler;
+
+  if (!isLocalTauri()) return; // Browser mode: no native watcher.
+
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    await listen('directory-changed', () => {
+      if (!onDirectoryChange) return;
+      if (dirDebounceTimer) clearTimeout(dirDebounceTimer);
+      dirDebounceTimer = setTimeout(() => {
+        dirDebounceTimer = null;
+        onDirectoryChange();
+      }, 200);
+    });
+  } catch (e) {
+    console.warn('Failed to initialize directory watcher:', e);
+  }
+}
+
+/**
+ * Watch `path` recursively as the active vault, releasing the previously
+ * watched vault. Pass a falsy path to stop watching. No-op in browser mode.
+ */
+export async function watchVault(path) {
+  if (!isLocalTauri()) return;
+  const next = path || null;
+  if (next === currentVault) return;
+  const prev = currentVault;
+  currentVault = next;
+  if (prev) {
+    try {
+      await backend.unwatchDirectory(prev);
+    } catch (e) {
+      console.warn('unwatch_directory failed:', prev, e);
+    }
+  }
+  if (next) {
+    try {
+      await backend.watchDirectory(next);
+    } catch (e) {
+      console.warn('watch_directory failed:', next, e);
+    }
+  }
+}
+
 /** Begin watching a file path. No-op in browser mode or for null paths. */
 export async function watchFile(path) {
   if (!path || !isLocalTauri()) return;

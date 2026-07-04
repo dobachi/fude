@@ -107,6 +107,8 @@ import { initTheme } from './core/theme.js';
 import { onContentChange, triggerSave, checkRecovery } from './core/autosave.js';
 import {
   initFileWatcher,
+  initDirectoryWatcher,
+  watchVault,
   watchFile,
   unwatchFile,
   reloadFromDisk,
@@ -650,6 +652,8 @@ async function init() {
   setTabPathChangeCallback(handleTabPathChange);
   setTabContextMenuCallback(handleTabContextMenu);
   initFileWatcher(handleExternalFileChange);
+  // Refresh the sidebar tree when files change anywhere under the open vault.
+  initDirectoryWatcher(refreshTree);
 
   // Global keyboard shortcuts - capture at window level to override browser defaults
   window.addEventListener('keydown', handleGlobalKeys, true);
@@ -725,6 +729,7 @@ async function init() {
       try {
         const tree = await backend.readDirTree(vaultPath, getShowAllFiles());
         loadDirectory(tree);
+        watchVault(vaultPath);
       } catch {
         /* ignore */
       }
@@ -813,6 +818,7 @@ async function init() {
           vaultPath = openDir;
           const tree = await backend.readDirTree(openDir, getShowAllFiles());
           loadDirectory(tree);
+          watchVault(vaultPath);
         }
       } catch {
         /* ignore */
@@ -1297,6 +1303,7 @@ async function openPath(path) {
     const tree = await backend.readDirTree(path, getShowAllFiles());
     vaultPath = path;
     loadDirectory(tree);
+    watchVault(vaultPath);
   } catch {
     try {
       const existed = getTabByPath(path);
@@ -1865,6 +1872,7 @@ async function handleOpenFolder() {
         vaultPath = folder;
         const tree = await backend.readDirTree(folder, getShowAllFiles());
         loadDirectory(tree);
+        watchVault(vaultPath);
         scheduleSessionSave();
         if (!tree || tree.length === 0) {
           showToast(
@@ -1880,6 +1888,7 @@ async function handleOpenFolder() {
         vaultPath = folder;
         const tree = await backend.readDirTree(folder, getShowAllFiles());
         loadDirectory(tree);
+        watchVault(vaultPath);
         scheduleSessionSave();
       });
     }
