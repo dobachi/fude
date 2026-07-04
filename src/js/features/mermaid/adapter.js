@@ -23,7 +23,7 @@ const cache = new Map(); // `${theme}\n${text}` -> sanitized svg
 // The runner loads the Mermaid UMD bundle (which sets a `mermaid` global) from a
 // blob URL, initializes it with startOnLoad off and securityLevel 'strict', then
 // renders each diagram to an SVG string via `mermaid.render(id, text)`.
-const RUNNER_HTML = `<!doctype html><html><head><meta charset="utf-8"></head><body><div id="sink" style="position:absolute;left:-99999px;top:0;"></div><script>
+const RUNNER_HTML = `<!doctype html><html><head><meta charset="utf-8"></head><body><script>
   function loadClassic(code){return new Promise(function(res,rej){
     var url=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
     var s=document.createElement('script');
@@ -133,8 +133,11 @@ async function ensureEngine(theme) {
 
     iframe = document.createElement('iframe');
     iframe.setAttribute('sandbox', 'allow-scripts');
+    // Mermaid measures text via getBBox, which needs a laid-out document — so
+    // the runner iframe is given a real size and merely parked offscreen rather
+    // than collapsed to 0×0 or hidden (which can yield empty/mis-sized SVG).
     iframe.style.cssText =
-      'position:absolute;width:0;height:0;border:0;visibility:hidden;pointer-events:none;';
+      'position:absolute;left:-99999px;top:0;width:1200px;height:1200px;border:0;pointer-events:none;';
     iframe.srcdoc = RUNNER_HTML;
 
     const ready = new Promise((resolve, reject) => {
