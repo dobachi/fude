@@ -77,6 +77,7 @@ pub struct Features {
     pub code_highlight: bool,
     pub source_code_mode: bool,
     pub plantuml_preview: bool,
+    pub mermaid_preview: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,6 +232,7 @@ impl Default for Config {
                 code_highlight: false,
                 source_code_mode: false,
                 plantuml_preview: false,
+                mermaid_preview: false,
             },
             font_size: 14,
             ui_font_size: 14,
@@ -255,6 +257,7 @@ impl Default for Features {
             code_highlight: false,
             source_code_mode: false,
             plantuml_preview: false,
+            mermaid_preview: false,
         }
     }
 }
@@ -367,6 +370,9 @@ fn is_listed_file(name: &str) -> bool {
         ".iuml",
         ".pu",
         ".wsd",
+        // Mermaid
+        ".mmd",
+        ".mermaid",
         // Images
         ".png",
         ".jpg",
@@ -1971,6 +1977,7 @@ mod tests {
                 code_highlight: true,
                 source_code_mode: true,
                 plantuml_preview: true,
+                mermaid_preview: true,
             },
             font_size: 18,
             ui_font_size: 16,
@@ -1991,6 +1998,7 @@ mod tests {
         assert_eq!(restored.theme, "light");
         assert!(restored.features.ai_copilot);
         assert!(!restored.features.diff_highlight);
+        assert!(restored.features.mermaid_preview);
         assert_eq!(restored.font_size, 18);
         assert_eq!(restored.ui_font_size, 16);
         assert!(restored.vim_mode);

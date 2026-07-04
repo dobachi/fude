@@ -290,6 +290,15 @@ export function setPlantumlEnabled(enabled) {
   plantumlEnabled = !!enabled;
 }
 
+// ── Mermaid extension hook ─────────────────────────────────
+
+let mermaidEnabled = false;
+
+/** Toggle Mermaid diagram rendering in the preview (set from config). */
+export function setMermaidEnabled(enabled) {
+  mermaidEnabled = !!enabled;
+}
+
 // ── Code syntax highlighting hook ──────────────────────────
 
 let codeHighlightEnabled = false;
@@ -308,6 +317,40 @@ export function isPlantumlFile(path) {
   const dot = path.lastIndexOf('.');
   if (dot < 0) return false;
   return PLANTUML_EXTS.includes(path.slice(dot + 1).toLowerCase());
+}
+
+// File extensions whose entire contents are a single Mermaid diagram.
+const MERMAID_EXTS = ['mmd', 'mermaid'];
+
+/** True if `path` is a standalone Mermaid file (rendered whole as one diagram). */
+export function isMermaidFile(path) {
+  if (!path) return false;
+  const dot = path.lastIndexOf('.');
+  if (dot < 0) return false;
+  return MERMAID_EXTS.includes(path.slice(dot + 1).toLowerCase());
+}
+
+/** Render an entire document as a single Mermaid diagram into `container`. */
+function renderMermaidDocument(content, container) {
+  container.innerHTML = '';
+  const holder = document.createElement('div');
+  holder.className = 'mermaid-diagram';
+  holder.setAttribute('data-source-line', '1');
+  holder.textContent = '⏳ Mermaid…';
+  container.appendChild(holder);
+
+  import('../features/mermaid/adapter.js')
+    .then((adapter) => adapter.renderMermaid(content))
+    .then((svg) => {
+      if (!holder.isConnected) return;
+      holder.innerHTML = svg;
+      attachPanZoom(holder);
+    })
+    .catch((err) => {
+      if (!holder.isConnected) return;
+      holder.classList.add('mermaid-error');
+      holder.textContent = `Mermaid error: ${err.message}`;
+    });
 }
 
 /** Render an entire document as a single PlantUML diagram into `container`. */
@@ -349,6 +392,10 @@ export function renderPreview(content, basePath, container, filePath) {
     renderPlantumlDocument(content, container, basePath);
     return;
   }
+  if (mermaidEnabled && isMermaidFile(filePath)) {
+    renderMermaidDocument(content, container);
+    return;
+  }
   if (isQuartoFile(filePath)) {
     renderQuartoMarkdown(content, basePath, container);
   } else {
@@ -365,9 +412,10 @@ export function renderPreview(content, basePath, container, filePath) {
  */
 export async function enhancePreview(container) {
   if (!container) return;
-  // PlantUML first: it replaces its <pre> with a diagram, so those blocks are
+  // Diagrams first: they replace their <pre> with an SVG, so those blocks are
   // gone before the syntax-highlight pass scans the remaining code blocks.
   await renderPlantumlBlocks(container);
+  await renderMermaidBlocks(container);
   await highlightCodeBlocks(container);
 }
 
@@ -386,9 +434,9 @@ async function highlightCodeBlocks(container) {
       const cls = Array.from(code.classList).find((c) => c.startsWith('language-'));
       if (!cls) return;
       const lang = cls.slice('language-'.length);
-      // PlantUML/puml fences are handled by their own renderer (or left plain
-      // when that extension is off); never syntax-highlight them.
-      if (lang === 'plantuml' || lang === 'puml') return;
+      // PlantUML/Mermaid fences are handled by their own renderer (or left
+      // plain when that extension is off); never syntax-highlight them.
+      if (lang === 'plantuml' || lang === 'puml' || lang === 'mermaid') return;
       code.dataset.hlHandled = '1';
       const html = await highlightCode(code.textContent || '', lang);
       // Re-check connectivity: preview may have re-rendered while awaiting.
@@ -442,6 +490,53 @@ async function renderPlantumlBlocks(container) {
         if (!holder.isConnected) return;
         holder.classList.add('puml-error');
         holder.textContent = `PlantUML error: ${err.message}`;
+      });
+  });
+}
+
+/**
+ * Post-render pass: replace ```mermaid code blocks with rendered SVG. No-op
+ * unless the extension is enabled. The engine adapter is imported lazily and
+ * only when a diagram is actually present.
+ * @param {HTMLElement} container
+ */
+async function renderMermaidBlocks(container) {
+  if (!mermaidEnabled || !container) return;
+  const codes = container.querySelectorAll('pre > code.language-mermaid');
+  if (!codes.length) return;
+
+  let adapter;
+  try {
+    adapter = await import('../features/mermaid/adapter.js');
+  } catch (e) {
+    console.error('Failed to load Mermaid adapter:', e);
+    return;
+  }
+
+  codes.forEach((code) => {
+    const pre = code.parentElement;
+    if (!pre || pre.dataset.mermaidHandled) return;
+    pre.dataset.mermaidHandled = '1';
+
+    const text = code.textContent || '';
+    const line = pre.getAttribute('data-source-line') || '';
+    const holder = document.createElement('div');
+    holder.className = 'mermaid-diagram';
+    if (line) holder.setAttribute('data-source-line', line);
+    holder.textContent = '⏳ Mermaid…';
+    pre.replaceWith(holder);
+
+    adapter
+      .renderMermaid(text)
+      .then((svg) => {
+        if (!holder.isConnected) return;
+        holder.innerHTML = svg;
+        attachPanZoom(holder);
+      })
+      .catch((err) => {
+        if (!holder.isConnected) return;
+        holder.classList.add('mermaid-error');
+        holder.textContent = `Mermaid error: ${err.message}`;
       });
   });
 }

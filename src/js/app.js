@@ -43,6 +43,7 @@ import {
   syncPreviewToLine,
   getLineFromPreview,
   setPlantumlEnabled,
+  setMermaidEnabled,
   setCodeHighlightEnabled,
   renderPreview,
 } from './core/preview.js';
@@ -547,6 +548,7 @@ async function init() {
 
   initTheme(config.theme || 'dark');
   setPlantumlEnabled(config.features?.plantuml_preview);
+  setMermaidEnabled(config.features?.mermaid_preview);
   setCodeHighlightEnabled(config.features?.code_highlight);
   sourceCodeModeEnabled = !!config.features?.source_code_mode;
   setSourceCodeMode(sourceCodeModeEnabled);
@@ -556,6 +558,7 @@ async function init() {
     const saved = e.detail || {};
     config = saved;
     setPlantumlEnabled(saved.features?.plantuml_preview);
+    setMermaidEnabled(saved.features?.mermaid_preview);
     setCodeHighlightEnabled(saved.features?.code_highlight);
     sourceCodeModeEnabled = !!saved.features?.source_code_mode;
     setSourceCodeMode(sourceCodeModeEnabled);

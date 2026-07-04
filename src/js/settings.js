@@ -111,7 +111,12 @@ export async function openSettings() {
             <span class="ext-status" id="ext-status-archimate"></span>
             <div class="ext-progress" id="ext-progress-archimate" style="display:none"><div class="ext-progress-bar"></div></div>
           </div>
-          <small class="setting-hint">PlantUML: 有効化すると初回のみ描画エンジン（約十数MB）をダウンロード。 ArchiMate: <code>!include &lt;archimate/Archimate&gt;</code> をローカルで解決（PlantUML本体が前提・自動導入）。</small>
+          <div class="ext-row" data-ext="mermaid">
+            <label><input type="checkbox" id="setting-mermaid" ${config.features?.mermaid_preview ? 'checked' : ''} /> Mermaid Preview</label>
+            <span class="ext-status" id="ext-status-mermaid"></span>
+            <div class="ext-progress" id="ext-progress-mermaid" style="display:none"><div class="ext-progress-bar"></div></div>
+          </div>
+          <small class="setting-hint">PlantUML: 有効化すると初回のみ描画エンジン（約十数MB）をダウンロード。 ArchiMate: <code>!include &lt;archimate/Archimate&gt;</code> をローカルで解決（PlantUML本体が前提・自動導入）。 Mermaid: 有効化すると初回のみ描画エンジン（約数MB）をダウンロード。<code>.mmd</code> ファイルと <code>\`\`\`mermaid</code> フェンスを描画。</small>
         </div>
       </div>
       <div class="settings-footer">
@@ -245,6 +250,33 @@ async function setupExtensions() {
     });
   }
 
+  // --- Mermaid engine (gated by features.mermaid_preview) ---
+  const mcb = panel.querySelector('#setting-mermaid');
+  const mStatus = panel.querySelector('#ext-status-mermaid');
+  const mProg = panel.querySelector('#ext-progress-mermaid');
+  const mBar = mProg?.querySelector('.ext-progress-bar');
+
+  let mermaidInstalled = await isInstalled('mermaid');
+  if (mStatus) mStatus.textContent = mermaidInstalled ? '導入済み' : '未導入';
+
+  if (mcb && mStatus) {
+    mcb.addEventListener('change', async () => {
+      if (!mcb.checked) {
+        mStatus.textContent = mermaidInstalled ? '導入済み（無効）' : '未導入';
+        return;
+      }
+      if (mermaidInstalled) {
+        mStatus.textContent = '導入済み';
+        return;
+      }
+      mcb.disabled = true;
+      const ok = await installExtensionWithProgress('mermaid', mStatus, mProg, mBar);
+      mermaidInstalled = ok;
+      mcb.checked = ok;
+      mcb.disabled = false;
+    });
+  }
+
   if (acb && aStatus) {
     acb.addEventListener('change', async () => {
       if (!acb.checked) {
@@ -302,6 +334,7 @@ async function saveSettings() {
       code_highlight: document.querySelector('#setting-code-highlight')?.checked || false,
       source_code_mode: document.querySelector('#setting-source-code-mode')?.checked || false,
       plantuml_preview: document.querySelector('#setting-plantuml')?.checked || false,
+      mermaid_preview: document.querySelector('#setting-mermaid')?.checked || false,
     },
     font_size: parseInt(document.querySelector('#setting-fontsize')?.value || '14', 10),
     ui_font_size: parseInt(document.querySelector('#setting-ui-fontsize')?.value || '14', 10),
