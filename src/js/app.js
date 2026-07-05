@@ -50,6 +50,7 @@ import {
 import {
   openTab,
   closeTab,
+  duplicateTab,
   nextTab,
   prevTab,
   getActiveTab,
@@ -1280,12 +1281,17 @@ function handleFileContextMenu(entry, x, y) {
 function handleTabContextMenu(tabId, x, y) {
   const tab = getAllTabs().find((t) => t.id === tabId);
   if (!tab) return;
-  const items = [
+  const items = [];
+  // Only text tabs have editable content worth copying (image viewers don't).
+  if (tab.kind !== 'image') {
+    items.push({ label: 'タブを複製', action: () => duplicateTab(tabId) }, { separator: true });
+  }
+  items.push(
     { label: '閉じる', action: () => closeTab(tabId) },
     { label: '他のタブを閉じる', action: () => closeOtherTabs(tabId) },
     { label: '右側のタブを閉じる', action: () => closeTabsToRight(tabId) },
     { label: 'すべて閉じる', action: () => closeAllTabs() },
-  ];
+  );
   if (tab.path) {
     items.push({ separator: true });
     if (isLocalTauri()) {

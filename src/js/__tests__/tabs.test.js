@@ -51,6 +51,32 @@ describe('tabs module', () => {
     expect(tabEls[0].querySelector('.tab-name').textContent).toBe('hello.md');
   });
 
+  it('duplicateTab creates an untitled dirty copy of the content', () => {
+    const src = mod.openTab('/docs/hello.md', '# Hello');
+    mod.updateTabContent(src.id, '# Hello edited'); // simulate live edits
+
+    const dup = mod.duplicateTab(src.id);
+
+    expect(dup).toBeTruthy();
+    expect(dup.id).not.toBe(src.id);
+    expect(dup.path).toBeNull(); // scratch buffer, not the same file
+    expect(dup.content).toBe('# Hello edited'); // copies current content
+    expect(dup.name).toBe('hello.md (コピー)');
+    expect(dup.dirty).toBe(true); // unsaved copy
+    expect(mod.getActiveTab().id).toBe(dup.id); // becomes active
+    expect(mod.getAllTabs().length).toBe(2); // original kept
+
+    // Editing the copy must not touch the original's content.
+    mod.updateTabContent(dup.id, 'changed');
+    expect(mod.getAllTabs().find((t) => t.id === src.id).content).toBe('# Hello edited');
+  });
+
+  it('duplicateTab refuses image tabs and unknown ids', () => {
+    const img = mod.openTab('/pic.png', '', { kind: 'image' });
+    expect(mod.duplicateTab(img.id)).toBeNull();
+    expect(mod.duplicateTab('nope')).toBeNull();
+  });
+
   it('closeTab removes the tab from the list and DOM', () => {
     const tab1 = mod.openTab('/a.md');
     const tab2 = mod.openTab('/b.md');

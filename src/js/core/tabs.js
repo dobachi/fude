@@ -94,7 +94,7 @@ export function openTab(path, content = '', opts = {}) {
   const tab = {
     id: generateTabId(),
     path: path || null,
-    name: getFilename(path),
+    name: opts.name || getFilename(path),
     content,
     dirty: false,
     cursor: { from: 0, to: 0 },
@@ -118,6 +118,25 @@ export function openTab(path, content = '', opts = {}) {
   }
 
   return tab;
+}
+
+/**
+ * Duplicate a tab as a new untitled scratch buffer holding the same current
+ * content. A file-backed tab is copied into an *unsaved* buffer rather than
+ * reopening its path, so the two tabs never fight over one file's save/temp/
+ * watch state; the copy is marked dirty because its content isn't on disk.
+ * Returns the new tab, or null when the source is missing or not a text tab
+ * (image viewers have no editable content to copy).
+ * @param {string} id
+ * @returns {object|null}
+ */
+export function duplicateTab(id) {
+  const src = tabs.find((t) => t.id === id);
+  if (!src || src.kind !== 'text') return null;
+  const name = src.name ? `${src.name} (コピー)` : undefined;
+  const dup = openTab(null, src.content, { viewMode: src.viewMode, name });
+  if (dup) markDirty(dup.id);
+  return dup;
 }
 
 export function closeTab(id) {
