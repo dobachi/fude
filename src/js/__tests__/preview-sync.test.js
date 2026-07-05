@@ -41,18 +41,50 @@ describe('renderMarkdown source-line attribution', () => {
     const ul = container.querySelector('ul');
     expect(ul?.dataset.sourceLine).toBe('1');
   });
+
+  it('tags table rows so sync has anchors inside a table', () => {
+    renderMarkdown('| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n', '', container);
+    const bodyRows = container.querySelectorAll('tbody tr[data-source-line]');
+    // Each body row carries its own source line — the anchors that keep
+    // editor⇄preview sync from drifting across a table.
+    expect(bodyRows.length).toBe(2);
+    expect(bodyRows[0].dataset.sourceLine).toBe('3');
+    expect(bodyRows[1].dataset.sourceLine).toBe('4');
+  });
 });
 
+// jsdom does not lay out elements, so we stub getBoundingClientRect — the
+// container-relative source the sync now uses. Each element's viewport top is
+// its intended content-space top minus the current scrollTop, and the container
+// sits at viewport top 0; the sync recovers the content-space top exactly.
+function stubRects(container, linesAndOffsets) {
+  container.innerHTML = '';
+  container.getBoundingClientRect = () => ({
+    top: 0,
+    left: 0,
+    bottom: 0,
+    right: 0,
+    width: 0,
+    height: 0,
+  });
+  for (const [line, top] of linesAndOffsets) {
+    const div = document.createElement('div');
+    div.dataset.sourceLine = String(line);
+    div.getBoundingClientRect = () => ({
+      top: top - container.scrollTop,
+      left: 0,
+      bottom: 0,
+      right: 0,
+      width: 0,
+      height: 0,
+    });
+    container.appendChild(div);
+  }
+}
+
 describe('syncPreviewToLine', () => {
-  // jsdom does not lay out elements, so we stub offsetTop and scrollHeight
   function setupElements(linesAndOffsets) {
-    container.innerHTML = '';
-    for (const [line, top] of linesAndOffsets) {
-      const div = document.createElement('div');
-      div.dataset.sourceLine = String(line);
-      Object.defineProperty(div, 'offsetTop', { value: top, configurable: true });
-      container.appendChild(div);
-    }
+    stubRects(container, linesAndOffsets);
     Object.defineProperty(container, 'scrollHeight', {
       value: 10000,
       configurable: true,
@@ -127,13 +159,7 @@ describe('syncPreviewToLine', () => {
 
 describe('getLineFromPreview', () => {
   function setupElements(linesAndOffsets, scrollTop = 0) {
-    container.innerHTML = '';
-    for (const [line, top] of linesAndOffsets) {
-      const div = document.createElement('div');
-      div.dataset.sourceLine = String(line);
-      Object.defineProperty(div, 'offsetTop', { value: top, configurable: true });
-      container.appendChild(div);
-    }
+    stubRects(container, linesAndOffsets);
     container.scrollTop = scrollTop;
   }
 
@@ -193,5 +219,41 @@ describe('getLineFromPreview', () => {
 
   it('returns null on null container', () => {
     expect(getLineFromPreview(null)).toBeNull();
+  });
+
+  it('uses container-relative geometry, not table-relative offsetTop', () => {
+    // Simulate a table row: its offsetTop is measured from the <table> (a small
+    // number), but its true position in the scroll content is far down. The old
+    // code read offsetTop and mis-synced; the fix reads getBoundingClientRect.
+    container.innerHTML = '';
+    container.getBoundingClientRect = () => ({
+      top: 0,
+      left: 0,
+      bottom: 0,
+      right: 0,
+      width: 0,
+      height: 0,
+    });
+    const mk = (line, contentTop, misleadingOffsetTop) => {
+      const div = document.createElement('div');
+      div.dataset.sourceLine = String(line);
+      Object.defineProperty(div, 'offsetTop', { value: misleadingOffsetTop, configurable: true });
+      div.getBoundingClientRect = () => ({
+        top: contentTop - container.scrollTop,
+        left: 0,
+        bottom: 0,
+        right: 0,
+        width: 0,
+        height: 0,
+      });
+      container.appendChild(div);
+    };
+    mk(1, 0, 0);
+    mk(5, 100, 0); // a "table row" far down (content top 100) but offsetTop 0
+    mk(10, 200, 0);
+    container.scrollTop = 100;
+    // Correct answer uses content top (100 => line 5); offsetTop-based logic
+    // would have wrongly treated all rows as top 0.
+    expect(getLineFromPreview(container)).toBe(5);
   });
 });

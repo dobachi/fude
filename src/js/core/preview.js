@@ -550,6 +550,24 @@ export function setBasePath(path) {
 }
 
 /**
+ * Build a function returning an element's top in the container's scroll-content
+ * coordinate space (0 = very top of content), consistent for ALL elements.
+ *
+ * We can't use `el.offsetTop`: it is measured from the element's offsetParent,
+ * which for table rows is the <table> (and for other nested block elements can
+ * be any positioned ancestor). Mixing those origins with the container's
+ * scrollTop is what makes editor⇄preview sync drift around tables. A
+ * getBoundingClientRect delta is origin-consistent regardless of nesting.
+ * @param {HTMLElement} container
+ * @param {number} scrollTop current container.scrollTop (passed so callers can
+ *   read it once before mutating it)
+ */
+function makeTopWithin(container, scrollTop) {
+  const containerTop = container.getBoundingClientRect().top;
+  return (el) => el.getBoundingClientRect().top - containerTop + scrollTop;
+}
+
+/**
  * Inverse of syncPreviewToLine: given the current preview scroll position,
  * return the corresponding source line (fractional, 1-based) or null if
  * the preview has no tagged elements.
@@ -562,13 +580,19 @@ export function getLineFromPreview(container) {
   if (elements.length === 0) return null;
 
   const scrollTop = container.scrollTop;
+  const topOf = makeTopWithin(container, scrollTop);
   let prev = null;
+  let prevTop = 0;
   let next = null;
+  let nextTop = 0;
   for (const el of elements) {
-    if (el.offsetTop <= scrollTop) {
+    const t = topOf(el);
+    if (t <= scrollTop) {
       prev = el;
+      prevTop = t;
     } else {
       next = el;
+      nextTop = t;
       break;
     }
   }
@@ -578,9 +602,9 @@ export function getLineFromPreview(container) {
   if (!next) return prevLine;
 
   const nextLine = parseInt(next.dataset.sourceLine, 10);
-  const span = next.offsetTop - prev.offsetTop;
+  const span = nextTop - prevTop;
   if (span <= 0) return prevLine;
-  const ratio = (scrollTop - prev.offsetTop) / span;
+  const ratio = (scrollTop - prevTop) / span;
   return prevLine + (nextLine - prevLine) * ratio;
 }
 
@@ -595,14 +619,19 @@ export function syncPreviewToLine(container, line) {
   const elements = container.querySelectorAll('[data-source-line]');
   if (elements.length === 0) return;
 
+  const topOf = makeTopWithin(container, container.scrollTop);
   let prev = null;
+  let prevTop = 0;
   let next = null;
+  let nextTop = 0;
   for (const el of elements) {
     const elLine = parseInt(el.dataset.sourceLine, 10);
     if (elLine <= line) {
       prev = el;
+      prevTop = topOf(el);
     } else {
       next = el;
+      nextTop = topOf(el);
       break;
     }
   }
@@ -615,14 +644,14 @@ export function syncPreviewToLine(container, line) {
     // Past the last tagged element — interpolate to bottom
     const prevLine = parseInt(prev.dataset.sourceLine, 10);
     const remaining = Math.max(0, line - prevLine);
-    const remainingHeight = container.scrollHeight - prev.offsetTop;
+    const remainingHeight = container.scrollHeight - prevTop;
     // Heuristic: assume 1 line ≈ 24px in the remaining region
-    target = prev.offsetTop + Math.min(remaining * 24, remainingHeight);
+    target = prevTop + Math.min(remaining * 24, remainingHeight);
   } else {
     const prevLine = parseInt(prev.dataset.sourceLine, 10);
     const nextLine = parseInt(next.dataset.sourceLine, 10);
     const ratio = (line - prevLine) / (nextLine - prevLine);
-    target = prev.offsetTop + (next.offsetTop - prev.offsetTop) * ratio;
+    target = prevTop + (nextTop - prevTop) * ratio;
   }
 
   container.scrollTop = target;
