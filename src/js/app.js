@@ -12,6 +12,7 @@ import {
   setContentFromDisk,
   scrollEditorToLine,
   jumpToLine,
+  flashLine,
   registerPanesModule,
   registerImagePasteHandler,
   registerSaveHandler,
@@ -88,6 +89,7 @@ const {
   focusPane,
   getActivePane,
   getActivePaneView,
+  getPaneByPreviewContainer,
   focusEditorView,
   setCallbacks,
   createEditorInPane,
@@ -591,7 +593,7 @@ async function init() {
 
   // Init preview for the default pane
   const previewEl = document.querySelector('.pane[data-pane-id="default"] .preview-pane');
-  if (previewEl) initPreview(previewEl);
+  if (previewEl) initPreview(previewEl, { onSourceJump: handlePreviewSourceJump });
 
   initPanes();
 
@@ -601,6 +603,7 @@ async function init() {
     onScroll: handlePaneScroll,
     onPreviewScroll: handlePreviewScroll,
     onSelectionChange: handleSelectionChange,
+    onSourceJump: handlePreviewSourceJump,
     onEditorCreated: () => {
       reapplyMode();
     },
@@ -1106,6 +1109,22 @@ function handlePreviewScroll(pane) {
   scrollEditorToLine(pane.editorView, line);
 }
 
+// Double-click in the preview → move the editor cursor to the matching source
+// line. Mirrors the outline "jump to heading" wiring (recordScrollSync +
+// jumpToLine), plus a flash so the landing spot is obvious.
+function handlePreviewSourceJump(line, container) {
+  const pane = getPaneByPreviewContainer(container) || getActivePane();
+  if (!pane || !pane.editorView) return;
+  // User-initiated move: suppress the bounce-back from the editor scroll we're
+  // about to cause (same guard the outline jump uses).
+  recordScrollSync('editor');
+  // In preview-only mode the editor is hidden; reveal it so the cursor lands
+  // somewhere visible (same policy as opening a file from the sidebar).
+  if (currentViewMode() === 'preview') setViewMode('split');
+  jumpToLine(pane.editorView, line);
+  flashLine(pane.editorView, line);
+}
+
 function handleSelectionChange(selectedText) {
   // Only forward to chat when AI panel is open
   const app = document.getElementById('app');
@@ -1467,6 +1486,13 @@ function applyReloadToAllPanes(path, content, tabId) {
   // Editor now matches disk → refresh the baseline for conflict detection.
   markTabSynced(tabId, content);
   updateDocContext(path, content);
+
+  // The disk-reload transaction is annotated so the editor's onChange never
+  // fires, so scheduleOutlineUpdate is bypassed too. Refresh the outline here
+  // when the reloaded file is the one the outline is showing (the active tab),
+  // otherwise the heading list goes stale after an external change.
+  const activeTab = getActiveTab();
+  if (activeTab && activeTab.path === path) updateOutline(content);
 }
 
 async function handleExternalFileChange(path) {

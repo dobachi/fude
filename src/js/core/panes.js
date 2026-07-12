@@ -26,6 +26,7 @@ let onScrollCallback = null; // (pane, info) => void
 let onPreviewScrollCallback = null; // (pane) => void
 let onSelectionChangeCallback = null; // (selectedText) => void
 let onEditorCreatedCallback = null; // (pane) => void — invoked after createEditorInPane
+let onSourceJumpCallback = null; // (line, previewContainer) => void — preview dblclick
 
 export function setCallbacks({
   onChange,
@@ -33,12 +34,24 @@ export function setCallbacks({
   onPreviewScroll,
   onSelectionChange,
   onEditorCreated,
+  onSourceJump,
 }) {
   onChangeCallback = onChange;
   onScrollCallback = onScroll;
   onPreviewScrollCallback = onPreviewScroll;
   onSelectionChangeCallback = onSelectionChange;
   onEditorCreatedCallback = onEditorCreated;
+  onSourceJumpCallback = onSourceJump;
+}
+
+// Preview-init options shared by every pane so double-click-to-source works in
+// split panes too (not just the default pane initialised by app.js).
+function previewInitOpts() {
+  return {
+    onSourceJump: (line, container) => {
+      if (onSourceJumpCallback) onSourceJumpCallback(line, container);
+    },
+  };
 }
 
 function attachPreviewScrollListener(pane) {
@@ -88,6 +101,11 @@ export function getActivePane() {
 
 export function getAllPanes() {
   return [...panes];
+}
+
+/** Find the pane whose preview container is `container` (or null). */
+export function getPaneByPreviewContainer(container) {
+  return panes.find((p) => p.previewContainer === container) || null;
 }
 
 export function getPaneCount() {
@@ -160,7 +178,7 @@ function doSplit(cssClass) {
   const pane = makePaneObject(paneId, el);
 
   // Init preview for the new pane
-  initPreview(pane.previewContainer);
+  initPreview(pane.previewContainer, previewInitOpts());
 
   // Copy file from source pane
   if (source && source.editorView) {

@@ -211,13 +211,43 @@ function handlePreviewKeys(e) {
 }
 
 /**
+ * Given a clicked preview element, walk up to the nearest ancestor carrying a
+ * `data-source-line` attribute and return its 1-based source line number.
+ * Returns null when there is no such ancestor or the attribute is not a number.
+ * @param {Element|null} el
+ * @returns {number|null}
+ */
+export function sourceLineFromElement(el) {
+  const node = el && el.closest ? el.closest('[data-source-line]') : null;
+  if (!node) return null;
+  const line = parseInt(node.getAttribute('data-source-line'), 10);
+  return Number.isFinite(line) ? line : null;
+}
+
+/**
  * Initialise a preview container (vim-like key navigation).
  * Can be called multiple times for different containers (one per pane).
+ * @param {HTMLElement} container
+ * @param {{ onSourceJump?: (line: number, container: HTMLElement) => void }} [opts]
  */
-export function initPreview(container) {
+export function initPreview(container, opts = {}) {
   ensureMd();
   container.setAttribute('tabindex', '0');
   container.addEventListener('keydown', handlePreviewKeys);
+
+  // Double-click any rendered block to jump to the matching source line in the
+  // editor. Blocks carry `data-source-line` (added by the source_line core
+  // rule); we resolve the nearest one and hand the line to the app.
+  container.addEventListener('dblclick', (e) => {
+    if (!opts.onSourceJump) return;
+    const line = sourceLineFromElement(e.target);
+    if (line === null) return;
+    // The two clicks leave a word selected; clear it so it doesn't linger and
+    // distract from the editor cursor we're about to place.
+    const sel = window.getSelection && window.getSelection();
+    if (sel) sel.removeAllRanges();
+    opts.onSourceJump(line, container);
+  });
 
   // Intercept ALL link clicks inside the preview. Without this the Tauri
   // webview will navigate itself away (e.g. an internal anchor like

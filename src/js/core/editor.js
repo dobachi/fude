@@ -5,8 +5,16 @@ import {
   drawSelection,
   highlightActiveLine,
   lineNumbers,
+  Decoration,
 } from '@codemirror/view';
-import { EditorState, Compartment, Annotation, Prec } from '@codemirror/state';
+import {
+  EditorState,
+  Compartment,
+  Annotation,
+  Prec,
+  StateField,
+  StateEffect,
+} from '@codemirror/state';
 
 // Marks transactions that replace document content from disk (file reload).
 // Listeners use this to skip dirty-marking and autosave for these updates.
@@ -81,6 +89,13 @@ const baseTheme = EditorView.theme({
     overflow: 'auto',
     fontFamily: 'var(--font-mono)',
     fontSize: 'var(--font-size)',
+  },
+  // Transient highlight for a line we just jumped to (e.g. preview double-click).
+  // Amber reads on both light and dark themes; the transition fades it out as
+  // the decoration is cleared.
+  '.cm-flash-line': {
+    backgroundColor: 'rgba(255,193,7,0.38)',
+    transition: 'background-color 0.6s ease-out',
   },
 });
 
@@ -502,6 +517,7 @@ export function createEditor(
     history(),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     highlightSelectionMatches(),
+    flashLineField,
     languageCompartment.of(initialLang),
     keymap.of([
       {
@@ -764,6 +780,47 @@ export function setScroll(view, scroll) {
   }
   view.scrollDOM.scrollTop = scroll.top || 0;
   view.scrollDOM.scrollLeft = scroll.left || 0;
+}
+
+// ── Line flash (transient highlight after a jump) ─────────────
+// A one-shot line decoration used to draw the eye to the line we just jumped
+// to (e.g. from a preview double-click). It clears itself after FLASH_MS.
+const FLASH_MS = 800;
+const flashLineEffect = StateEffect.define(); // value: line-start pos, or null to clear
+const flashLineDeco = Decoration.line({ class: 'cm-flash-line' });
+const flashLineField = StateField.define({
+  create() {
+    return Decoration.none;
+  },
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (e.is(flashLineEffect)) {
+        deco = e.value == null ? Decoration.none : Decoration.set([flashLineDeco.range(e.value)]);
+      }
+    }
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+/**
+ * Briefly highlight the given 1-based line, then clear it. Purely visual —
+ * used to show where a jump (e.g. from the preview) landed.
+ */
+export function flashLine(view, line) {
+  if (!view) return;
+  const docLines = view.state.doc.lines;
+  const safe = Math.max(1, Math.min(Math.floor(line), docLines));
+  const pos = view.state.doc.line(safe).from;
+  view.dispatch({ effects: flashLineEffect.of(pos) });
+  setTimeout(() => {
+    try {
+      view.dispatch({ effects: flashLineEffect.of(null) });
+    } catch {
+      /* view destroyed before the flash cleared — ignore */
+    }
+  }, FLASH_MS);
 }
 
 /**
