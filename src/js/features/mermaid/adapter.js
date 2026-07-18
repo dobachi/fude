@@ -75,8 +75,27 @@ const RUNNER_HTML = `<!doctype html><html><head><meta charset="utf-8"></head><bo
  * @param {string} svg
  * @returns {string} sanitized SVG markup
  */
+// HTML の空要素（void elements）。Mermaid はラベル内の改行を <foreignObject> の
+// 中に <br> として出すが、閉じタグが無いため XML パーサでは構文エラーになる。
+// 実際に出得るものだけを対象にする。
+const VOID_ELEMENTS = 'area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr';
+const UNCLOSED_VOID = new RegExp(`<(${VOID_ELEMENTS})\\b([^>]*?)\\s*/?>`, 'gi');
+
+/**
+ * 閉じていない空要素を自己閉じ形（<br/>）に直す。
+ *
+ * Mermaid の出力は SVG の中に HTML 片（foreignObject 内のラベル）が混ざった
+ * 形で、その HTML 片は XML として妥当とは限らない。厳格な XML パースを保った
+ * まま（HTML パーサに切り替えると viewBox などの属性名の大小が壊れる）
+ * 通せるようにするための前処理。
+ * 既に自己閉じのものは二重に閉じない。
+ */
+function closeVoidElements(markup) {
+  return markup.replace(UNCLOSED_VOID, (_m, tag, attrs) => `<${tag}${attrs} />`);
+}
+
 export function sanitizeMermaidSvg(svg) {
-  const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const doc = new DOMParser().parseFromString(closeVoidElements(svg), 'image/svg+xml');
   const root = doc.documentElement;
   if (!root || root.getElementsByTagName('parsererror').length || root.nodeName === 'parsererror') {
     throw new Error('Invalid SVG output');

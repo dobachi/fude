@@ -42,6 +42,55 @@ describe('sanitizeMermaidSvg', () => {
   });
 });
 
+// 回帰: ノードラベルに改行を入れると Mermaid は <foreignObject> の中に
+// 閉じタグの無い <br> を出す。これを XML として厳格にパースすると構文エラーに
+// なり、図全体が "Invalid SVG output" で描画できなくなっていた。
+describe('sanitizeMermaidSvg — HTML の空要素を含むラベル', () => {
+  const label = (inner) =>
+    SVG(
+      `<foreignObject width="100" height="50"><div xmlns="http://www.w3.org/1999/xhtml">${inner}</div></foreignObject>`,
+    );
+
+  it('閉じていない <br> を含んでも描画できる', () => {
+    const out = sanitizeMermaidSvg(label('<span>一行目<br>二行目</span>'));
+    expect(out).toContain('一行目');
+    expect(out).toContain('二行目');
+    expect(out).toContain('br');
+  });
+
+  it('自己閉じの <br/> も従来どおり通る', () => {
+    const out = sanitizeMermaidSvg(label('<span>a<br/>b</span>'));
+    expect(out).toContain('a');
+    expect(out).toContain('b');
+  });
+
+  it('複数の <br> と大文字 <BR> を含んでも通る', () => {
+    const out = sanitizeMermaidSvg(label('<span>1<br>2<BR>3<br />4</span>'));
+    for (const t of ['1', '2', '3', '4']) expect(out).toContain(t);
+  });
+
+  it('他の空要素（<hr> / <img>）を含んでも通る', () => {
+    const out = sanitizeMermaidSvg(label('<div>x<hr><img src="a.png">y</div>'));
+    expect(out).toContain('x');
+    expect(out).toContain('y');
+  });
+
+  it('空要素を含んでいても script は除去する', () => {
+    const out = sanitizeMermaidSvg(label('<span>a<br>b</span><script>alert(1)</script>'));
+    expect(out).not.toContain('alert(1)');
+  });
+
+  it('<br> を含む属性値や文字列は壊さない', () => {
+    // "<br>" という字面がテキストとして入っている場合（エスケープ済み）
+    const out = sanitizeMermaidSvg(label('<span>&lt;br&gt; と書いた</span>'));
+    expect(out).toContain('と書いた');
+  });
+
+  it('本当に壊れた SVG は従来どおり弾く', () => {
+    expect(() => sanitizeMermaidSvg('<svg><unclosed></svg>')).toThrow();
+  });
+});
+
 describe('currentMermaidTheme', () => {
   it('maps the app data-theme to a Mermaid theme name', () => {
     const root = document.documentElement;
