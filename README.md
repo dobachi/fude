@@ -179,7 +179,14 @@ make format      # 全フォーマット実行 (Prettier + cargo fmt)
 make check       # lint + format + test + build (CI向け)
 make remote      # WSLからWindows版Fudeを起動
 make clean       # ビルド成果物を削除
+
+make docker-gui  # Dockerで隔離してGUI動作確認（ホストを汚さない）
+make docker-test # Dockerでテスト実行
 ```
+
+手動での動作確認は `make docker-gui` を推奨します。ホストのファイルシステムを
+マウントしないため、設定・セッション（`~/.config/fude`）や実ファイルに触れずに
+試せます。詳細は [docs/DOCKER.md](docs/DOCKER.md)。
 
 ## 技術スタック
 

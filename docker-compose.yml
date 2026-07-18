@@ -1,0 +1,16 @@
+# Fude 動作確認用 compose
+#   GUI:    docker compose up --build         → http://localhost:6080/vnc.html
+#   テスト: docker compose run --rm fude test
+#   CI相当: docker compose run --rm fude check
+#   シェル: docker compose run --rm fude shell
+#
+# 安全性: ホストのファイルシステムはマウントしない（完全分離）。
+services:
+  fude:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: fude-verify
+    ports:
+      - '6080:6080'
+    # ホスト非マウント。操作はコンテナ内サンドボックスで完結。

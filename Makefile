@@ -1,4 +1,5 @@
-.PHONY: setup doctor install-rust dev build test check lint format clean help remote release
+.PHONY: setup doctor install-rust dev build test check lint format clean help remote release \
+	docker-build docker-gui docker-test docker-check docker-shell docker-down
 
 # OS判定
 UNAME_S := $(shell uname -s)
@@ -20,6 +21,7 @@ help:
 	@echo "  make lint         全lint実行"
 	@echo "  make format       全フォーマット実行"
 	@echo "  make check        lint + format + test + build"
+	@echo "  make docker-gui   Dockerで隔離してGUI動作確認（ホストを汚さない）"
 	@echo "  make remote       WSLからWindows版Fudeを起動"
 	@echo "  make release      全OS向けリリースビルド（CIでビルド）"
 	@echo "  make clean        ビルド成果物を削除"
@@ -196,3 +198,26 @@ release:
 clean:
 	rm -rf dist/bundle.js dist/index.html dist/style.css
 	cd src-tauri && cargo clean
+
+# ---- Docker 動作確認（安全・隔離） ----
+# 手動での動作確認はここで行う。ホストのファイルシステムをマウントしないので、
+# 設定/セッション（~/.config/fude）や実ファイルを触らずに試せる。
+# 詳細は docs/DOCKER.md
+docker-build:
+	docker compose build
+
+docker-gui: docker-build
+	@echo "起動後: http://localhost:6080/vnc.html を開いてください"
+	docker compose up
+
+docker-test:
+	docker compose run --rm fude test
+
+docker-check:
+	docker compose run --rm fude check
+
+docker-shell:
+	docker compose run --rm fude shell
+
+docker-down:
+	docker compose down --remove-orphans
