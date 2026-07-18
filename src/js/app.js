@@ -36,7 +36,15 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
-import { initMenuBar, toggleMenuBar } from './core/menubar.js';
+import {
+  initMenuBar,
+  toggleMenuBar,
+  focusMenuBar,
+  openMenuByAccessKey,
+  moveOpenMenu,
+  isMenuOpen,
+} from './core/menubar.js';
+import { createAltTap } from './core/menu-nav.js';
 import { emptyTableModel, formatTableText } from './core/table.js';
 import { promptDialog, confirmDialog } from './core/dialog.js';
 import {
@@ -670,6 +678,14 @@ async function init() {
 
   // Global keyboard shortcuts - capture at window level to override browser defaults
   window.addEventListener('keydown', handleGlobalKeys, true);
+
+  // Alt の単押し検出。keydown は上の capture 側とは別に素通しで見て、
+  // Alt を押している間に他のキーが来たら単押しではないと判断する。
+  window.addEventListener('keydown', (e) => altTap.keydown(e), true);
+  window.addEventListener('keyup', (e) => altTap.keyup(e), true);
+  // フォーカスが外れた間の押下は無効（Alt+Tab でウィンドウを切り替えたときに
+  // 戻ってきてメニューが開くのを防ぐ）
+  window.addEventListener('blur', () => altTap.reset());
 
   // TODO: Vim ESC/Ctrl+[ handling for browser mode - pending research
 
@@ -1797,7 +1813,8 @@ function buildMenuDefinition() {
   };
   return [
     {
-      label: 'ファイル',
+      label: 'ファイル(F)',
+      accessKey: 'F',
       items: [
         { label: '新規タブ', shortcut: 'Ctrl+Shift+T', action: () => openTab(null, '') },
         {
@@ -1820,7 +1837,8 @@ function buildMenuDefinition() {
       ],
     },
     {
-      label: '編集',
+      label: '編集(E)',
+      accessKey: 'E',
       items: [
         { label: '太字', shortcut: 'Ctrl+B', action: withView(toggleBold) },
         { label: '箇条書き', shortcut: 'Ctrl+Shift+8', action: withView(toggleBullet) },
@@ -1830,11 +1848,13 @@ function buildMenuDefinition() {
       ],
     },
     {
-      label: '挿入',
+      label: '挿入(I)',
+      accessKey: 'I',
       items: [{ label: '表…', shortcut: 'Ctrl+Shift+G', action: openTableGridPicker }],
     },
     {
-      label: '表示',
+      label: '表示(V)',
+      accessKey: 'V',
       items: [
         { label: 'エディタのみ', shortcut: 'Ctrl+Shift+J', action: () => setViewMode('editor') },
         { label: '分割', shortcut: 'Ctrl+Shift+K', action: () => setViewMode('split') },
@@ -1857,7 +1877,8 @@ function buildMenuDefinition() {
       ],
     },
     {
-      label: 'AI',
+      label: 'AI(A)',
+      accessKey: 'A',
       items: [
         { label: 'AIチャット', shortcut: 'Ctrl+Shift+I', action: () => toggleAIPanel() },
         {
@@ -1868,7 +1889,8 @@ function buildMenuDefinition() {
       ],
     },
     {
-      label: 'ヘルプ',
+      label: 'ヘルプ(H)',
+      accessKey: 'H',
       items: [
         { label: '設定', shortcut: 'Ctrl+,', action: openSettings },
         { label: 'モード切替', shortcut: 'Ctrl+Shift+M', action: cycleMode },
@@ -2148,11 +2170,31 @@ function smartClose() {
   }
 }
 
+// Alt の単押しでメニューバーを開く（Windows のメニューバーと同じ作法）。
+// Alt+文字は組み合わせなので、Emacs モードでは M-f 等を奪わないよう
+// 単押しだけを有効にする。
+const altTap = createAltTap({ onTap: () => focusMenuBar() });
+
 function handleGlobalKeys(e) {
+  // メニューが開いている間は左右で隣のメニューへ移る
+  if (isMenuOpen() && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+    if (moveOpenMenu(e.key === 'ArrowRight' ? 1 : -1)) {
+      e.preventDefault();
+      return;
+    }
+  }
+
   // Alt+key shortcuts (browser-friendly fallbacks; harmless in Tauri)
   if (e.altKey && !e.ctrlKey) {
-    // In Emacs mode, let Alt-* fall through to CodeMirror (M-b/f/v/d/w etc.)
+    // In Emacs mode, let Alt-* fall through to CodeMirror (M-b/f/v/d/w etc.).
+    // 単押し（altTap）だけは keyup 側で拾うので、ここで return してよい。
     if (getMode() === 'emacs') return;
+    // Alt+F/E/V/... はメニューバーのアクセスキー。該当が無ければ従来の
+    // Alt ショートカット（Alt+N/T/W/O）に落ちる。
+    if (e.key.length === 1 && openMenuByAccessKey(e.key)) {
+      e.preventDefault();
+      return;
+    }
     switch (e.key) {
       case 'n':
       case 't':
