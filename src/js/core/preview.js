@@ -5,6 +5,7 @@ import { attachPanZoom } from './svg-panzoom.js';
 import { highlightCode } from './code-highlight.js';
 import { isLocalTauri } from '../backend.js';
 import { openExternal, isExternalUrl } from './external-link.js';
+import { resolveLinkTarget } from './link-target.js';
 import {
   isQuartoFile,
   applyQuartoExtensions,
@@ -217,6 +218,39 @@ function handlePreviewKeys(e) {
  * @param {Element|null} el
  * @returns {number|null}
  */
+/**
+ * Base path of the document rendered into a container. Recorded per container
+ * at render time so panes showing different files resolve their own links;
+ * falls back to the module-level path for callers that never rendered.
+ */
+function basePathOf(container) {
+  return (container && container.dataset && container.dataset.basePath) || currentBasePath;
+}
+
+/**
+ * CSS.escape with a fallback for environments that lack it (jsdom). The
+ * fallback escapes every character outside the identifier-safe set, which is
+ * enough for the heading slugs and hand-written ids we look up.
+ */
+function cssEscape(id) {
+  if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') return CSS.escape(id);
+  return String(id).replace(/[^\p{L}\p{N}_-]/gu, (ch) => `\\${ch}`);
+}
+
+/**
+ * Scroll a preview container to the element matching an anchor id.
+ * @returns {boolean} true when a matching element was found.
+ */
+export function scrollToAnchor(container, id) {
+  if (!container || !id) return false;
+  // Prefer a strict id match; escaping guards ids with punctuation.
+  const esc = cssEscape(id);
+  const target = container.querySelector(`#${esc}`) || container.querySelector(`[name="${esc}"]`);
+  if (!target) return false;
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return true;
+}
+
 export function sourceLineFromElement(el) {
   const node = el && el.closest ? el.closest('[data-source-line]') : null;
   if (!node) return null;
@@ -228,7 +262,10 @@ export function sourceLineFromElement(el) {
  * Initialise a preview container (vim-like key navigation).
  * Can be called multiple times for different containers (one per pane).
  * @param {HTMLElement} container
- * @param {{ onSourceJump?: (line: number, container: HTMLElement) => void }} [opts]
+ * @param {{
+ *   onSourceJump?: (line: number, container: HTMLElement) => void,
+ *   onFileLink?: (target: {path: string, hash: string}, container: HTMLElement) => void,
+ * }} [opts]
  */
 export function initPreview(container, opts = {}) {
   ensureMd();
@@ -255,7 +292,8 @@ export function initPreview(container, opts = {}) {
   //
   //   http/https/mailto → OS default browser
   //   #anchor           → scroll inside the preview to the matching id
-  //   anything else     → no-op (relative paths etc. are ignored for now)
+  //   local file path   → hand to onFileLink so the app opens it in a tab
+  //   anything else     → no-op
   container.addEventListener('click', (e) => {
     const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
     if (!a) return;
@@ -268,19 +306,13 @@ export function initPreview(container, opts = {}) {
       return;
     }
     if (href.startsWith('#')) {
-      const id = decodeURIComponent(href.slice(1));
-      if (!id) return;
-      // Prefer a strict id match; CSS.escape guards ids with punctuation.
-      const target =
-        container.querySelector(`#${CSS.escape(id)}`) ||
-        container.querySelector(`[name="${CSS.escape(id)}"]`);
-      if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
+      scrollToAnchor(container, decodeURIComponent(href.slice(1)));
       return;
     }
-    // Relative paths or other schemes: silently swallow to avoid webview
-    // navigation. (Opening linked .md files in a new tab is a future feature.)
+    // Relative/absolute file path: resolve against the document's directory
+    // and let the app open it (GitHub-style browsing between files).
+    const target = resolveLinkTarget(href, basePathOf(container));
+    if (target && opts.onFileLink) opts.onFileLink(target, container);
   });
 }
 
@@ -294,6 +326,7 @@ export function renderMarkdown(text, basePath = '', container = null) {
   ensureMd();
   if (!container) return;
   currentBasePath = basePath;
+  container.dataset.basePath = basePath || '';
   const html = md.render(text);
   container.innerHTML = html;
 }
@@ -306,6 +339,7 @@ export function renderQuartoMarkdown(text, basePath = '', container = null) {
   ensureMd();
   if (!container) return;
   currentBasePath = basePath;
+  container.dataset.basePath = basePath || '';
   qmdFrontMatterHtml = ''; // reset; set by the front-matter callback during render
   const body = qmdMd.render(text);
   container.innerHTML = qmdFrontMatterHtml + body;

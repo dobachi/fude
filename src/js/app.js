@@ -47,6 +47,7 @@ import {
   setMermaidEnabled,
   setCodeHighlightEnabled,
   renderPreview,
+  scrollToAnchor,
 } from './core/preview.js';
 import {
   openTab,
@@ -593,7 +594,11 @@ async function init() {
 
   // Init preview for the default pane
   const previewEl = document.querySelector('.pane[data-pane-id="default"] .preview-pane');
-  if (previewEl) initPreview(previewEl, { onSourceJump: handlePreviewSourceJump });
+  if (previewEl)
+    initPreview(previewEl, {
+      onSourceJump: handlePreviewSourceJump,
+      onFileLink: handlePreviewFileLink,
+    });
 
   initPanes();
 
@@ -604,6 +609,7 @@ async function init() {
     onPreviewScroll: handlePreviewScroll,
     onSelectionChange: handleSelectionChange,
     onSourceJump: handlePreviewSourceJump,
+    onFileLink: handlePreviewFileLink,
     onEditorCreated: () => {
       reapplyMode();
     },
@@ -1154,6 +1160,72 @@ async function handleFileSelect(path) {
     console.error('Failed to open file:', e);
     showToast(`ファイルを開けませんでした: ${e?.message || e}`, { type: 'error', duration: 6000 });
   }
+}
+
+/**
+ * Open a file linked from the preview (GitHub-style browsing between files).
+ * Text files land in a tab; anything unreadable as text (PDF, office docs, a
+ * directory) is handed to the OS default application. `hash` scrolls the newly
+ * rendered preview to the matching heading anchor.
+ * @param {{path: string, hash: string}} target
+ */
+async function handlePreviewFileLink(target) {
+  if (!target || !target.path) return;
+  const { path, hash } = target;
+
+  if (isImagePath(path)) {
+    openTab(path, '', { kind: 'image' });
+    highlightFile(path);
+    if (currentViewMode() === 'preview') setViewMode('split');
+    return;
+  }
+
+  let content;
+  try {
+    content = await backend.readFile(path);
+  } catch (e) {
+    // Not readable as UTF-8 text (binary, directory, or missing) - let the OS
+    // decide what to do with it. A genuinely missing path fails here too and
+    // surfaces as a toast.
+    const opened = await openWithDefaultApp(path);
+    if (!opened) {
+      console.error('Failed to open linked file:', e);
+      showToast(`リンク先を開けませんでした: ${path}`, { type: 'error', duration: 6000 });
+    }
+    return;
+  }
+
+  const existed = getTabByPath(path);
+  const tab = openTab(path, content);
+  if (!existed && tab) await markTabSynced(tab.id, content);
+  highlightFile(path);
+  if (hash) scrollPreviewToAnchor(hash);
+}
+
+/** Open a path with the OS default application. Returns false on failure. */
+async function openWithDefaultApp(path) {
+  if (!isLocalTauri()) return false;
+  try {
+    const { openPath: openWithOs } = await import('@tauri-apps/plugin-opener');
+    await openWithOs(path);
+    return true;
+  } catch (e) {
+    console.error('openPath failed:', e);
+    return false;
+  }
+}
+
+/**
+ * Scroll the active pane's preview to an anchor id. The preview for a freshly
+ * opened tab renders asynchronously, so retry for a short while before giving
+ * up rather than scrolling an empty container.
+ */
+function scrollPreviewToAnchor(hash, attempt = 0) {
+  const pane = getActivePane();
+  const container = pane && pane.previewContainer;
+  if (container && scrollToAnchor(container, hash)) return;
+  if (attempt >= 10) return;
+  setTimeout(() => scrollPreviewToAnchor(hash, attempt + 1), 50);
 }
 
 // ── Right-click context menus ──────────────────────────────
