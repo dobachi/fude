@@ -18,7 +18,7 @@ let enginePromise = null;
 let engineTheme = null; // theme the current engine was initialized with
 let seq = 0;
 const pending = new Map(); // id -> { resolve, reject }
-const cache = new Map(); // `${theme}\n${text}` -> sanitized svg
+const cache = new Map(); // `${theme}\n${text}` -> Promise<sanitized svg>
 
 // The runner loads the Mermaid UMD bundle (which sets a `mermaid` global) from a
 // blob URL, initializes it with startOnLoad off and securityLevel 'strict', then
@@ -170,7 +170,7 @@ async function ensureEngine(theme) {
   return enginePromise;
 }
 
-async function doRenderMermaid(text, theme, cacheKey) {
+async function doRenderMermaid(text, theme) {
   await ensureEngine(theme);
   const id = ++seq;
   const svg = await new Promise((resolve, reject) => {
@@ -183,9 +183,7 @@ async function doRenderMermaid(text, theme, cacheKey) {
       }
     }, RENDER_TIMEOUT_MS);
   });
-  const clean = sanitizeMermaidSvg(svg);
-  cache.set(cacheKey, clean);
-  return clean;
+  return sanitizeMermaidSvg(svg);
 }
 
 // Renders share one iframe, so serialize them to avoid cross-render races.
@@ -201,12 +199,38 @@ let renderChain = Promise.resolve();
  */
 export function renderMermaid(text, theme = currentMermaidTheme()) {
   const cacheKey = `${theme}\n${text}`;
-  if (cache.has(cacheKey)) return cache.get(cacheKey);
-  const run = renderChain.then(() => doRenderMermaid(text, theme, cacheKey));
+  const run = memoizeRender(cache, cacheKey, () =>
+    renderChain.then(() => doRenderMermaid(text, theme)),
+  );
   renderChain = run.then(
     () => {},
     () => {},
   );
+  return run;
+}
+
+/**
+ * Memoize an async producer by key. The PROMISE is cached, never its resolved
+ * value — caching the string made a second render of the same diagram return a
+ * plain string, and callers doing `.then()` on it blew up with
+ * "renderMermaid(...).then is not a function".
+ *
+ * Concurrent duplicate calls also share one render, and failures are evicted so
+ * a transient error (engine not installed yet, timeout) doesn't poison the
+ * cache forever.
+ * @param {Map<string, Promise<*>>} cache
+ * @param {string} key
+ * @param {() => Promise<*>} produce
+ * @returns {Promise<*>} always a promise, hit or miss
+ */
+export function memoizeRender(cache, key, produce) {
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const run = produce();
+  cache.set(key, run);
+  run.catch(() => {
+    if (cache.get(key) === run) cache.delete(key);
+  });
   return run;
 }
 
