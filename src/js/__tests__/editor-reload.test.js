@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
-import { setContentFromDisk } from '../core/editor.js';
+import { createEditor, setContentFromDisk } from '../core/editor.js';
+import { initOutline, updateOutline } from '../core/outline.js';
 
 let containers = [];
 
@@ -78,5 +79,48 @@ describe('setContentFromDisk', () => {
     const line = view.state.doc.lineAt(newPos);
     expect(line.number).toBe(2);
     expect(newPos - line.from).toBeLessThanOrEqual(2); // col clamped to line length
+  });
+
+  it('does not fire onChange (so callers must refresh the outline themselves)', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    containers.push(container);
+    const onChange = vi.fn();
+    const view = createEditor(container, '# Old', onChange);
+
+    setContentFromDisk(view, '# New\n## Added');
+
+    // The reload annotation suppresses onChange, which is exactly why the app's
+    // disk-reload path can't rely on it to update the outline. Regression guard
+    // for a stale outline after an external file change.
+    expect(onChange).not.toHaveBeenCalled();
+    expect(view.state.doc.toString()).toBe('# New\n## Added');
+  });
+
+  it('outline reflects reloaded content when explicitly refreshed', () => {
+    // Mirrors applyReloadToAllPanes: after setContentFromDisk, the active tab's
+    // outline is rebuilt from the new content via updateOutline().
+    const ol = document.createElement('div');
+    document.body.appendChild(ol);
+    containers.push(ol);
+    initOutline(ol, {});
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    containers.push(container);
+    const view = createEditor(container, '# Old title', null);
+    updateOutline(view.state.doc.toString());
+    expect([...ol.querySelectorAll('.outline-item')].map((el) => el.textContent)).toEqual([
+      'Old title',
+    ]);
+
+    const reloaded = '# New title\n## New section';
+    setContentFromDisk(view, reloaded);
+    updateOutline(reloaded); // the fix
+
+    expect([...ol.querySelectorAll('.outline-item')].map((el) => el.textContent)).toEqual([
+      'New title',
+      'New section',
+    ]);
   });
 });
