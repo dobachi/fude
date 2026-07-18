@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeManualCheck } from '../core/updater.js';
+import { describeManualCheck, describeInstallError, isLinuxPlatform } from '../core/updater.js';
 
 describe('describeManualCheck', () => {
   it('reports unsupported (browser) mode as an error', () => {
@@ -32,5 +32,55 @@ describe('describeManualCheck', () => {
   it('prioritizes the unsupported case even if an error is present', () => {
     const r = describeManualCheck({ isDesktop: false, update: null, error: 'boom' });
     expect(r.kind).toBe('unsupported');
+  });
+});
+
+describe('describeInstallError', () => {
+  it('エラーメッセージをそのまま詳細として返す', () => {
+    const r = describeInstallError(new Error('exit code 127'));
+    expect(r.detail).toBe('exit code 127');
+  });
+
+  it('message を持たない値も文字列化する', () => {
+    expect(describeInstallError('boom').detail).toBe('boom');
+    expect(describeInstallError(null).detail).toBe('不明なエラー');
+    expect(describeInstallError(undefined).detail).toBe('不明なエラー');
+  });
+
+  // WSL の deb 版では pkexec が認証できず、アプリ内更新は構造的に成功しない。
+  // 「再試行してください」だけを出すと永久に解決しないので、手動更新へ誘導する。
+  it('Linux では管理者権限と手動更新に触れる', () => {
+    const r = describeInstallError(new Error('x'), { isLinux: true });
+    expect(r.hint).toContain('管理者権限');
+    expect(r.hint).toContain('手動');
+  });
+
+  it('Linux 以外では再試行と手動更新を案内する', () => {
+    const r = describeInstallError(new Error('x'), { isLinux: false });
+    expect(r.hint).toContain('再試行');
+    expect(r.hint).not.toContain('WSL');
+  });
+
+  it('既定は Linux 以外の文言', () => {
+    expect(describeInstallError(new Error('x')).hint).toContain('再試行');
+  });
+});
+
+describe('isLinuxPlatform', () => {
+  it('Linux を判定する', () => {
+    expect(isLinuxPlatform({ platform: 'Linux x86_64', userAgent: 'X11; Linux' })).toBe(true);
+  });
+
+  it('Android は Linux 扱いしない', () => {
+    expect(isLinuxPlatform({ platform: 'Linux armv8l', userAgent: 'Android 14' })).toBe(false);
+  });
+
+  it('Windows / macOS は false', () => {
+    expect(isLinuxPlatform({ platform: 'Win32', userAgent: 'Windows NT' })).toBe(false);
+    expect(isLinuxPlatform({ platform: 'MacIntel', userAgent: 'Macintosh' })).toBe(false);
+  });
+
+  it('navigator が無くても壊れない', () => {
+    expect(isLinuxPlatform(null)).toBe(false);
   });
 });
