@@ -41,7 +41,14 @@ struct WatcherState {
 static STATE: OnceLock<Mutex<Option<WatcherState>>> = OnceLock::new();
 
 fn lock_state() -> std::sync::MutexGuard<'static, Option<WatcherState>> {
-    STATE.get_or_init(|| Mutex::new(None)).lock().unwrap()
+    // Recover from poisoning instead of propagating it. The guarded state is a
+    // set of refcount maps, not an invariant a panic can leave half-broken in a
+    // dangerous way — and treating a poisoned lock as fatal would mean one
+    // panic anywhere disables file watching for the rest of the process.
+    STATE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 fn canonicalize(path: &Path) -> PathBuf {
@@ -306,6 +313,21 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// These tests drive the process-wide `STATE`, so they must not run at the
+    /// same time: each one resets the shared watcher, which would yank the
+    /// state out from under a concurrently running test (that is exactly how
+    /// this suite started failing in CI — an assert saw `None` instead of its
+    /// own refcount, then the resulting panic poisoned the lock for the other
+    /// test). Every test touching the global watcher takes this guard first.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Serialize a test against every other test that uses the global watcher.
+    /// Poisoning is recovered from so one failing test reports its own real
+    /// assertion rather than cascading `PoisonError`s into the others.
+    fn lock_tests() -> std::sync::MutexGuard<'static, ()> {
+        TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Install a real (event-discarding) watcher without needing a Tauri AppHandle.
     fn init_test_watcher() {
         let watcher = notify::recommended_watcher(|_res: Result<Event, notify::Error>| {}).unwrap();
@@ -324,6 +346,7 @@ mod tests {
 
     #[test]
     fn multi_watch_refcounts_until_last_unwatch() {
+        let _guard = lock_tests();
         init_test_watcher();
 
         let dir = std::env::temp_dir().join("fude_fw_refcount_test");
@@ -366,6 +389,7 @@ mod tests {
 
     #[test]
     fn vault_watch_refcounts_until_last_unwatch() {
+        let _guard = lock_tests();
         init_test_watcher();
 
         let dir = std::env::temp_dir().join("fude_fw_vault_test");
