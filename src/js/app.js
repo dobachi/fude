@@ -715,6 +715,12 @@ async function init() {
   const sidebarOpen = document.getElementById('sidebar-open');
   if (sidebarOpen) sidebarOpen.addEventListener('click', toggleSidebar);
 
+  // タブバー右端の表示切替（マウス操作用）。キーボードの
+  // Ctrl+Shift+J/K/L と同じ setViewMode を呼ぶだけで、状態は一箇所に保つ。
+  document.querySelectorAll('.view-mode-btn').forEach((btn) => {
+    btn.addEventListener('click', () => setViewMode(btn.dataset.mode));
+  });
+
   // Menu bar (hidden by default; toggled with Ctrl+Shift+B).
   const menuBarEl = document.getElementById('menu-bar');
   if (menuBarEl) initMenuBar(menuBarEl, buildMenuDefinition());
@@ -1618,7 +1624,19 @@ async function manualReload() {
 // ── View mode ──────────────────────────────────────────────
 // Each pane reflects the view mode of the tab it currently displays, so
 // switching tabs (or focusing a different pane) shows that file's own layout.
+/** タブバーのボタンに現在の表示モードを反映する */
+function syncViewModeButtons() {
+  const mode = currentViewMode();
+  document.querySelectorAll('.view-mode-btn').forEach((btn) => {
+    const on = btn.dataset.mode === mode;
+    btn.classList.toggle('active', on);
+    // 現在のモードを支援技術にも伝える（見た目だけの active に留めない）
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
 function applyViewMode() {
+  syncViewModeButtons();
   const allPanes = panesModule.getAllPanes();
   for (const p of allPanes) {
     const mode = paneViewMode(p);

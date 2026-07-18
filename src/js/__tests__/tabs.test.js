@@ -237,3 +237,50 @@ describe('tabs module', () => {
     expect(session[1]).toMatchObject({ path: '/b.md', view_mode: 'preview' });
   });
 });
+
+// タブバー右端に固定した表示切替ボタン（.tab-bar-actions）との共存。
+// タブは常にアクションの前へ入れる必要がある — 後ろに積むとタブが増えた
+// ときにボタンが右端から押し出されて隠れてしまう。
+describe('tab bar actions（右端固定の表示切替）', () => {
+  let mod;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    document.body.innerHTML =
+      '<div id="tab-bar">' +
+      '<button id="sidebar-open"></button>' +
+      '<div id="view-mode-switch" class="tab-bar-actions"></div>' +
+      '</div>';
+    mod = await import('../core/tabs.js');
+  });
+
+  it('タブはアクションより前に描画される', () => {
+    mod.openTab('/a.md', '');
+    const bar = document.getElementById('tab-bar');
+    expect(bar.lastElementChild.id).toBe('view-mode-switch');
+  });
+
+  it('タブが増えてもアクションが末尾のまま', () => {
+    mod.openTab('/a.md', '');
+    mod.openTab('/b.md', '');
+    mod.openTab('/c.md', '');
+    const bar = document.getElementById('tab-bar');
+    expect(bar.querySelectorAll('.tab')).toHaveLength(3);
+    expect(bar.lastElementChild.id).toBe('view-mode-switch');
+  });
+
+  it('タブを閉じ切ってもアクションは消えない（.tab だけを消すため）', () => {
+    const t = mod.openTab('/a.md', '');
+    mod.closeTab(t.id);
+    expect(document.getElementById('view-mode-switch')).not.toBeNull();
+    expect(document.getElementById('sidebar-open')).not.toBeNull();
+  });
+
+  it('アクションが無い場合も従来どおり末尾に追加する（後方互換）', async () => {
+    vi.resetModules();
+    document.body.innerHTML = '<div id="tab-bar"></div>';
+    const m2 = await import('../core/tabs.js');
+    m2.openTab('/a.md', '');
+    expect(document.querySelectorAll('#tab-bar .tab')).toHaveLength(1);
+  });
+});

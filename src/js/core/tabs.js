@@ -316,6 +316,10 @@ function renderTabBar() {
   // Remove only tab elements, preserve the sidebar-open button
   tabBar.querySelectorAll('.tab').forEach((el) => el.remove());
 
+  // Tabs go before the pinned actions (view-mode switch) so those stay at the
+  // right edge no matter how many tabs are open.
+  const actions = tabBar.querySelector('.tab-bar-actions');
+
   tabs.forEach((tab) => {
     const el = document.createElement('div');
     el.className = `tab${tab.id === activeTabId ? ' active' : ''}${tab.dirty ? ' dirty' : ''}`;
@@ -357,7 +361,8 @@ function renderTabBar() {
       if (onTabContextMenu) onTabContextMenu(tab.id, e.clientX, e.clientY);
     });
 
-    tabBar.appendChild(el);
+    if (actions) tabBar.insertBefore(el, actions);
+    else tabBar.appendChild(el);
   });
 }
 

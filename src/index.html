@@ -86,6 +86,50 @@
             <button id="sidebar-open" class="icon-btn sidebar-open-btn" aria-label="Open sidebar">
               &#x2630;
             </button>
+            <div
+              id="view-mode-switch"
+              class="tab-bar-actions"
+              role="group"
+              aria-label="表示の切り替え"
+            >
+              <button
+                class="view-mode-btn"
+                data-mode="editor"
+                type="button"
+                title="エディタのみ (Ctrl+Shift+J)"
+                aria-label="エディタのみ"
+              >
+                <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                  <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+                </svg>
+              </button>
+              <button
+                class="view-mode-btn"
+                data-mode="split"
+                type="button"
+                title="分割 (Ctrl+Shift+K)"
+                aria-label="分割"
+              >
+                <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                  <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+                  <line x1="8" y1="2.5" x2="8" y2="13.5" />
+                </svg>
+              </button>
+              <button
+                class="view-mode-btn"
+                data-mode="preview"
+                type="button"
+                title="プレビューのみ (Ctrl+Shift+L)"
+                aria-label="プレビューのみ"
+              >
+                <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                  <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+                  <line x1="4" y1="6" x2="12" y2="6" />
+                  <line x1="4" y1="9" x2="12" y2="9" />
+                  <line x1="4" y1="12" x2="9" y2="12" />
+                </svg>
+              </button>
+            </div>
           </div>
           <div id="workspace">
             <div class="pane active view-split" data-pane-id="default">
