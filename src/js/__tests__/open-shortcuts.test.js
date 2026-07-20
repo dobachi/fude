@@ -3,6 +3,7 @@ import {
   isOpenFileShortcut,
   isOpenFolderShortcut,
   isGoToPathShortcut,
+  isPrintShortcut,
 } from '../core/open-shortcuts.js';
 
 const ev = (over = {}) => ({
@@ -60,5 +61,24 @@ describe('isGoToPathShortcut', () => {
       false,
     );
     expect(isGoToPathShortcut(ev({ ctrlKey: true, shiftKey: true, key: 'O' }))).toBe(false);
+  });
+});
+
+describe('isPrintShortcut', () => {
+  it('matches Ctrl+P / Cmd+P in normal mode', () => {
+    expect(isPrintShortcut(ev({ ctrlKey: true, key: 'p' }), 'normal')).toBe(true);
+    expect(isPrintShortcut(ev({ metaKey: true, key: 'P' }), 'normal')).toBe(true);
+  });
+
+  it('does not match in vim/emacs (Ctrl-P is an editor key there)', () => {
+    expect(isPrintShortcut(ev({ ctrlKey: true, key: 'p' }), 'vim')).toBe(false);
+    expect(isPrintShortcut(ev({ ctrlKey: true, key: 'p' }), 'emacs')).toBe(false);
+  });
+
+  it('rejects Shift/Alt combos and other keys', () => {
+    expect(isPrintShortcut(ev({ ctrlKey: true, shiftKey: true, key: 'P' }), 'normal')).toBe(false);
+    expect(isPrintShortcut(ev({ ctrlKey: true, altKey: true, key: 'p' }), 'normal')).toBe(false);
+    expect(isPrintShortcut(ev({ ctrlKey: true, key: 'o' }), 'normal')).toBe(false);
+    expect(isPrintShortcut(ev({ key: 'p' }), 'normal')).toBe(false); // no ctrl
   });
 });

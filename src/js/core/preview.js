@@ -403,7 +403,7 @@ function renderMermaidDocument(content, container) {
   holder.textContent = '⏳ Mermaid…';
   container.appendChild(holder);
 
-  import('../features/mermaid/adapter.js')
+  return import('../features/mermaid/adapter.js')
     .then((adapter) => adapter.renderMermaid(content))
     .then((svg) => {
       if (!holder.isConnected) return;
@@ -426,7 +426,7 @@ function renderPlantumlDocument(content, container, baseDir) {
   holder.textContent = '⏳ PlantUML…';
   container.appendChild(holder);
 
-  import('../features/plantuml/adapter.js')
+  return import('../features/plantuml/adapter.js')
     .then((adapter) => adapter.renderPlantUML(content, baseDir))
     .then((svg) => {
       if (!holder.isConnected) return;
@@ -450,22 +450,28 @@ function renderPlantumlDocument(content, container, baseDir) {
  * @param {HTMLElement} container
  * @param {string} [filePath]
  */
+/**
+ * Render a document into `container`. Returns a Promise that resolves once the
+ * asynchronous enhancement passes (diagrams → SVG, syntax highlight) have fully
+ * completed, so callers that need a finished snapshot (e.g. printing) can
+ * `await` it. Live callers may ignore the return value; enhancement still runs
+ * in the background exactly as before.
+ * @returns {Promise<void>|undefined}
+ */
 export function renderPreview(content, basePath, container, filePath) {
   if (!container) return;
   if (plantumlEnabled && isPlantumlFile(filePath)) {
-    renderPlantumlDocument(content, container, basePath);
-    return;
+    return renderPlantumlDocument(content, container, basePath);
   }
   if (mermaidEnabled && isMermaidFile(filePath)) {
-    renderMermaidDocument(content, container);
-    return;
+    return renderMermaidDocument(content, container);
   }
   if (isQuartoFile(filePath)) {
     renderQuartoMarkdown(content, basePath, container);
   } else {
     renderMarkdown(content, basePath, container);
   }
-  enhancePreview(container);
+  return enhancePreview(container);
 }
 
 /**
@@ -530,6 +536,7 @@ async function renderPlantumlBlocks(container) {
     return;
   }
 
+  const jobs = [];
   codes.forEach((code) => {
     const pre = code.parentElement;
     if (!pre || pre.dataset.pumlHandled) return;
@@ -543,19 +550,23 @@ async function renderPlantumlBlocks(container) {
     holder.textContent = '⏳ PlantUML…';
     pre.replaceWith(holder);
 
-    adapter
-      .renderPlantUML(text, currentBasePath)
-      .then((svg) => {
-        if (!holder.isConnected) return;
-        holder.innerHTML = svg;
-        attachPanZoom(holder);
-      })
-      .catch((err) => {
-        if (!holder.isConnected) return;
-        holder.classList.add('puml-error');
-        holder.textContent = `PlantUML error: ${err.message}`;
-      });
+    jobs.push(
+      adapter
+        .renderPlantUML(text, currentBasePath)
+        .then((svg) => {
+          if (!holder.isConnected) return;
+          holder.innerHTML = svg;
+          attachPanZoom(holder);
+        })
+        .catch((err) => {
+          if (!holder.isConnected) return;
+          holder.classList.add('puml-error');
+          holder.textContent = `PlantUML error: ${err.message}`;
+        }),
+    );
   });
+  // See renderMermaidBlocks: await so an awaiting caller gets finished SVG.
+  await Promise.all(jobs);
 }
 
 /**
@@ -577,6 +588,7 @@ async function renderMermaidBlocks(container) {
     return;
   }
 
+  const jobs = [];
   codes.forEach((code) => {
     const pre = code.parentElement;
     if (!pre || pre.dataset.mermaidHandled) return;
@@ -590,19 +602,25 @@ async function renderMermaidBlocks(container) {
     holder.textContent = '⏳ Mermaid…';
     pre.replaceWith(holder);
 
-    adapter
-      .renderMermaid(text)
-      .then((svg) => {
-        if (!holder.isConnected) return;
-        holder.innerHTML = svg;
-        attachPanZoom(holder);
-      })
-      .catch((err) => {
-        if (!holder.isConnected) return;
-        holder.classList.add('mermaid-error');
-        holder.textContent = `Mermaid error: ${err.message}`;
-      });
+    jobs.push(
+      adapter
+        .renderMermaid(text)
+        .then((svg) => {
+          if (!holder.isConnected) return;
+          holder.innerHTML = svg;
+          attachPanZoom(holder);
+        })
+        .catch((err) => {
+          if (!holder.isConnected) return;
+          holder.classList.add('mermaid-error');
+          holder.textContent = `Mermaid error: ${err.message}`;
+        }),
+    );
   });
+  // Await SVG resolution so callers that await the render (e.g. printing) get a
+  // fully-rendered snapshot. Live callers fire this unawaited, so the preview
+  // UI still shows placeholders immediately and fills in progressively.
+  await Promise.all(jobs);
 }
 
 export function setTheme(_theme) {

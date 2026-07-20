@@ -46,3 +46,23 @@ export function isOpenFolderShortcut(e) {
 export function isGoToPathShortcut(e) {
   return (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (e.key === 'p' || e.key === 'P');
 }
+
+/**
+ * Should a keydown trigger "Print"? Bound to Ctrl/Cmd+P (no Shift/Alt) in
+ * NORMAL mode only — in vim/emacs bare Ctrl-P is an editor key (emacs
+ * previous-line), so those modes print via the File menu instead. Limiting it
+ * to normal mode mirrors isOpenFileShortcut (Ctrl+O).
+ *
+ * @param {KeyboardEvent} e
+ * @param {string} mode current key mode ('normal' | 'vim' | 'emacs')
+ * @returns {boolean}
+ */
+export function isPrintShortcut(e, mode) {
+  return (
+    (e.ctrlKey || e.metaKey) &&
+    !e.shiftKey &&
+    !e.altKey &&
+    (e.key === 'p' || e.key === 'P') &&
+    mode === 'normal'
+  );
+}

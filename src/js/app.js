@@ -132,7 +132,7 @@ import { initKeymode, reapplyMode, cycleMode, setAppVersion, getMode } from './c
 import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
-import { isOpenFileShortcut, isGoToPathShortcut } from './core/open-shortcuts.js';
+import { isOpenFileShortcut, isGoToPathShortcut, isPrintShortcut } from './core/open-shortcuts.js';
 import { normalizeInputPath } from './core/pathnorm.js';
 
 import { isLocalTauri } from './backend.js';
@@ -1468,6 +1468,33 @@ async function handleGoToPath() {
   }
 }
 
+// ── Print (v1: rendered preview) ───────────────────────────
+let _printer = null;
+async function getPrinter() {
+  if (_printer) return _printer;
+  const { createPrinter } = await import('./features/print/print.js');
+  _printer = createPrinter({
+    renderPreview,
+    dirname: dirnameOf,
+    onError: (m) => showToast(m, { type: 'error', duration: 6000 }),
+    cssHref: 'style.css',
+  });
+  return _printer;
+}
+
+/** Print the active document's rendered preview (works in any view mode). */
+async function printActive() {
+  const tab = getActiveTab();
+  if (!tab) return;
+  try {
+    const printer = await getPrinter();
+    await printer.printPreview(tab);
+  } catch (e) {
+    console.error('Print failed:', e);
+    showToast(`印刷に失敗しました: ${e?.message || e}`, { type: 'error', duration: 6000 });
+  }
+}
+
 /** Render an image file into a pane's main area as a pan/zoom viewer. */
 function renderImageTab(pane, tab) {
   if (pane.previewContainer) pane.previewContainer.innerHTML = '';
@@ -1863,6 +1890,8 @@ function buildMenuDefinition() {
           action: () => performSave({ forceDialog: true }),
         },
         { label: '再読込', shortcut: 'Ctrl+Shift+R', action: manualReload },
+        { separator: true },
+        { label: '印刷（プレビュー）', shortcut: 'Ctrl+P', action: printActive },
         { separator: true },
         { label: '閉じる', shortcut: 'Ctrl+Shift+W', action: smartClose },
       ],
@@ -2339,6 +2368,16 @@ function handleGlobalKeys(e) {
       e.preventDefault();
       e.stopPropagation();
       handleOpenFile();
+      return;
+    }
+
+    // Ctrl+P = Print (normal mode only). Intercept so the browser doesn't print
+    // the whole app window; vim/emacs keep Ctrl-P for the editor and print via
+    // the File menu instead.
+    if (isPrintShortcut(e, getMode())) {
+      e.preventDefault();
+      e.stopPropagation();
+      printActive();
       return;
     }
 
