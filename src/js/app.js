@@ -132,7 +132,8 @@ import { initKeymode, reapplyMode, cycleMode, setAppVersion, getMode } from './c
 import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
-import { isOpenFileShortcut } from './core/open-shortcuts.js';
+import { isOpenFileShortcut, isGoToPathShortcut } from './core/open-shortcuts.js';
+import { normalizeInputPath } from './core/pathnorm.js';
 
 import { isLocalTauri } from './backend.js';
 import { openHelp } from './help.js';
@@ -1420,21 +1421,50 @@ function handleTabContextMenu(tabId, x, y) {
   showMenu(x, y, items);
 }
 
+/**
+ * Open a path, auto-detecting whether it is a folder (→ load as vault) or a
+ * file (→ open in a tab). Resolves to `true` on success, `false` if the path
+ * could not be opened as either (e.g. it does not exist). Callers that don't
+ * care about the outcome can ignore the return value.
+ */
 async function openPath(path) {
   try {
     const tree = await backend.readDirTree(path, getShowAllFiles());
     vaultPath = path;
     loadDirectory(tree);
     watchVault(vaultPath);
+    return true;
   } catch {
     try {
       const existed = getTabByPath(path);
       const content = await backend.readFile(path);
       const tab = openTab(path, content);
       if (!existed && tab) await markTabSynced(tab.id, content);
+      return true;
     } catch (e) {
       console.error('Failed to open path:', e);
+      return false;
     }
+  }
+}
+
+// ── Go to path (open a file or folder by typing its path) ──
+async function handleGoToPath() {
+  const raw = await promptDialog('開くパスを入力（ファイル / フォルダ）', vaultPath || '', '開く');
+  if (raw == null) return; // cancelled
+  let home;
+  try {
+    home = await backend.getOpenDir();
+  } catch {
+    home = '';
+  }
+  const path = normalizeInputPath(raw, home);
+  if (!path) return;
+  const ok = await openPath(path);
+  if (ok) {
+    scheduleSessionSave();
+  } else {
+    showToast(`開けませんでした: ${path}`, { type: 'error', duration: 6000 });
   }
 }
 
@@ -1824,6 +1854,7 @@ function buildMenuDefinition() {
         },
         { label: 'ファイルを開く', shortcut: 'Ctrl+O', action: handleOpenFile },
         { label: 'フォルダを開く', shortcut: 'Ctrl+Shift+O', action: handleOpenFolder },
+        { label: 'パスを開く', shortcut: 'Ctrl+Shift+P', action: handleGoToPath },
         { separator: true },
         { label: '保存', shortcut: 'Ctrl+S', action: () => performSave({}) },
         {
@@ -2407,6 +2438,16 @@ function handleGlobalKeys(e) {
     e.preventDefault();
     e.stopPropagation();
     cycleMode();
+    return;
+  }
+
+  // Go to path: Ctrl+Shift+P — open a file or folder by typing its path.
+  // Works in every mode; bare Ctrl+P is left to the editor (emacs previous-line
+  // / browser print).
+  if (isGoToPathShortcut(e)) {
+    e.preventDefault();
+    e.stopPropagation();
+    handleGoToPath();
     return;
   }
 

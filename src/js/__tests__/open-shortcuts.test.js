@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { isOpenFileShortcut, isOpenFolderShortcut } from '../core/open-shortcuts.js';
+import {
+  isOpenFileShortcut,
+  isOpenFolderShortcut,
+  isGoToPathShortcut,
+} from '../core/open-shortcuts.js';
 
 const ev = (over = {}) => ({
   ctrlKey: false,
@@ -40,5 +44,21 @@ describe('isOpenFolderShortcut', () => {
     expect(isOpenFolderShortcut(ev({ ctrlKey: true }))).toBe(false);
     expect(isOpenFolderShortcut(ev({ ctrlKey: true, shiftKey: true, altKey: true }))).toBe(false);
     expect(isOpenFolderShortcut(ev({ ctrlKey: true, shiftKey: true, key: 'k' }))).toBe(false);
+  });
+});
+
+describe('isGoToPathShortcut', () => {
+  it('matches Ctrl+Shift+P / Cmd+Shift+P in any mode', () => {
+    expect(isGoToPathShortcut(ev({ ctrlKey: true, shiftKey: true, key: 'P' }))).toBe(true);
+    expect(isGoToPathShortcut(ev({ ctrlKey: true, shiftKey: true, key: 'p' }))).toBe(true);
+    expect(isGoToPathShortcut(ev({ metaKey: true, shiftKey: true, key: 'P' }))).toBe(true);
+  });
+
+  it('rejects bare Ctrl+P (left to the editor / print), Alt, or other keys', () => {
+    expect(isGoToPathShortcut(ev({ ctrlKey: true, key: 'p' }))).toBe(false); // no Shift
+    expect(isGoToPathShortcut(ev({ ctrlKey: true, shiftKey: true, altKey: true, key: 'P' }))).toBe(
+      false,
+    );
+    expect(isGoToPathShortcut(ev({ ctrlKey: true, shiftKey: true, key: 'O' }))).toBe(false);
   });
 });

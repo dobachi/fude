@@ -33,3 +33,16 @@ export function isOpenFileShortcut(e, mode) {
 export function isOpenFolderShortcut(e) {
   return (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (e.key === 'o' || e.key === 'O');
 }
+
+/**
+ * Should a keydown trigger "Go to path" (open a file or folder by typing its
+ * path)? Bound to Ctrl/Cmd+Shift+P, which works in every mode (Shift combos
+ * don't collide with editor keybindings, and it avoids bare Ctrl+P which stays
+ * with the editor — emacs previous-line / browser print).
+ *
+ * @param {KeyboardEvent} e
+ * @returns {boolean}
+ */
+export function isGoToPathShortcut(e) {
+  return (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (e.key === 'p' || e.key === 'P');
+}
