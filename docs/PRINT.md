@@ -1,8 +1,8 @@
 # Fude (筆) - 印刷機能 設計ドキュメント
 
 > 最終更新: 2026-07-20
-> ステータス: ドラフト（未実装）
-> 関連: プレビュー描画は `src/js/core/preview.js`、キーバインドは `src/js/core/open-shortcuts.js`
+> ステータス: v1（プレビュー印刷）・v2（エディタ印刷）実装済み。v3 以降は未着手
+> 関連: プレビュー描画は `src/js/core/preview.js`、印刷本体は `src/js/features/print/print.js`、キーバインドは `src/js/core/open-shortcuts.js`
 
 ---
 

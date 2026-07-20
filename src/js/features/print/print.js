@@ -6,10 +6,54 @@
 // contentWindow.print(). The OS print dialog covers both physical printing and
 // "Print to File" (PDF). Loaded lazily from app.js to keep it off the hot path.
 
-import { buildPrintDocument } from '../../core/print-document.js';
+import { buildPrintDocument, escapeHtml } from '../../core/print-document.js';
 
 const DEFAULT_TIMEOUT_MS = 10000;
 const AFTERPRINT_FALLBACK_MS = 60000;
+
+// Map a file extension to a language name the highlighter understands. Unknown
+// extensions fall through as-is (matchLanguageName may still know the alias);
+// a null result just yields plain (uncolored) source, which still prints fine.
+const EXT_LANG = {
+  md: 'markdown',
+  markdown: 'markdown',
+  mdown: 'markdown',
+  mkd: 'markdown',
+  mdx: 'markdown',
+  qmd: 'markdown',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  jsx: 'jsx',
+  ts: 'typescript',
+  tsx: 'tsx',
+  py: 'python',
+  rs: 'rust',
+  go: 'go',
+  rb: 'ruby',
+  sh: 'shell',
+  bash: 'shell',
+  html: 'html',
+  css: 'css',
+  json: 'json',
+  yaml: 'yaml',
+  yml: 'yaml',
+  toml: 'toml',
+  sql: 'sql',
+  c: 'c',
+  h: 'c',
+  cpp: 'cpp',
+  java: 'java',
+};
+
+/** Language name for a file path, defaulting to markdown, '' for plain text. */
+export function langForPath(path) {
+  const m = /\.([a-z0-9]+)$/i.exec(path || '');
+  if (!m) return 'markdown';
+  const ext = m[1].toLowerCase();
+  if (ext === 'txt') return '';
+  return EXT_LANG[ext] ?? ext;
+}
 
 /**
  * @param {object} deps
@@ -25,6 +69,7 @@ export function createPrinter(deps) {
   const {
     doc = typeof document !== 'undefined' ? document : null,
     renderPreview,
+    highlightCode,
     dirname = defaultDirname,
     onError,
     cssHref = 'style.css',
@@ -63,7 +108,29 @@ export function createPrinter(deps) {
     await sink(html);
   }
 
-  return { printPreview, snapshotPreviewHtml };
+  /** Build the highlighted (or plain) source HTML for the editor buffer. */
+  async function buildEditorBody(tab) {
+    const text = tab.content || '';
+    let inner = null;
+    if (highlightCode) {
+      try {
+        inner = await highlightCode(text, langForPath(tab.path));
+      } catch {
+        inner = null;
+      }
+    }
+    if (inner == null) inner = escapeHtml(text); // plain fallback (unknown lang)
+    return `<pre class="print-source"><code>${inner}</code></pre>`;
+  }
+
+  async function printEditor(tab) {
+    if (!doc || !tab) return;
+    const body = await buildEditorBody(tab);
+    const html = buildPrintDocument({ bodyHtml: body, title: tab.name || 'Fude', cssHref });
+    await sink(html);
+  }
+
+  return { printPreview, printEditor, snapshotPreviewHtml, buildEditorBody };
 }
 
 function defaultDirname(path) {

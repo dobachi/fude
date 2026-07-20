@@ -1468,13 +1468,17 @@ async function handleGoToPath() {
   }
 }
 
-// ── Print (v1: rendered preview) ───────────────────────────
+// ── Print (preview / editor) ───────────────────────────────
 let _printer = null;
 async function getPrinter() {
   if (_printer) return _printer;
-  const { createPrinter } = await import('./features/print/print.js');
+  const [{ createPrinter }, { highlightCode }] = await Promise.all([
+    import('./features/print/print.js'),
+    import('./core/code-highlight.js'),
+  ]);
   _printer = createPrinter({
     renderPreview,
+    highlightCode,
     dirname: dirnameOf,
     onError: (m) => showToast(m, { type: 'error', duration: 6000 }),
     cssHref: 'style.css',
@@ -1482,17 +1486,26 @@ async function getPrinter() {
   return _printer;
 }
 
-/** Print the active document's rendered preview (works in any view mode). */
-async function printActive() {
+/**
+ * Print the active document.
+ * @param {'preview'|'editor'} kind
+ */
+async function runPrint(kind) {
   const tab = getActiveTab();
   if (!tab) return;
   try {
     const printer = await getPrinter();
-    await printer.printPreview(tab);
+    if (kind === 'editor') await printer.printEditor(tab);
+    else await printer.printPreview(tab);
   } catch (e) {
     console.error('Print failed:', e);
     showToast(`印刷に失敗しました: ${e?.message || e}`, { type: 'error', duration: 6000 });
   }
+}
+
+/** Ctrl+P: print what the current view shows (editor-only → source, else preview). */
+function printActive() {
+  return runPrint(currentViewMode() === 'editor' ? 'editor' : 'preview');
 }
 
 /** Render an image file into a pane's main area as a pan/zoom viewer. */
@@ -1891,7 +1904,8 @@ function buildMenuDefinition() {
         },
         { label: '再読込', shortcut: 'Ctrl+Shift+R', action: manualReload },
         { separator: true },
-        { label: '印刷（プレビュー）', shortcut: 'Ctrl+P', action: printActive },
+        { label: '印刷（プレビュー）', shortcut: 'Ctrl+P', action: () => runPrint('preview') },
+        { label: '印刷（エディタ）', action: () => runPrint('editor') },
         { separator: true },
         { label: '閉じる', shortcut: 'Ctrl+Shift+W', action: smartClose },
       ],
