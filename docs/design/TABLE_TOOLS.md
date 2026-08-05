@@ -8,7 +8,7 @@
   - `findTableAt(docText, lineIndex)` → カーソル位置の表ブロック `{ startLine, endLine, model }`
   - `parseTableBlock(lines)` / `formatTable(model)` / `formatTableText(model)`
   - `cellIndexInLine(line, colInLine)` → 行内文字オフセットからセル列番号
-  - `navigateTable()`（Tab/Enter セル移動）、`delimitedToModel()`（TSV/CSV ペースト）
+  - `navigateTable()`（Tab/Enter セル移動）、`delimitedToModel()`（TSV ペーストの自動変換）、`textToTableModel()`（選択範囲の明示的な表変換）
 - **`src/js/core/editor.js`**: `tableBlockRange(state)` で表ブロックの文字範囲を取得し、`view.dispatch` で置換する薄いラッパ。`tableFormat()` が「整形して差し替え」の既存パターン。
 - **`src/js/app.js`**: `openTableGridPicker` / `insertTable`（メニュー「表…」/ Ctrl+Shift+G）。
 - **`src/js/core/menu.js`**: `showMenu(x, y, items)`。`items` は `{ label, action, danger?, shortcut?, separator? }`。

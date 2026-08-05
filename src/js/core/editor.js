@@ -46,7 +46,13 @@ import {
 import { tags as t } from '@lezer/highlight';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { openExternal } from './external-link.js';
-import { findTableAt, navigateTable, formatTableText, delimitedToModel } from './table.js';
+import {
+  findTableAt,
+  navigateTable,
+  formatTableText,
+  delimitedToModel,
+  textToTableModel,
+} from './table.js';
 import { shouldOpenAsCode, languageDescForPath } from './file-lang.js';
 
 let currentFontSize = 14;
@@ -468,6 +474,88 @@ function tableFormat(view) {
   return true;
 }
 
+/**
+ * Replace the selection with a block of `text`, breaking the line when the
+ * selection does not start (or end) on a line of its own.
+ */
+function replaceSelectionWithBlock(view, text) {
+  const { state } = view;
+  const { from, to } = state.selection.main;
+  const before = state.sliceDoc(state.doc.lineAt(from).from, from);
+  const after = state.sliceDoc(to, state.doc.lineAt(to).to);
+  let insert = text;
+  if (before.trim() !== '') insert = '\n' + insert;
+  if (after.trim() !== '') insert = insert + '\n';
+  view.dispatch({ changes: { from, to, insert }, scrollIntoView: true });
+}
+
+/**
+ * Convert the selected text into a Markdown table (explicit command — the user
+ * asked, so delimiter detection is permissive). Returns false when there is no
+ * selection or it is blank, so the caller can tell the user why nothing moved.
+ */
+export function convertSelectionToTable(view) {
+  if (!view) return false;
+  const { from, to } = view.state.selection.main;
+  if (from === to) return false;
+  const model = textToTableModel(view.state.sliceDoc(from, to));
+  if (!model) return false;
+  replaceSelectionWithBlock(view, formatTableText(model));
+  view.focus();
+  return true;
+}
+
+// ── Plain paste (Ctrl+Shift+V) ─────────────────────────────
+// A paste event carries no modifier state, so Ctrl+Shift+V arms a one-shot flag
+// that the paste handler consumes to skip the TSV -> table conversion. The flag
+// is time-boxed: a Ctrl+Shift+V that never produces a paste must not disable the
+// conversion on the user's next ordinary paste.
+const PLAIN_PASTE_WINDOW_MS = 1000;
+let plainPasteArmedAt = 0;
+
+/** Mark the next paste (if it arrives soon) as a plain, unconverted paste. */
+export function armPlainPaste(now = Date.now()) {
+  plainPasteArmedAt = now;
+}
+
+/** Consume the flag: true when a plain paste was armed and is still fresh. */
+export function takePlainPaste(now = Date.now()) {
+  const armed = plainPasteArmedAt !== 0 && now - plainPasteArmedAt < PLAIN_PASTE_WINDOW_MS;
+  plainPasteArmedAt = 0;
+  return armed;
+}
+
+/**
+ * Paste the clipboard as plain text, bypassing the table conversion. Done by
+ * hand rather than by letting the webview's own Ctrl+Shift+V through, because
+ * that binding is not available on every platform.
+ */
+function plainPaste(view) {
+  armPlainPaste();
+  const read = navigator.clipboard?.readText?.();
+  if (!read) {
+    document.execCommand('paste');
+    view.focus();
+    return true;
+  }
+  read
+    .then((text) => {
+      if (text) view.dispatch(view.state.replaceSelection(text), { scrollIntoView: true });
+      view.focus();
+    })
+    .catch(() => {
+      // Clipboard read denied: fall back to the webview's paste. The flag armed
+      // above keeps the resulting paste event from converting anything.
+      document.execCommand('paste');
+      view.focus();
+    });
+  return true;
+}
+
+function plainPasteKeymap() {
+  return keymap.of([{ key: 'Mod-Shift-v', run: plainPaste }]);
+}
+
 function tableKeymap() {
   return keymap.of([
     { key: 'Tab', run: (v) => tableNav(v, 'next') },
@@ -548,6 +636,7 @@ export function createEditor(
     // keymap (which otherwise win), but still below vim/emacs (Prec.highest).
     // The handlers return false outside a table, falling through to those.
     Prec.high(tableKeymap()),
+    Prec.high(plainPasteKeymap()),
     baseTheme,
     themeCompartment.of(themeExtensionFor(document.documentElement.getAttribute('data-theme'))),
     EditorView.lineWrapping,
@@ -570,21 +659,15 @@ export function createEditor(
             return true;
           }
         }
-        // 2. Tabular text (TSV / CSV) -> Markdown table.
+        // 2. Tabular text (TSV) -> Markdown table, unless the user asked for a
+        // plain paste with Ctrl+Shift+V.
+        if (takePlainPaste()) return false;
         const text = event.clipboardData?.getData('text/plain');
         if (text) {
           const model = delimitedToModel(text);
           if (model) {
-            const { state } = view;
-            const { from, to } = state.selection.main;
-            const line = state.doc.lineAt(from);
-            const before = state.sliceDoc(line.from, from);
-            const after = state.sliceDoc(to, state.doc.lineAt(to).to);
-            let insert = formatTableText(model);
-            if (before.trim() !== '') insert = '\n' + insert;
-            if (after.trim() !== '') insert = insert + '\n';
             event.preventDefault();
-            view.dispatch(state.replaceSelection(insert), { scrollIntoView: true });
+            replaceSelectionWithBlock(view, formatTableText(model));
             return true;
           }
         }

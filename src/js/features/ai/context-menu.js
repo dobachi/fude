@@ -9,6 +9,7 @@ let menuEl = null;
  * @property {(selectedText: string) => void} onAskAI - Open chat panel with selected text
  * @property {(view: any) => void} onComposer - Open composer for the view
  * @property {() => any|null} getActiveView - Get the current active EditorView
+ * @property {(view: any) => void} [onConvertTable] - Convert the selection to a Markdown table
  */
 
 /** @type {ContextMenuCallbacks|null} */
@@ -63,6 +64,7 @@ const EDIT_ITEMS = [
   { id: 'paste', label: 'Paste', icon: '📌' },
   { id: 'delete', label: 'Delete', icon: '🗑' },
   { id: 'select-all', label: 'Select All', icon: '☐' },
+  { id: 'to-table', label: 'Convert to Table', icon: '▦' },
 ];
 
 const AI_ITEMS = [
@@ -156,6 +158,9 @@ function handleAction(actionId, view) {
     case 'select-all':
       view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
       view.focus();
+      break;
+    case 'to-table':
+      callbacks?.onConvertTable?.(view);
       break;
     case 'ask-ai': {
       if (!callbacks) break;

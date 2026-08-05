@@ -11,6 +11,7 @@ import {
   cellIndexInLine,
   navigateTable,
   delimitedToModel,
+  textToTableModel,
 } from '../core/table.js';
 
 describe('displayWidth', () => {
@@ -157,19 +158,6 @@ describe('delimitedToModel', () => {
     expect(model.header).toEqual(['a', 'b']);
     expect(model.rows).toEqual([['c', 'd']]);
   });
-  it('converts consistent CSV', () => {
-    const model = delimitedToModel('x,y\n1,2\n3,4');
-    expect(model.header).toEqual(['x', 'y']);
-    expect(model.rows).toEqual([
-      ['1', '2'],
-      ['3', '4'],
-    ]);
-  });
-  it('handles quoted CSV fields containing commas', () => {
-    const model = delimitedToModel('"a,b",c\n1,2');
-    expect(model.header).toEqual(['a,b', 'c']);
-    expect(model.rows).toEqual([['1', '2']]);
-  });
   it('escapes pipes in converted cells', () => {
     const model = delimitedToModel('a|b\tc\n1\t2');
     expect(model.header).toEqual(['a\\|b', 'c']);
@@ -177,5 +165,62 @@ describe('delimitedToModel', () => {
   it('does not convert prose', () => {
     expect(delimitedToModel('hello world\nfoo bar baz')).toBeNull();
     expect(delimitedToModel('just one line')).toBeNull();
+  });
+  it('does not convert CSV — commas alone never trigger auto-conversion', () => {
+    expect(delimitedToModel('x,y\n1,2\n3,4')).toBeNull();
+  });
+  // Regression: two prose lines with one comma each used to be read as a
+  // consistent 2-column CSV, so pasting a paragraph silently produced a table.
+  it('does not convert prose that happens to have one comma per line', () => {
+    const prose =
+      'NTT DATA runs dataspace projects all over the world, more than thirty of them.\n' +
+      'I am here as a practitioner, not as a standards person.';
+    expect(delimitedToModel(prose)).toBeNull();
+  });
+});
+
+describe('textToTableModel', () => {
+  it('splits on tabs when every line has one', () => {
+    const model = textToTableModel('a\tb\nc\td');
+    expect(model.header).toEqual(['a', 'b']);
+    expect(model.rows).toEqual([['c', 'd']]);
+  });
+  it('splits on commas, honouring quoted fields', () => {
+    const model = textToTableModel('"a,b",c\n1,2');
+    expect(model.header).toEqual(['a,b', 'c']);
+    expect(model.rows).toEqual([['1', '2']]);
+  });
+  it('splits on runs of spaces when there is no other delimiter', () => {
+    const model = textToTableModel('名前   年齢\n田中   30');
+    expect(model.header).toEqual(['名前', '年齢']);
+    expect(model.rows).toEqual([['田中', '30']]);
+  });
+  it('falls back to a single column for prose', () => {
+    const model = textToTableModel('hello world\nfoo bar baz');
+    expect(model.header).toEqual(['hello world']);
+    expect(model.rows).toEqual([['foo bar baz']]);
+  });
+  it('pads ragged rows to the widest row', () => {
+    const model = textToTableModel('a,b,c\n1,2');
+    expect(model.header).toEqual(['a', 'b', 'c']);
+    expect(model.rows).toEqual([['1', '2', '']]);
+  });
+  it('drops blank lines inside the selection', () => {
+    const model = textToTableModel('a,b\n\n1,2\n');
+    expect(model.rows).toEqual([['1', '2']]);
+  });
+  it('realigns an existing Markdown table instead of nesting it', () => {
+    const model = textToTableModel('| a | b |\n| --- | ---: |\n| 1 | 2 |');
+    expect(model.header).toEqual(['a', 'b']);
+    expect(model.align).toEqual([null, 'right']);
+    expect(model.rows).toEqual([['1', '2']]);
+  });
+  it('does not double-escape pipes that are already escaped', () => {
+    const model = textToTableModel('a \\| b | c\nd | e');
+    expect(model.header).toEqual(['a \\| b', 'c']);
+  });
+  it('returns null for blank text', () => {
+    expect(textToTableModel('')).toBeNull();
+    expect(textToTableModel('  \n\n')).toBeNull();
   });
 });

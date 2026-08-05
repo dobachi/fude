@@ -21,6 +21,7 @@ import {
   toggleNumbered,
   openSearch,
   setSourceCodeMode,
+  convertSelectionToTable,
 } from './core/editor.js';
 import { shouldOpenAsCode } from './core/file-lang.js';
 import {
@@ -981,6 +982,7 @@ async function init() {
     onComposer: (view) => {
       openComposerForView(view);
     },
+    onConvertTable: () => convertSelectionToTableAction(),
   });
 
   // AI panel close button
@@ -1924,7 +1926,10 @@ function buildMenuDefinition() {
     {
       label: '挿入(I)',
       accessKey: 'I',
-      items: [{ label: '表…', shortcut: 'Ctrl+Shift+G', action: openTableGridPicker }],
+      items: [
+        { label: '表…', shortcut: 'Ctrl+Shift+G', action: openTableGridPicker },
+        { label: '選択範囲を表に変換', action: convertSelectionToTableAction },
+      ],
     },
     {
       label: '表示(V)',
@@ -1989,6 +1994,15 @@ function openTableGridPicker() {
   const x = coords ? coords.left : window.innerWidth / 2;
   const y = coords ? coords.bottom + 4 : window.innerHeight / 2;
   showTableGridPicker(x, y, (rows, cols) => insertTable(view, rows, cols));
+}
+
+/** Convert the selected text into a table, telling the user when nothing is selected. */
+function convertSelectionToTableAction() {
+  const view = currentView();
+  if (!view) return;
+  if (!convertSelectionToTable(view)) {
+    showToast('表に変換する範囲を選択してください', { type: 'info' });
+  }
 }
 
 /** Insert a blank, aligned table (rows includes the header row) at the cursor. */

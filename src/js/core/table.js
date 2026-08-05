@@ -391,39 +391,89 @@ function parseCsvLine(line) {
   return fields;
 }
 
-/** Escape a raw cell value for use inside a Markdown table cell. */
+/**
+ * Escape a raw cell value for use inside a Markdown table cell. Pipes that are
+ * already escaped are left alone so converting pipe-delimited text twice does
+ * not pile up backslashes.
+ */
 function escapeCell(value) {
-  return String(value).replace(/\|/g, '\\|').replace(/\n/g, ' ').trim();
+  return String(value).replace(/\\?\|/g, '\\|').replace(/\n/g, ' ').trim();
+}
+
+/** Normalize newlines and split into lines, or null when the text is blank. */
+function splitLines(text) {
+  const raw = String(text)
+    .replace(/\r\n?/g, '\n')
+    .replace(/^\n+|\n+$/g, '');
+  if (raw.trim() === '') return null;
+  return raw.split('\n');
 }
 
 /**
- * Convert pasted delimited text (TSV or CSV) into a table model, or null when it
- * does not look like tabular data. Conservative to avoid mangling prose:
- *   - TSV: every line contains a tab (>= 2 columns).
- *   - CSV: >= 2 lines, every line has the same field count (>= 2 columns).
+ * Convert pasted text into a table model, or null when it is not unambiguously
+ * tabular. Only TSV qualifies: a tab on every line means the text came from a
+ * spreadsheet. Comma-separated text is deliberately NOT auto-converted — prose
+ * with one comma per line looks exactly like a two-column CSV, and silently
+ * turning a pasted paragraph into a table is far worse than not converting.
+ * Use textToTableModel() for the explicit "convert selection" command.
  * The first line becomes the header.
  */
 export function delimitedToModel(text) {
-  const raw = String(text).replace(/\r\n?/g, '\n').replace(/\n+$/, '');
-  if (raw.trim() === '') return null;
-  const lines = raw.split('\n');
+  const lines = splitLines(text);
+  if (!lines) return null;
+  if (!lines.every((l) => l.includes('\t'))) return null;
+  const grid = lines.map((l) => l.split('\t'));
+  const cols = Math.max(...grid.map((r) => r.length));
+  return cols >= 2 ? gridToModel(grid, cols) : null;
+}
 
-  // TSV first: tabs are an unambiguous signal.
-  if (lines.every((l) => l.includes('\t'))) {
-    const grid = lines.map((l) => l.split('\t'));
-    const cols = Math.max(...grid.map((r) => r.length));
-    if (cols >= 2) return gridToModel(grid, cols);
-  }
+/** Runs of two or more spaces (ASCII or ideographic U+3000) used as a column gap. */
+const SPACE_GAP = /[ \u3000]{2,}/;
 
-  // CSV: require multiple consistent rows to avoid converting prose.
-  if (lines.length >= 2) {
-    const grid = lines.map(parseCsvLine);
-    const cols = grid[0].length;
-    if (cols >= 2 && grid.every((r) => r.length === cols)) {
-      return gridToModel(grid, cols);
-    }
+/** Pick a delimiter for an explicit conversion: the first one every line has. */
+function detectDelimiter(lines) {
+  if (lines.every((l) => l.includes('\t'))) return 'tab';
+  if (lines.every((l) => l.includes('|'))) return 'pipe';
+  if (lines.every((l) => l.includes(','))) return 'comma';
+  if (lines.every((l) => SPACE_GAP.test(l.trim()))) return 'space';
+  return 'none';
+}
+
+/** Split one line into cells using the delimiter chosen for the whole block. */
+function splitByDelimiter(line, delimiter) {
+  switch (delimiter) {
+    case 'tab':
+      return line.split('\t');
+    case 'pipe':
+      return splitRow(line);
+    case 'comma':
+      return parseCsvLine(line);
+    case 'space':
+      return line.trim().split(SPACE_GAP);
+    default:
+      return [line];
   }
-  return null;
+}
+
+/**
+ * Convert selected text into a table model for the explicit "convert selection
+ * to table" command. Unlike delimitedToModel() this never has to guess whether
+ * the user wants a table — they asked — so it accepts ragged rows and falls
+ * back to a single column. Returns null only for blank text.
+ */
+export function textToTableModel(text) {
+  const lines = splitLines(text)?.filter((l) => l.trim() !== '');
+  if (!lines || lines.length === 0) return null;
+
+  // Already a Markdown table: reparse so re-running the command just realigns
+  // instead of wrapping the existing pipes in another layer of cells.
+  const parsed = parseTableBlock(lines);
+  if (parsed) return parsed;
+
+  const delimiter = detectDelimiter(lines);
+  const grid = lines.map((l) => splitByDelimiter(l, delimiter));
+  const cols = Math.max(...grid.map((r) => r.length));
+  return gridToModel(grid, cols);
 }
 
 function gridToModel(grid, cols) {
