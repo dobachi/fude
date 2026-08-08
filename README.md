@@ -68,6 +68,11 @@ fude-browser     # ブラウザモード (http://localhost:3000) - 日本語IME�
 fude-remote      # Windows版を自動取得して起動
 ```
 
+> **日本語入力の変換候補が入力位置から遠くに出る場合**は
+> [docs/WSL_IME.md](docs/WSL_IME.md) を参照してください。
+> 原因は IM 側の構成で、**fcitx4 → fcitx5 への移行**で解決します
+> （WSLg では `fcitx5 --disable=wayland,waylandim` での起動が必須）。
+
 ## 使い方
 
 ### 基本操作
