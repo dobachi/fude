@@ -11,6 +11,7 @@
 
   --sidebar-width: 250px;
   --tab-height: 36px;
+  --status-bar-height: 22px;
   --ai-panel-width: 320px;
   --pane-border: 1px solid var(--border);
   --transition-speed: 0.2s;
@@ -2899,4 +2900,49 @@ body:has(#app.ai-panel-open) #mode-indicator {
 .view-mode-btn:focus-visible {
   outline: 2px solid var(--fg-accent);
   outline-offset: 1px;
+}
+
+/* ===== Status bar ===== */
+/* 画面最下部の細い帯。開いているファイルのパスを常時出す。
+   色は各テーマの変数に乗せてあるので、テーマ切替にそのまま追従する。 */
+#status-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  height: var(--status-bar-height);
+  padding: 0 10px;
+  background: var(--bg-secondary);
+  border-top: var(--pane-border);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* パスは末尾（ファイル名）が重要なので、長いときは statusbar.js が
+   先頭側を "…/" に畳む。ここの ellipsis は保険。 */
+.status-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  user-select: text;
+}
+
+.status-path:hover {
+  color: var(--fg-primary);
+}
+
+.status-path:focus-visible {
+  outline: 1px solid var(--fg-accent);
+  outline-offset: 1px;
+}
+
+/* ファイル未選択。押しても何も起きないので、押せそうな見た目にしない。 */
+.status-path.is-empty {
+  color: var(--fg-muted);
+  font-style: italic;
+  cursor: default;
 }

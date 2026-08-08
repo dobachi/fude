@@ -35,6 +35,7 @@ import { isImagePath, mimeToExt, insertImageMarkdown } from './core/image-insert
 import { attachPanZoom } from './core/svg-panzoom.js';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
+import { createStatusBar } from './core/statusbar.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
 import {
@@ -180,6 +181,20 @@ let isMainWindow = true;
 
 let vaultPath = '';
 let config = {};
+
+// 画面下部のステータスバー（現在ファイルのパスを常時表示）。
+// vault 配下なら相対パス、長ければ先頭を畳む。判断は core/statusbar.js の純粋関数側。
+const statusBar = createStatusBar({
+  el: typeof document !== 'undefined' ? document.getElementById('status-bar') : null,
+  getVaultPath: () => vaultPath,
+  onCopy: () => showToast('パスをコピーしました'),
+});
+
+/** ステータスバーをアクティブタブの状態に合わせる。 */
+function updateStatusBar() {
+  const tab = getActiveTab();
+  statusBar.render(tab ? tab.path : null);
+}
 
 // Register panes module with editor.js so getCurrentView() works without circular imports
 registerPanesModule(panesModule);
@@ -759,6 +774,7 @@ async function init() {
   const session = isMainWindow ? await restoreSession() : null;
   if (session && session.open_tabs && session.open_tabs.length > 0) {
     vaultPath = session.vault_path || '';
+    updateStatusBar(); // vault が決まるとパス表示が相対に変わる
     defaultViewMode = session.view_mode || 'split';
     applyViewMode();
 
@@ -853,6 +869,7 @@ async function init() {
         const openDir = await backend.getOpenDir();
         if (openDir) {
           vaultPath = openDir;
+          updateStatusBar();
           const tree = await backend.readDirTree(openDir, getShowAllFiles());
           loadDirectory(tree);
           watchVault(vaultPath);
@@ -1433,6 +1450,7 @@ async function openPath(path) {
   try {
     const tree = await backend.readDirTree(path, getShowAllFiles());
     vaultPath = path;
+    updateStatusBar();
     loadDirectory(tree);
     watchVault(vaultPath);
     return true;
@@ -1531,6 +1549,9 @@ function renderImageTab(pane, tab) {
 
 // ── Tab change handler ─────────────────────────────────────
 function handleTabChange(tab) {
+  // タブの切替・開閉のたびに下部のパス表示を合わせる（pane の有無に依らず先に反映）
+  statusBar.render(tab ? tab.path : null);
+
   const pane = getActivePane();
   if (!pane) return;
 
@@ -1625,6 +1646,8 @@ function handleTabPathChange({ oldPath, newPath }) {
     const others = getAllTabs().filter((t) => t.path === newPath);
     if (others.length <= 1) watchFile(newPath);
   }
+  // 名前を付けて保存・リネームでパスが変わったら表示も追随させる
+  updateStatusBar();
 }
 
 function getFilename(p) {
@@ -2105,6 +2128,7 @@ async function handleOpenFolder() {
       const folder = await open({ directory: true, multiple: false });
       if (folder) {
         vaultPath = folder;
+        updateStatusBar();
         const tree = await backend.readDirTree(folder, getShowAllFiles());
         loadDirectory(tree);
         watchVault(vaultPath);
@@ -2121,6 +2145,7 @@ async function handleOpenFolder() {
     } else {
       openFolderPicker(async (folder) => {
         vaultPath = folder;
+        updateStatusBar();
         const tree = await backend.readDirTree(folder, getShowAllFiles());
         loadDirectory(tree);
         watchVault(vaultPath);
