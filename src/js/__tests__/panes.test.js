@@ -214,3 +214,40 @@ describe('panes module', () => {
     expect(pane.dirty).toBe(false);
   });
 });
+
+describe('focusTargetForViewMode', () => {
+  let focusTargetForViewMode;
+
+  beforeEach(async () => {
+    ({ focusTargetForViewMode } = await import('../core/panes.js'));
+  });
+
+  it('moves focus into the preview when preview-only hides the editor', () => {
+    // The reported bug: switching to preview left focus on the hidden editor
+    // (i.e. on <body>), so the preview's j/k/gg navigation was dead.
+    expect(focusTargetForViewMode('preview', 'editor')).toBe('preview');
+    expect(focusTargetForViewMode('preview', 'none')).toBe('preview');
+  });
+
+  it('moves focus back to the editor when editor-only hides the preview', () => {
+    expect(focusTargetForViewMode('editor', 'preview')).toBe('editor');
+    expect(focusTargetForViewMode('editor', 'none')).toBe('editor');
+  });
+
+  it('keeps focus that is already in the visible half', () => {
+    expect(focusTargetForViewMode('preview', 'preview')).toBe('keep');
+    expect(focusTargetForViewMode('editor', 'editor')).toBe('keep');
+  });
+
+  it('leaves split alone unless focus is nowhere', () => {
+    expect(focusTargetForViewMode('split', 'editor')).toBe('keep');
+    expect(focusTargetForViewMode('split', 'preview')).toBe('keep');
+    expect(focusTargetForViewMode('split', 'none')).toBe('editor');
+  });
+
+  it('never steals focus from other UI (filer, AI panel, dialogs)', () => {
+    expect(focusTargetForViewMode('preview', 'elsewhere')).toBe('keep');
+    expect(focusTargetForViewMode('editor', 'elsewhere')).toBe('keep');
+    expect(focusTargetForViewMode('split', 'elsewhere')).toBe('keep');
+  });
+});

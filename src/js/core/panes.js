@@ -370,6 +370,28 @@ export function focusPane(direction) {
   }
 }
 
+/**
+ * Pure decision for where keyboard focus belongs after a view-mode change.
+ *
+ * Hiding the focused element drops focus on <body>, where no keymap listens —
+ * that is how preview-only mode ends up swallowing `j` / `k` / `gg`, which are
+ * bound to the preview container, and editor-only mode ends up ignoring Vim
+ * keys. Focus that sits in some other UI (filer, outline, AI panel, a dialog)
+ * is never stolen.
+ *
+ * @param {'editor'|'split'|'preview'} mode the mode being applied
+ * @param {'editor'|'preview'|'none'|'elsewhere'} focusIn where focus sits now
+ *   ('none' = nowhere useful, e.g. <body> after the focused element was hidden)
+ * @returns {'editor'|'preview'|'keep'}
+ */
+export function focusTargetForViewMode(mode, focusIn) {
+  if (focusIn === 'elsewhere') return 'keep';
+  if (mode === 'preview') return focusIn === 'preview' ? 'keep' : 'preview';
+  if (mode === 'editor') return focusIn === 'editor' ? 'keep' : 'editor';
+  // Split keeps both panes visible, so only rescue focus that is nowhere.
+  return focusIn === 'none' ? 'editor' : 'keep';
+}
+
 // ── Internal ──────────────────────────────────────────────
 
 function setActivePaneById(id) {

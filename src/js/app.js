@@ -102,6 +102,7 @@ const {
   getActivePaneView,
   getPaneByPreviewContainer,
   focusEditorView,
+  focusTargetForViewMode,
   setCallbacks,
   createEditorInPane,
   getPaneCount,
@@ -207,6 +208,35 @@ function currentView() {
 /** Move keyboard focus back to the active pane's editor (robustly). */
 function focusActiveEditor() {
   focusEditorView(getActivePaneView());
+}
+
+/** Where keyboard focus sits relative to `pane`. See focusTargetForViewMode. */
+function paneFocusLocation(pane) {
+  const el = document.activeElement;
+  if (!el || el === document.body) return 'none';
+  if (pane) {
+    // Preview first: pane.element contains the preview container too.
+    if (pane.previewContainer && pane.previewContainer.contains(el)) return 'preview';
+    if (pane.element && pane.element.contains(el)) return 'editor';
+  }
+  return 'elsewhere';
+}
+
+/**
+ * Focus the half of the active pane the current view mode expects: the preview
+ * container in preview-only mode (its j/k/gg navigation is bound there, and the
+ * hidden editor cannot take focus), the editor otherwise. Used where the app
+ * unconditionally grabbed the editor before.
+ */
+function focusActivePaneForMode() {
+  const pane = getActivePane();
+  if (pane && pane.previewContainer && paneViewMode(pane) === 'preview') {
+    // preventScroll: the container is its own scroller; focusing it must not
+    // yank the reader back to the top of the document.
+    pane.previewContainer.focus({ preventScroll: true });
+    return;
+  }
+  focusActiveEditor();
 }
 
 /**
@@ -715,8 +745,9 @@ async function init() {
         // AIパネル内をクリック/選択中ならエディタに戻さない
         const aiPanel = document.getElementById('ai-panel');
         if (aiPanel && (aiPanel.contains(active) || aiPanel.matches(':hover'))) return;
-        const view = currentView();
-        if (view) view.focus();
+        // Route by view mode: in preview-only the editor is hidden and cannot
+        // take focus, so aiming at it would leave focus stranded on <body>.
+        focusActivePaneForMode();
       }
     }, 10);
   });
@@ -929,10 +960,10 @@ async function init() {
   document.addEventListener('dragover', (e) => e.preventDefault());
   document.addEventListener('drop', (e) => e.preventDefault());
 
-  // Auto-focus editor when window gains focus
+  // Auto-focus the active pane when the window gains focus (the preview
+  // container in preview-only mode, the editor otherwise).
   window.addEventListener('focus', () => {
-    const view = currentView();
-    if (view) view.focus();
+    focusActivePaneForMode();
   });
 
   // Warn on window close if unsaved changes (Tauri).
@@ -1676,8 +1707,9 @@ function handleTabChange(tab) {
   // Refresh outline for the newly active document
   updateOutline(tab.content);
 
-  // Focus editor after tab switch
-  if (view) view.focus();
+  // Focus the active pane after a tab switch (preview container in
+  // preview-only mode, editor otherwise).
+  focusActivePaneForMode();
 
   // Save session on tab change
   scheduleSessionSave();
@@ -1821,6 +1853,15 @@ function setViewMode(mode) {
   // Remember the most recently chosen mode as the default for new tabs.
   defaultViewMode = mode;
   applyViewMode();
+
+  // Move focus to whichever half the new mode leaves visible, so the keymap
+  // that mode implies (preview j/k/gg, editor Vim/Emacs) keeps working.
+  const pane = getActivePane();
+  const target = focusTargetForViewMode(mode, paneFocusLocation(pane));
+  if (target === 'preview' && pane && pane.previewContainer)
+    pane.previewContainer.focus({ preventScroll: true });
+  else if (target === 'editor') focusActiveEditor();
+
   scheduleSessionSave();
 }
 
