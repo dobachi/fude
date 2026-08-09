@@ -56,3 +56,69 @@ export function normalizeInputPath(raw, home = '') {
   if (!s) return '';
   return expandTilde(s, home);
 }
+
+/**
+ * Directory that the file-tree pane should show for a given file path.
+ * Handles both POSIX (/) and Windows (\) separators, and keeps the separator
+ * for root-level files (`/foo.md` -> `/`, `C:\foo.md` -> `C:\`).
+ * Returns '' when there is no usable parent (empty path, or a bare filename).
+ *
+ * @param {string} filePath
+ * @returns {string}
+ */
+export function fileDirForTree(filePath) {
+  const p = String(filePath ?? '').trim();
+  if (!p) return '';
+  const lastSep = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  if (lastSep < 0) return '';
+  if (lastSep === 0) return p[0]; // '/foo.md' -> '/'
+  if (lastSep === 2 && /^[A-Za-z]:$/.test(p.slice(0, 2))) return p.slice(0, 3); // 'C:\foo.md'
+  return p.slice(0, lastSep);
+}
+
+/** Trailing separators are cosmetic: drop them, but never eat a bare root. */
+function trimTrailingSep(path) {
+  const s = String(path ?? '');
+  if (s.length <= 1) return s;
+  return s.replace(/[/\\]+$/, '') || s[0];
+}
+
+/**
+ * Whether `child` is `parent` itself or lives somewhere below it. Trailing
+ * separators are ignored; empty paths are never inside anything. Comparison is
+ * case-sensitive (Fude's target platforms are Linux/WSL).
+ *
+ * @param {string} child
+ * @param {string} parent
+ * @returns {boolean}
+ */
+export function isWithinDir(child, parent) {
+  const c = trimTrailingSep(child);
+  const p = trimTrailingSep(parent);
+  if (!c || !p) return false;
+  if (c === p) return true;
+  // A root ('/') already carries its separator; 'C:' needs one appended.
+  const prefix = /[/\\]$/.test(p) ? p : p + (c.includes('\\') || p.includes('\\') ? '\\' : '/');
+  return c.startsWith(prefix);
+}
+
+/**
+ * Decide what "show the active file's folder in the file tree" should do.
+ *
+ * A file that already lives under the loaded tree root is only revealed in
+ * place — re-rooting there would needlessly narrow the visible tree. Only a
+ * file outside the current root moves the root to its own folder.
+ *
+ * @param {string} filePath path of the file to reveal (may be null/empty)
+ * @param {string} vaultPath folder currently loaded as the tree root
+ * @returns {{action: 'none'|'reveal'|'open', dir: string}}
+ *   'none'   — no saved file to locate (unsaved tab / nothing open)
+ *   'reveal' — already inside the tree root; expand and highlight only
+ *   'open'   — load `dir` as the new tree root
+ */
+export function resolveRevealDir(filePath, vaultPath) {
+  const dir = fileDirForTree(filePath);
+  if (!dir) return { action: 'none', dir: '' };
+  if (isWithinDir(dir, vaultPath)) return { action: 'reveal', dir };
+  return { action: 'open', dir };
+}

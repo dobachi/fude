@@ -56,6 +56,42 @@ describe('sidebar module', () => {
     expect(active.dataset.path).toBe('/b.md');
   });
 
+  it('highlightFile reports whether the file is in the rendered tree', () => {
+    const container = document.getElementById('file-tree');
+    mod.initSidebar(container, vi.fn());
+
+    mod.loadDirectory([{ name: 'a.md', path: '/a.md', is_dir: false, children: null }]);
+
+    expect(mod.highlightFile('/a.md')).toBe(true);
+    expect(mod.highlightFile('/missing.md')).toBe(false);
+    expect(container.querySelector('.tree-item-label.active')).toBeNull();
+  });
+
+  it('highlightFile expands ancestors and scrolls only when asked', () => {
+    const container = document.getElementById('file-tree');
+    mod.initSidebar(container, vi.fn());
+
+    mod.loadDirectory([
+      {
+        name: 'docs',
+        path: '/docs',
+        is_dir: true,
+        children: [{ name: 'deep.md', path: '/docs/deep.md', is_dir: false, children: null }],
+      },
+    ]);
+
+    const target = container.querySelector('.tree-item-label[data-path="/docs/deep.md"]');
+    const scrollIntoView = vi.fn();
+    target.scrollIntoView = scrollIntoView;
+
+    expect(mod.highlightFile('/docs/deep.md')).toBe(true);
+    expect(container.querySelector('.tree-dir').classList.contains('open')).toBe(true);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    expect(mod.highlightFile('/docs/deep.md', { scroll: true })).toBe(true);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+  });
+
   it('show/hide/isSidebarVisible drive the sidebar-collapsed class', () => {
     const app = document.getElementById('app');
     expect(mod.isSidebarVisible()).toBe(true);

@@ -118,6 +118,7 @@ Settings are stored in `~/.config/fude/config.json`.
 | `Ctrl+S` | Save |
 | `Ctrl+Shift+S` | Save As |
 | `Ctrl+O` | Open folder |
+| `Ctrl+Shift+U` | Locate the current file in the file tree (opens its folder if outside) |
 | `Ctrl+B` | Bold toggle (`**`) |
 | `Ctrl+E` | Toggle sidebar |
 | `Ctrl+F` | Search & replace |

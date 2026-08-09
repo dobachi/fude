@@ -292,9 +292,17 @@ export function nextSidebarFocusAction({ visible, focusInFiler }) {
   return 'focus-filer';
 }
 
-export function highlightFile(path) {
+/**
+ * Mark `path` as the active file, expanding the directories leading to it.
+ * With `{ scroll: true }` the item is also brought into view — used when the
+ * user explicitly asks to locate a file, not on every ordinary tab switch.
+ *
+ * @returns {boolean} whether the file is present in the rendered tree.
+ */
+export function highlightFile(path, { scroll = false } = {}) {
   activeFilePath = path;
-  if (!fileTreeContainer) return;
+  if (!fileTreeContainer) return false;
+  let found = false;
 
   fileTreeContainer.querySelectorAll('.tree-item-label.active').forEach((el) => {
     el.classList.remove('active');
@@ -302,6 +310,7 @@ export function highlightFile(path) {
 
   fileTreeContainer.querySelectorAll('.tree-item-label[data-path]').forEach((el) => {
     if (el.dataset.path === path) {
+      found = true;
       el.classList.add('active');
       // Expand parent directories (and remember them so a later re-render keeps
       // the path to the active file open).
@@ -313,8 +322,14 @@ export function highlightFile(path) {
         if (icon) icon.textContent = '\u25bc';
         parent = parent.parentElement?.closest('.tree-dir');
       }
+      // scrollIntoView is absent in jsdom, so feature-detect before calling.
+      if (scroll && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ block: 'nearest' });
+      }
     }
   });
+
+  return found;
 }
 
 export function getShowAllFiles() {

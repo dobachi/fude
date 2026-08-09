@@ -135,7 +135,7 @@ import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
 import { isOpenFileShortcut, isGoToPathShortcut, isPrintShortcut } from './core/open-shortcuts.js';
-import { normalizeInputPath } from './core/pathnorm.js';
+import { normalizeInputPath, resolveRevealDir } from './core/pathnorm.js';
 
 import { isLocalTauri } from './backend.js';
 import { openHelp } from './help.js';
@@ -1431,6 +1431,7 @@ function handleTabContextMenu(tabId, x, y) {
       items.push({ label: '新しいウィンドウで開く', action: () => openInNewWindow(tab.path) });
     }
     items.push(
+      { label: 'このファイルの場所を開く', action: () => revealFileDir(tab.path) },
       { label: 'パスをコピー', action: () => copyText(tab.path) },
       { label: 'ファイル名をコピー', action: () => copyText(getFilename(tab.path)) },
       { separator: true },
@@ -1466,6 +1467,54 @@ async function openPath(path) {
       return false;
     }
   }
+}
+
+/**
+ * Locate `filePath` in the file-tree pane. A file already under the loaded
+ * tree root is only expanded and scrolled to; a file outside it re-roots the
+ * tree at its own folder. Reveals the sidebar if it was collapsed, and is a
+ * no-op (with a toast) for tabs that have never been saved.
+ */
+async function revealFileDir(filePath) {
+  const { action, dir } = resolveRevealDir(filePath, vaultPath);
+  if (action === 'none') {
+    showToast('保存済みのファイルを開いてから実行してください', { type: 'error' });
+    return;
+  }
+
+  showSidebar();
+  if (action === 'reveal') {
+    // Already inside the tree — keep the wider view and just point at the file.
+    // A miss means the tree predates the file (or a filter hid it): refresh once.
+    if (!highlightFile(filePath, { scroll: true })) {
+      await refreshTree();
+      if (!highlightFile(filePath, { scroll: true })) {
+        showToast('ファイラにこのファイルが見つかりません（設定の「全ファイル表示」を確認）', {
+          duration: 6000,
+        });
+      }
+    }
+    return;
+  }
+
+  try {
+    const tree = await backend.readDirTree(dir, getShowAllFiles());
+    vaultPath = dir;
+    updateStatusBar();
+    loadDirectory(tree);
+    highlightFile(filePath, { scroll: true });
+    watchVault(vaultPath);
+    scheduleSessionSave();
+  } catch (e) {
+    console.error('Failed to open file directory:', e);
+    showToast(`フォルダを開けませんでした: ${e?.message || e}`, { type: 'error', duration: 8000 });
+  }
+}
+
+/** Ctrl+Shift+U / menu: reveal the active tab's folder in the file tree. */
+function handleRevealActiveFileDir() {
+  const tab = getActiveTab();
+  return revealFileDir(tab && tab.path);
 }
 
 // ── Go to path (open a file or folder by typing its path) ──
@@ -1920,6 +1969,11 @@ function buildMenuDefinition() {
         { label: 'ファイルを開く', shortcut: 'Ctrl+O', action: handleOpenFile },
         { label: 'フォルダを開く', shortcut: 'Ctrl+Shift+O', action: handleOpenFolder },
         { label: 'パスを開く', shortcut: 'Ctrl+Shift+P', action: handleGoToPath },
+        {
+          label: 'このファイルの場所を開く',
+          shortcut: 'Ctrl+Shift+U',
+          action: handleRevealActiveFileDir,
+        },
         { separator: true },
         { label: '保存', shortcut: 'Ctrl+S', action: () => performSave({}) },
         {
@@ -2582,6 +2636,12 @@ function handleGlobalKeys(e) {
       e.preventDefault();
       e.stopPropagation();
       cycleSidebarFocus();
+      return;
+    case 'U':
+      // Ctrl+Shift+U: show the active file's folder in the file tree.
+      e.preventDefault();
+      e.stopPropagation();
+      handleRevealActiveFileDir();
       return;
     case 'J':
       e.preventDefault();
