@@ -2386,6 +2386,14 @@ body {
   cursor: grabbing;
 }
 
+/* Locked (default): the diagram is just part of the page, so the wheel and
+   touch drags scroll the preview instead of zooming/panning the diagram. */
+.puml-diagram.panzoom.panzoom-locked,
+.mermaid-diagram.panzoom.panzoom-locked {
+  cursor: default;
+  touch-action: auto;
+}
+
 .panzoom-controls {
   position: absolute;
   top: 6px;
@@ -2419,6 +2427,16 @@ body {
 
 .panzoom-controls button:hover {
   background: var(--bg-hover);
+}
+
+/* Lock toggle: highlighted while mouse interaction is enabled. */
+.panzoom-controls button[data-z='lock'] {
+  font-size: 0.857rem;
+}
+
+.panzoom-controls button.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 /* Full-window diagram viewer */
