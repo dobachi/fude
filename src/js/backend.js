@@ -73,6 +73,14 @@ async function doInvoke(cmd, args) {
 // Export isTauriWebview for use in app.js
 export { isTauriWebview as isLocalTauri };
 
+// Whether an in-app update can complete here (see src-tauri/src/updater_env.rs).
+// Desktop-only: browser mode has no local install to replace, and the HTTP
+// fallback has no such endpoint, so it reports null ("undecidable") instead.
+export async function updateEnv() {
+  if (!isTauriWebview()) return null;
+  return doInvoke('update_env');
+}
+
 export async function readFile(path) {
   return doInvoke('read_file', { path });
 }

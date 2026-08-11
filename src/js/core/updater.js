@@ -1,5 +1,8 @@
 // updater.js - Auto-update check (startup + manual "Check for updates")
-import { isLocalTauri } from '../backend.js';
+import { isLocalTauri, updateEnv } from '../backend.js';
+
+/** Where we send users when the update has to be applied by hand. */
+const RELEASE_PAGE = 'https://github.com/dobachi/fude/releases/latest';
 
 /**
  * Decide the user-facing feedback for a manual update check. Pure so it can be
@@ -58,6 +61,29 @@ export function describeInstallError(error, opts = {}) {
   return { detail, hint };
 }
 
+/**
+ * Decide how the update should be applied. Pure (no DOM, no Tauri).
+ *
+ * On WSL the deb/rpm update cannot succeed, and failing is not even the worst of
+ * it: the updater asks for the password twice on the way down — `pkexec` prompts
+ * on the console (no polkit agent, so it fails), then zenity prompts again in a
+ * GUI dialog. `update_env` tells us this in advance, so we swap the button for a
+ * link to the release page and never start that dance.
+ *
+ * @param {{can_install?: boolean}|null} [env]  result of the update_env command
+ * @returns {{mode: 'in-app'|'manual', label: string, note: string}}
+ */
+export function describeInstallPlan(env = null) {
+  if (env && env.can_install === false) {
+    return {
+      mode: 'manual',
+      label: 'リリースページを開く',
+      note: 'この形式（deb / rpm）の更新には管理者権限が必要ですが、この環境（WSL など）では認証できないため、アプリ内では更新を完了できません。リリースページからパッケージを取得して更新してください。',
+    };
+  }
+  return { mode: 'in-app', label: 'アップデート', note: '' };
+}
+
 /** Whether the current platform is Linux (used to pick the failure hint). */
 export function isLinuxPlatform(nav = typeof navigator !== 'undefined' ? navigator : null) {
   const s = `${nav?.platform || ''} ${nav?.userAgent || ''}`;
@@ -86,7 +112,7 @@ export async function checkForUpdates(opts = {}) {
   }
 
   if (update) {
-    showUpdateDialog(update);
+    await showUpdateDialog(update);
     return;
   }
 
@@ -99,17 +125,26 @@ export async function checkForUpdates(opts = {}) {
   notify?.(r.message, r.type);
 }
 
-function showUpdateDialog(update) {
+async function showUpdateDialog(update) {
+  let env = null;
+  try {
+    env = await updateEnv();
+  } catch (e) {
+    console.info('Update environment check failed:', e); // undecidable -> try as before
+  }
+  const plan = describeInstallPlan(env);
+
   const overlay = document.createElement('div');
   overlay.className = 'settings-overlay';
   overlay.innerHTML = `
     <div class="settings-panel" style="width:400px">
       <div class="settings-body" style="padding:20px">
-        <p style="margin-bottom:8px;color:var(--fg-primary);font-weight:600">Fude ${update.version} が利用可能です</p>
-        <p style="margin-bottom:16px;color:var(--fg-secondary);font-size:13px">${update.body || ''}</p>
+        <p style="margin-bottom:8px;color:var(--fg-primary);font-weight:600">Fude ${escapeText(update.version)} が利用可能です</p>
+        <p style="margin-bottom:16px;color:var(--fg-secondary);font-size:13px">${escapeText(update.body || '')}</p>
+        ${plan.note ? `<p class="update-note" style="margin-bottom:16px;color:var(--fg-secondary);font-size:13px">${escapeText(plan.note)}</p>` : ''}
         <div style="display:flex;gap:8px;justify-content:flex-end">
           <button class="btn-skip" style="padding:6px 16px;background:var(--bg-tertiary);color:var(--fg-primary);border:1px solid var(--border);border-radius:4px;cursor:pointer">スキップ</button>
-          <button class="btn-update" style="padding:6px 16px;background:var(--fg-accent);color:#fff;border:none;border-radius:4px;cursor:pointer">アップデート</button>
+          <button class="btn-update" style="padding:6px 16px;background:var(--fg-accent);color:#fff;border:none;border-radius:4px;cursor:pointer">${escapeText(plan.label)}</button>
         </div>
       </div>
     </div>
@@ -118,6 +153,11 @@ function showUpdateDialog(update) {
 
   overlay.querySelector('.btn-skip').addEventListener('click', () => overlay.remove());
   overlay.querySelector('.btn-update').addEventListener('click', async () => {
+    if (plan.mode === 'manual') {
+      await openReleasePage();
+      overlay.remove();
+      return;
+    }
     overlay.querySelector('.btn-update').textContent = 'ダウンロード中...';
     overlay.querySelector('.btn-update').disabled = true;
     overlay.querySelector('.btn-skip').disabled = true;
@@ -130,6 +170,16 @@ function showUpdateDialog(update) {
       showInstallError(overlay, e);
     }
   });
+}
+
+/** Open the release list in the browser (manual update path). */
+async function openReleasePage() {
+  try {
+    const { openUrl } = await import('@tauri-apps/plugin-opener');
+    await openUrl(RELEASE_PAGE);
+  } catch (e) {
+    console.error('Failed to open the release page:', e);
+  }
 }
 
 /**
@@ -150,9 +200,14 @@ function showInstallError(overlay, error) {
     <p class="update-error-hint" style="margin-bottom:16px;color:var(--fg-secondary);font-size:13px">${escapeText(hint)}</p>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-close" style="padding:6px 16px;background:var(--bg-tertiary);color:var(--fg-primary);border:1px solid var(--border);border-radius:4px;cursor:pointer">閉じる</button>
+      <button class="btn-release" style="padding:6px 16px;background:var(--fg-accent);color:#fff;border:none;border-radius:4px;cursor:pointer">リリースページを開く</button>
     </div>`;
   body.querySelector('.btn-close').addEventListener('click', () => overlay.remove());
-  body.querySelector('.btn-close').focus();
+  body.querySelector('.btn-release').addEventListener('click', async () => {
+    await openReleasePage();
+    overlay.remove();
+  });
+  body.querySelector('.btn-release').focus();
 }
 
 /** Escape text destined for innerHTML (error messages can contain markup). */

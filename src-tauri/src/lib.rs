@@ -1,5 +1,6 @@
 mod file_watcher;
 mod key_storage;
+mod updater_env;
 
 use futures_util::StreamExt;
 use key_storage::{create_storage, set_dir_permissions, set_file_permissions, KeyStorage};
@@ -1677,6 +1678,7 @@ pub fn run() {
             ai_chat,
             ai_chat_stream,
             ai_models,
+            updater_env::update_env,
             file_watcher::watch_file,
             file_watcher::unwatch_file,
             file_watcher::watch_directory,

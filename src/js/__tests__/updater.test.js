@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { describeManualCheck, describeInstallError, isLinuxPlatform } from '../core/updater.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  describeManualCheck,
+  describeInstallPlan,
+  describeInstallError,
+  isLinuxPlatform,
+  checkForUpdates,
+} from '../core/updater.js';
 
 describe('describeManualCheck', () => {
   it('reports unsupported (browser) mode as an error', () => {
@@ -82,5 +88,150 @@ describe('isLinuxPlatform', () => {
 
   it('navigator が無くても壊れない', () => {
     expect(isLinuxPlatform(null)).toBe(false);
+  });
+});
+
+describe('describeInstallPlan', () => {
+  it('判定できないときはアプリ内更新のまま', () => {
+    expect(describeInstallPlan(null).mode).toBe('in-app');
+    expect(describeInstallPlan().label).toBe('アップデート');
+    expect(describeInstallPlan(null).note).toBe('');
+  });
+
+  it('アプリ内更新が可能なら従来どおり', () => {
+    expect(describeInstallPlan({ needs_root: true, no_auth: false, can_install: true }).mode).toBe(
+      'in-app',
+    );
+  });
+
+  // WSL の deb 版では pkexec（コンソール）と zenity（GUI）の両方でパスワードを
+  // 聞かれた末に必ず失敗する。試させないことが目的。
+  it('アプリ内更新が不可能なら手動更新へ誘導する', () => {
+    const plan = describeInstallPlan({ needs_root: true, no_auth: true, can_install: false });
+    expect(plan.mode).toBe('manual');
+    expect(plan.label).toContain('リリースページ');
+    expect(plan.note).toContain('管理者権限');
+  });
+});
+
+// The dialog is only reachable through checkForUpdates, so fake the Tauri runtime
+// and stub the plugins it imports dynamically.
+vi.mock('@tauri-apps/plugin-updater', () => ({ check: () => Promise.resolve(mockUpdate) }));
+vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: () => Promise.resolve(mockRelaunch()) }));
+vi.mock('@tauri-apps/plugin-opener', () => ({
+  openUrl: (url) => Promise.resolve(mockOpenUrl(url)),
+}));
+
+let mockUpdate = null;
+let mockRelaunch = vi.fn();
+let mockOpenUrl = vi.fn();
+/** update_env command result. null = undecidable (fall back to the in-app update) */
+let mockEnv = null;
+
+function fakeTauri() {
+  window.isTauri = true;
+  window.__TAURI_INTERNALS__ = {
+    invoke: vi.fn(async (cmd) => (cmd === 'update_env' ? mockEnv : null)),
+  };
+}
+
+describe('更新ダイアログ', () => {
+  beforeEach(() => {
+    mockEnv = null;
+    fakeTauri();
+    mockRelaunch = vi.fn();
+    mockOpenUrl = vi.fn();
+    mockUpdate = {
+      version: '0.9.9',
+      body: 'リリースノート本文',
+      downloadAndInstall: vi.fn().mockResolvedValue(undefined),
+    };
+  });
+
+  afterEach(() => {
+    delete window.isTauri;
+    delete window.__TAURI_INTERNALS__;
+    document.body.innerHTML = '';
+  });
+
+  it('更新があればダイアログを出す', async () => {
+    await checkForUpdates();
+    const overlay = document.querySelector('.settings-overlay');
+    expect(overlay).toBeTruthy();
+    expect(overlay.textContent).toContain('0.9.9');
+    expect(overlay.textContent).toContain('リリースノート本文');
+  });
+
+  it('スキップで閉じ、インストールしない', async () => {
+    await checkForUpdates();
+    document.querySelector('.btn-skip').click();
+    expect(document.querySelector('.settings-overlay')).toBeNull();
+    expect(mockUpdate.downloadAndInstall).not.toHaveBeenCalled();
+  });
+
+  it('アップデートでインストールし再起動する', async () => {
+    await checkForUpdates();
+    document.querySelector('.btn-update').click();
+    await vi.waitFor(() => expect(mockRelaunch).toHaveBeenCalled());
+    expect(mockUpdate.downloadAndInstall).toHaveBeenCalled();
+  });
+
+  it('失敗したら理由を出したまま閉じず、リリースページへ誘導する', async () => {
+    mockUpdate.downloadAndInstall = vi.fn().mockRejectedValue(new Error('disk full'));
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await checkForUpdates();
+    document.querySelector('.btn-update').click();
+    await vi.waitFor(() => expect(document.querySelector('.update-error-detail')).toBeTruthy());
+    expect(document.querySelector('.update-error-detail').textContent).toContain('disk full');
+    expect(mockRelaunch).not.toHaveBeenCalled();
+    document.querySelector('.btn-release').click();
+    await vi.waitFor(() => expect(mockOpenUrl).toHaveBeenCalled());
+    expect(mockOpenUrl.mock.calls[0][0]).toContain('/releases');
+    err.mockRestore();
+  });
+
+  it('エラーメッセージの markup をエスケープする', async () => {
+    mockUpdate.downloadAndInstall = vi.fn().mockRejectedValue(new Error('<img src=x>'));
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await checkForUpdates();
+    document.querySelector('.btn-update').click();
+    await vi.waitFor(() => expect(document.querySelector('.update-error-detail')).toBeTruthy());
+    expect(document.querySelector('.update-error-detail').querySelector('img')).toBeNull();
+    err.mockRestore();
+  });
+});
+
+describe('更新ダイアログ（アプリ内更新が不可能な環境）', () => {
+  beforeEach(() => {
+    mockEnv = { needs_root: true, no_auth: true, can_install: false };
+    fakeTauri();
+    mockRelaunch = vi.fn();
+    mockOpenUrl = vi.fn();
+    mockUpdate = {
+      version: '0.9.9',
+      body: 'リリースノート本文',
+      downloadAndInstall: vi.fn().mockResolvedValue(undefined),
+    };
+  });
+
+  afterEach(() => {
+    delete window.isTauri;
+    delete window.__TAURI_INTERNALS__;
+    document.body.innerHTML = '';
+  });
+
+  it('理由を添えて手動更新のボタンに差し替える', async () => {
+    await checkForUpdates();
+    expect(document.querySelector('.btn-update').textContent).toContain('リリースページ');
+    expect(document.querySelector('.update-note').textContent).toContain('管理者権限');
+  });
+
+  it('押してもインストールは走らせず、リリースページを開く', async () => {
+    await checkForUpdates();
+    document.querySelector('.btn-update').click();
+    await vi.waitFor(() => expect(mockOpenUrl).toHaveBeenCalled());
+    expect(mockUpdate.downloadAndInstall).not.toHaveBeenCalled();
+    expect(mockRelaunch).not.toHaveBeenCalled();
+    expect(document.querySelector('.settings-overlay')).toBeNull();
   });
 });
