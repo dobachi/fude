@@ -35,6 +35,20 @@ describe('toVaultRelative', () => {
     expect(toVaultRelative('', '/home/me')).toBe('');
     expect(toVaultRelative(null, '/home/me')).toBe('');
   });
+
+  // 前置一致だけだと notes に対して notes-old まで配下扱いしてしまう。
+  it('セグメント境界で判定する（名前の途中で一致させない）', () => {
+    expect(toVaultRelative('/home/me/notes-old/a.md', '/home/me/notes')).toBe(
+      '/home/me/notes-old/a.md',
+    );
+  });
+
+  // tana からは \\wsl.localhost、エクスプローラ経由だと \\wsl$ で届く。
+  it('WSL の UNC 別名が違っても vault 配下と判定する', () => {
+    const file = '\\\\wsl$\\Ubuntu\\home\\me\\notes\\sub\\a.md';
+    const vault = '\\\\wsl.localhost\\Ubuntu\\home\\me\\notes';
+    expect(toVaultRelative(file, vault)).toBe('sub\\a.md');
+  });
 });
 
 describe('truncatePath', () => {
@@ -79,7 +93,33 @@ describe('truncatePath', () => {
 
 describe('statusPathText', () => {
   it('相対化してから省略する', () => {
-    expect(statusPathText('/home/me/notes/projects/a.md', '/home/me/notes')).toBe('projects/a.md');
+    expect(statusPathText('/home/me/notes/projects/a.md', '/home/me/notes')).toBe(
+      './projects/a.md',
+    );
+  });
+
+  // vault 直下だと相対パスがファイル名だけになり、パスが出ていないように見えていた。
+  it('vault 直下でも "./" が付いて相対だと分かる', () => {
+    expect(statusPathText('/home/me/notes/a.md', '/home/me/notes')).toBe('./a.md');
+  });
+
+  it('vault 外は絶対パスのまま（"./" を付けない）', () => {
+    expect(statusPathText('/tmp/other/a.md', '/home/me/notes')).toBe('/tmp/other/a.md');
+    expect(statusPathText('/home/me/a.md', '')).toBe('/home/me/a.md');
+  });
+
+  it('Windows / UNC パスでは ".\\" を使う', () => {
+    expect(statusPathText('C:\\notes\\a.md', 'C:\\notes')).toBe('.\\a.md');
+    const unc = '\\\\wsl.localhost\\Ubuntu\\home\\me\\notes\\a.md';
+    expect(statusPathText(unc, '\\\\wsl.localhost\\Ubuntu\\home\\me\\notes')).toBe('.\\a.md');
+  });
+
+  it('省略が起きるときは先頭の "." ごと畳まれる', () => {
+    const p = '/home/me/notes/' + 'dir/'.repeat(30) + 'a.md';
+    const got = statusPathText(p, '/home/me/notes', { maxLen: 30 });
+    expect(got.startsWith('…/')).toBe(true);
+    expect(got.startsWith('./')).toBe(false);
+    expect(got.length).toBeLessThanOrEqual(30);
   });
 
   it('ファイル未選択なら空文字', () => {
@@ -112,7 +152,7 @@ describe('createStatusBar', () => {
   it('パスを描画し、ツールチップにはフルパスを入れる', () => {
     const bar = createStatusBar({ el, getVaultPath: () => '/home/me/notes' });
     bar.render('/home/me/notes/projects/a.md');
-    expect(pathEl().textContent).toBe('projects/a.md');
+    expect(pathEl().textContent).toBe('./projects/a.md');
     expect(pathEl().title).toBe('/home/me/notes/projects/a.md');
     expect(pathEl().classList.contains('is-empty')).toBe(false);
     expect(bar.getPath()).toBe('/home/me/notes/projects/a.md');
@@ -140,7 +180,7 @@ describe('createStatusBar', () => {
 
     vault = '/home/me/notes'; // ここでフォルダを開いた想定
     bar.render();
-    expect(pathEl().textContent).toBe('a.md');
+    expect(pathEl().textContent).toBe('./a.md');
     expect(bar.getPath()).toBe('/home/me/notes/a.md'); // 保持しているのはフルパス
   });
 

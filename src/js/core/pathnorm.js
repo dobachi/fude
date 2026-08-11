@@ -58,6 +58,36 @@ export function normalizeInputPath(raw, home = '') {
 }
 
 /**
+ * Canonical form used only for *comparing* paths — never for file I/O.
+ *
+ * `\\wsl$\<distro>\…` and `\\wsl.localhost\<distro>\…` name the same location
+ * (the former is the older alias), but they are different strings. Tana hands
+ * Fude the `wsl.localhost` form while Explorer and older sessions use `wsl$`,
+ * so the same file was treated as two different files: it opened in a second
+ * tab, the status bar refused to show it as vault-relative, and revealing it in
+ * the tree missed. Paths are still opened exactly as they were handed to us.
+ *
+ * @param {string} path
+ * @returns {string}
+ */
+export function canonicalPath(path) {
+  return String(path ?? '').replace(/^\\\\wsl\$\\/i, '\\\\wsl.localhost\\');
+}
+
+/**
+ * Whether two paths name the same file, ignoring the WSL UNC alias. Case is
+ * still significant (Fude's target platforms are Linux/WSL).
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+export function samePath(a, b) {
+  const ca = canonicalPath(a);
+  return !!ca && ca === canonicalPath(b);
+}
+
+/**
  * Directory that the file-tree pane should show for a given file path.
  * Handles both POSIX (/) and Windows (\) separators, and keeps the separator
  * for root-level files (`/foo.md` -> `/`, `C:\foo.md` -> `C:\`).
@@ -93,8 +123,8 @@ function trimTrailingSep(path) {
  * @returns {boolean}
  */
 export function isWithinDir(child, parent) {
-  const c = trimTrailingSep(child);
-  const p = trimTrailingSep(parent);
+  const c = trimTrailingSep(canonicalPath(child));
+  const p = trimTrailingSep(canonicalPath(parent));
   if (!c || !p) return false;
   if (c === p) return true;
   // A root ('/') already carries its separator; 'C:' needs one appended.

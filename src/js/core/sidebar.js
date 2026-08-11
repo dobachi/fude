@@ -1,6 +1,7 @@
 // sidebar.js - Directory tree sidebar
 
 import { createListKeyHandler } from './list-nav.js';
+import { samePath } from './pathnorm.js';
 
 let fileTreeContainer = null;
 let onFileSelect = null;
@@ -219,7 +220,7 @@ function buildTreeItem(entry) {
     label.dataset.path = entry.path;
     label.innerHTML = `<span class="tree-icon">\u{1f4c4}</span><span>${escapeHtml(entry.name)}</span>`;
 
-    if (entry.path === activeFilePath) {
+    if (samePath(entry.path, activeFilePath)) {
       label.classList.add('active');
     }
 
@@ -309,7 +310,7 @@ export function highlightFile(path, { scroll = false } = {}) {
   });
 
   fileTreeContainer.querySelectorAll('.tree-item-label[data-path]').forEach((el) => {
-    if (el.dataset.path === path) {
+    if (samePath(el.dataset.path, path)) {
       found = true;
       el.classList.add('active');
       // Expand parent directories (and remember them so a later re-render keeps

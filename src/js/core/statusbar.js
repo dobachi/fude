@@ -5,6 +5,12 @@
 //
 // パスは末尾（ファイル名）が最も重要なので、省略は**先頭側**を削る。
 // CSS の text-overflow に任せると末尾が消えてファイル名が見えなくなるため。
+//
+// vault 相対にしたものは "./" 始まりで示す。無印だと vault 直下のファイルが
+// 「ファイル名だけ」の表示になり、パスが出ていないように見えるため。
+// フルパスは title（ツールチップ）とクリックでのコピーで常に取り出せる。
+
+import { canonicalPath } from './pathnorm.js';
 
 /** 既定の最大表示文字数。これを超えると先頭のディレクトリから畳む。 */
 export const DEFAULT_MAX_LEN = 90;
@@ -23,12 +29,25 @@ export function toVaultRelative(filePath, vaultPath) {
   const p = String(filePath ?? '');
   const v = String(vaultPath ?? '');
   if (!p || !v) return p;
-  const base = v.replace(/[/\\]+$/, '');
+  // 比較は WSL の UNC 別名（\\wsl$ ⇄ \\wsl.localhost）を吸収した形で行う。
+  // 切り出すのは末尾側なので、正規化した文字列から取っても中身は変わらない。
+  const cp = canonicalPath(p);
+  const base = canonicalPath(v).replace(/[/\\]+$/, '');
   if (!base) return p;
-  if (!p.startsWith(base)) return p;
-  const rest = p.slice(base.length).replace(/^[/\\]+/, '');
+  if (!cp.startsWith(base)) return p;
+  const tail = cp.slice(base.length);
+  // 境界が区切り文字であることまで見る。単なる前置一致だと
+  // vault=/a/notes に対して /a/notes-old/x.md まで配下扱いしてしまう。
+  if (tail && !/^[/\\]/.test(tail)) return p;
+  const rest = tail.replace(/^[/\\]+/, '');
   // vault 自身を指していた場合は畳まない（空文字にしない）
   return rest || p;
+}
+
+/** 区切り文字は元のパスの流儀に合わせる（Windows パスを / に書き換えない）。 */
+function separatorOf(path) {
+  const p = String(path ?? '');
+  return p.includes('\\') && !p.includes('/') ? '\\' : '/';
 }
 
 /**
@@ -43,8 +62,7 @@ export function truncatePath(path, maxLen = DEFAULT_MAX_LEN) {
   const p = String(path ?? '');
   if (!p || p.length <= maxLen) return p;
 
-  // 区切り文字は元のパスの流儀に合わせる（Windows パスを / に書き換えない）
-  const sep = p.includes('\\') && !p.includes('/') ? '\\' : '/';
+  const sep = separatorOf(p);
   const segments = p.split(/[/\\]/);
   const name = segments[segments.length - 1];
 
@@ -64,6 +82,11 @@ export function truncatePath(path, maxLen = DEFAULT_MAX_LEN) {
 /**
  * ステータスバーに出す表示用テキスト。ファイル未選択なら空文字。
  *
+ * vault 相対にしたときは "./"（Windows パスなら ".\"）を前置する。付けないと
+ * vault 直下のファイルが「ファイル名だけ」になり、絶対パスの短縮なのか相対なのか
+ * 区別が付かない。省略が起きる場合は先頭の "." ごと "…" に畳まれる。
+ * フルパスはツールチップ（title）とクリックでのコピーで取り出せる。
+ *
  * @param {string|null} filePath
  * @param {string} vaultPath
  * @param {{maxLen?: number}} [opts]
@@ -72,7 +95,9 @@ export function truncatePath(path, maxLen = DEFAULT_MAX_LEN) {
 export function statusPathText(filePath, vaultPath, opts = {}) {
   if (!filePath) return '';
   const maxLen = opts.maxLen ?? DEFAULT_MAX_LEN;
-  return truncatePath(toVaultRelative(filePath, vaultPath), maxLen);
+  const rel = toVaultRelative(filePath, vaultPath);
+  const shown = rel === filePath ? rel : '.' + separatorOf(filePath) + rel;
+  return truncatePath(shown, maxLen);
 }
 
 /**

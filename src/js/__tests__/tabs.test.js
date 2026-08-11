@@ -34,6 +34,23 @@ describe('tabs module', () => {
     mod = await import('../core/tabs.js');
   });
 
+  // \\wsl$\<distro> と \\wsl.localhost\<distro> は同じ場所の別名。tana 経由と
+  // エクスプローラ経由で形が変わるため、照合を素の文字列比較にすると同じファイルが
+  // 二重に開いてしまう。
+  it('getTabByPath は WSL の UNC 別名違いを同一視する', () => {
+    const modern = '\\\\wsl.localhost\\Ubuntu\\home\\me\\a.md';
+    const legacy = '\\\\wsl$\\Ubuntu\\home\\me\\a.md';
+    const tab = mod.openTab(modern, '# a');
+    expect(mod.getTabByPath(legacy)).toBe(tab);
+    expect(mod.getTabByPath('\\\\wsl$\\Ubuntu\\home\\me\\b.md')).toBeUndefined();
+  });
+
+  it('getTabByPath は未保存タブ（path なし）を取り違えない', () => {
+    mod.openTab(null, 'untitled');
+    expect(mod.getTabByPath(null)).toBeUndefined();
+    expect(mod.getTabByPath('')).toBeUndefined();
+  });
+
   it('openTab creates a tab and renders it in the DOM', () => {
     const tab = mod.openTab('/docs/hello.md', '# Hello');
 

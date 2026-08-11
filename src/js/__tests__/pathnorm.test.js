@@ -6,6 +6,8 @@ import {
   fileDirForTree,
   isWithinDir,
   resolveRevealDir,
+  canonicalPath,
+  samePath,
 } from '../core/pathnorm.js';
 
 describe('stripPathDecorations', () => {
@@ -201,5 +203,49 @@ describe('resolveRevealDir', () => {
     expect(resolveRevealDir(null, '/home/u/notes')).toEqual({ action: 'none', dir: '' });
     expect(resolveRevealDir('', '/home/u/notes')).toEqual({ action: 'none', dir: '' });
     expect(resolveRevealDir('untitled.md', '/home/u/notes')).toEqual({ action: 'none', dir: '' });
+  });
+});
+
+// \\wsl$\<distro> と \\wsl.localhost\<distro> は同じ場所の別名。tana からは
+// 後者、エクスプローラや古いセッションからは前者で届き、同じファイルが別物として
+// 扱われていた（タブが二重に開く / vault 相対にならない / ツリーで見つからない）。
+describe('canonicalPath / samePath', () => {
+  const legacy = '\\\\wsl$\\Ubuntu-22.04\\home\\me\\notes\\a.md';
+  const modern = '\\\\wsl.localhost\\Ubuntu-22.04\\home\\me\\notes\\a.md';
+
+  it('WSL の旧 UNC 別名を新しい形に寄せる', () => {
+    expect(canonicalPath(legacy)).toBe(modern);
+    expect(canonicalPath(modern)).toBe(modern);
+  });
+
+  it('先頭以外の wsl$ には触らない', () => {
+    expect(canonicalPath('/home/me/wsl$/a.md')).toBe('/home/me/wsl$/a.md');
+  });
+
+  it('WSL 以外のパスはそのまま', () => {
+    expect(canonicalPath('/home/me/a.md')).toBe('/home/me/a.md');
+    expect(canonicalPath('C:\\notes\\a.md')).toBe('C:\\notes\\a.md');
+    expect(canonicalPath(null)).toBe('');
+  });
+
+  it('別名違いを同一視する', () => {
+    expect(samePath(legacy, modern)).toBe(true);
+    expect(samePath(modern, modern)).toBe(true);
+  });
+
+  it('別ファイルは同一視しない', () => {
+    expect(samePath(legacy, modern.replace('a.md', 'b.md'))).toBe(false);
+    expect(samePath('/home/me/a.md', '/home/me/A.md')).toBe(false); // 大小は区別する
+  });
+
+  it('空パスはどれとも一致しない（未選択の取り違えを防ぐ）', () => {
+    expect(samePath('', '')).toBe(false);
+    expect(samePath(null, undefined)).toBe(false);
+    expect(samePath(null, '/home/me/a.md')).toBe(false);
+  });
+
+  it('isWithinDir も別名違いを吸収する', () => {
+    expect(isWithinDir(legacy, '\\\\wsl.localhost\\Ubuntu-22.04\\home\\me\\notes')).toBe(true);
+    expect(isWithinDir(modern, '\\\\wsl$\\Ubuntu-22.04\\home\\me')).toBe(true);
   });
 });

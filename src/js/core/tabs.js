@@ -1,6 +1,7 @@
 // tabs.js - Tab management, one EditorView at a time
 import * as backend from '../backend.js';
 import { clearPanesWithFile } from './panes.js';
+import { samePath } from './pathnorm.js';
 
 function showConfirmDialog(message, onConfirm) {
   const overlay = document.createElement('div');
@@ -306,7 +307,9 @@ export function getTabDiskHash(id) {
 
 /** Find a tab by file path (or undefined). */
 export function getTabByPath(path) {
-  return tabs.find((t) => t.path === path);
+  // WSL の UNC 別名（\\wsl$ ⇄ \\wsl.localhost）違いで同じファイルが
+  // 二重に開かないよう、照合は正規化して行う。
+  return tabs.find((t) => samePath(t.path, path));
 }
 
 function renderTabBar() {
