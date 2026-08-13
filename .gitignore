@@ -8,3 +8,6 @@ testfile
 testfile.md
 testfile2.md
 .fude-chat/
+# 計測用フィクスチャ。scripts/gen-perf-fixtures.js が決定的に再生成するので
+# 生成物そのものは追跡しない。
+.perf-fixtures/
