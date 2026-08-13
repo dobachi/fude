@@ -72,6 +72,51 @@ export function renderBlockHtml(md, text, env = {}) {
   return splitTopLevelBlocks(tokens).map((block) => md.renderer.render(block, md.options, env));
 }
 
+const SOURCE_LINE_ATTR = /data-source-line="(\d+)"/g;
+
+/**
+ * Comparison key for a block: its HTML with the source-line numbers blanked.
+ *
+ * Every block-level element carries `data-source-line` for scroll sync, so
+ * inserting or deleting a single line renumbers every block below it. Compared
+ * verbatim, pressing Enter therefore rebuilds the whole remainder of the
+ * document — losing diagram zoom and re-running the highlight and diagram
+ * passes over everything below the caret. Keying on the line-free HTML lets
+ * those blocks be recognised as unchanged; `patchSourceLines` then fixes up the
+ * numbers in place.
+ */
+export function blockKey(html) {
+  return html.replace(SOURCE_LINE_ATTR, 'data-source-line=""');
+}
+
+/** The source-line values a block's HTML carries, in document order. */
+function sourceLineValues(html) {
+  return Array.from(html.matchAll(SOURCE_LINE_ATTR), (m) => m[1]);
+}
+
+/**
+ * Rewrite the `data-source-line` values of an already-rendered block.
+ *
+ * Positional, not by identity: a diagram pass may have swapped the `<pre>` for
+ * its holder div, but the holder copies the attribute across, so the count and
+ * order of carrying elements survive.
+ */
+function patchSourceLines(container, offset, count, html) {
+  const values = sourceLineValues(html);
+  if (!values.length) return;
+
+  const carriers = [];
+  for (let k = 0; k < count; k++) {
+    const node = container.childNodes[offset + k];
+    if (!node || node.nodeType !== 1) continue;
+    if (node.hasAttribute('data-source-line')) carriers.push(node);
+    for (const el of node.querySelectorAll('[data-source-line]')) carriers.push(el);
+  }
+
+  const n = Math.min(carriers.length, values.length);
+  for (let k = 0; k < n; k++) carriers[k].setAttribute('data-source-line', values[k]);
+}
+
 /**
  * Locate the span that differs between two block lists.
  *
@@ -135,7 +180,7 @@ export function buildAll(container, htmlList) {
   const blocks = htmlList.map((html) => {
     const built = buildFragment(doc, html);
     frag.appendChild(built.fragment);
-    return { html, count: built.count };
+    return { html, key: blockKey(html), count: built.count };
   });
   container.appendChild(frag);
   return blocks;
@@ -165,35 +210,54 @@ export function applyBlocks(container, prevBlocks, htmlList) {
     return { blocks: buildAll(container, htmlList), replaced: htmlList.length, full: true };
   }
 
+  const nextKeys = htmlList.map(blockKey);
   const { start, prevEnd, nextEnd } = diffRange(
-    prevBlocks.map((b) => b.html),
-    htmlList,
+    prevBlocks.map((b) => b.key),
+    nextKeys,
   );
 
-  if (start === prevEnd && start === nextEnd) {
-    return { blocks: prevBlocks, replaced: 0, full: false };
+  let blocks = prevBlocks;
+  let replaced = 0;
+
+  if (start !== prevEnd || start !== nextEnd) {
+    const from = offsetOf(prevBlocks, start);
+    const removeCount = totalNodes(prevBlocks.slice(start, prevEnd));
+
+    // Snapshot before removing: childNodes is live, so indices shift underneath.
+    const doomed = [];
+    for (let k = 0; k < removeCount; k++) doomed.push(container.childNodes[from + k]);
+    for (const node of doomed) if (node) container.removeChild(node);
+
+    const frag = doc.createDocumentFragment();
+    const inserted = [];
+    for (let i = start; i < nextEnd; i++) {
+      const built = buildFragment(doc, htmlList[i]);
+      frag.appendChild(built.fragment);
+      inserted.push({ html: htmlList[i], key: nextKeys[i], count: built.count });
+    }
+    container.insertBefore(frag, container.childNodes[from] || null);
+
+    blocks = [...prevBlocks.slice(0, start), ...inserted, ...prevBlocks.slice(prevEnd)];
+    replaced = inserted.length;
   }
 
-  const from = offsetOf(prevBlocks, start);
-  const removeCount = totalNodes(prevBlocks.slice(start, prevEnd));
-
-  // Snapshot before removing: childNodes is live, so indices shift underneath.
-  const doomed = [];
-  for (let k = 0; k < removeCount; k++) doomed.push(container.childNodes[from + k]);
-  for (const node of doomed) if (node) container.removeChild(node);
-
-  const frag = doc.createDocumentFragment();
-  const inserted = [];
-  for (let i = start; i < nextEnd; i++) {
-    const built = buildFragment(doc, htmlList[i]);
-    frag.appendChild(built.fragment);
-    inserted.push({ html: htmlList[i], count: built.count });
+  // Blocks kept by key can still carry stale line numbers — that is the whole
+  // point of keying without them. Fix the attributes in place rather than
+  // rebuilding, so their rendered diagrams and highlighting survive.
+  let offset = 0;
+  let out = blocks;
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    const html = htmlList[i];
+    const insideReplaced = i >= start && i < start + replaced;
+    if (!insideReplaced && html !== undefined && block.html !== html) {
+      patchSourceLines(container, offset, block.count, html);
+      // Copy on write: `blocks` may still be the caller's array.
+      if (out === prevBlocks) out = [...prevBlocks];
+      out[i] = { ...block, html };
+    }
+    offset += block.count;
   }
-  container.insertBefore(frag, container.childNodes[from] || null);
 
-  return {
-    blocks: [...prevBlocks.slice(0, start), ...inserted, ...prevBlocks.slice(prevEnd)],
-    replaced: inserted.length,
-    full: false,
-  };
+  return { blocks: out, replaced, full: false };
 }

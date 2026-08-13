@@ -6,6 +6,7 @@ import {
   diffRange,
   buildAll,
   applyBlocks,
+  blockKey,
 } from '../core/preview-blocks.js';
 
 const md = markdownIt({ html: false, linkify: true, breaks: true });
@@ -376,5 +377,125 @@ describe('applyBlocks — 外部からの書き換えへの耐性', () => {
 
     expect(result.full).toBe(true);
     expect(el.querySelector('p').textContent).toBe('a');
+  });
+});
+
+describe('data-source-line の扱い', () => {
+  // preview.js の createMd() と同じく、ブロック要素に行番号を付ける
+  const lineMd = markdownIt({ html: false, linkify: true, breaks: true });
+  lineMd.core.ruler.push('source_line', (state) => {
+    for (const token of state.tokens) {
+      if (!token.map) continue;
+      if (
+        token.type.endsWith('_open') ||
+        token.type === 'code_block' ||
+        token.type === 'fence' ||
+        token.type === 'hr' ||
+        token.type === 'html_block'
+      ) {
+        token.attrSet('data-source-line', String(token.map[0] + 1));
+      }
+    }
+  });
+  // preview.js の renderFenceLike と同じく、フェンスでは <pre> 側に行番号を置く
+  lineMd.renderer.rules.fence = (tokens, idx) => {
+    const token = tokens[idx];
+    const line = token.attrGet('data-source-line');
+    const lang = token.info ? token.info.trim().split(/\s+/)[0] : '';
+    const langClass = lang ? ` class="language-${lang}"` : '';
+    return `<pre data-source-line="${line || ''}"><code${langClass}>${token.content}</code></pre>\n`;
+  };
+
+  const render = (text) => renderBlockHtml(lineMd, text, {});
+
+  it('blockKey は行番号を無視する', () => {
+    const a = '<p data-source-line="3">x</p>';
+    const b = '<p data-source-line="9">x</p>';
+    expect(blockKey(a)).toBe(blockKey(b));
+    expect(blockKey(a)).not.toBe(blockKey('<p data-source-line="3">y</p>'));
+  });
+
+  // 改行を1つ入れると以降の全ブロックの行番号がずれる。行番号込みで比較すると
+  // Enter を押すたびに文書の残り全部が作り直され、図のズームも失われる。
+  it('前方に改行を挿入しても後続ブロックのノードが保持される', () => {
+    const before = 'one\n\ntwo\n\nthree\n';
+    const after = 'one\n\nINSERTED\n\ntwo\n\nthree\n';
+
+    const el = container();
+    let blocks = buildAll(el, render(before));
+    const twoNode = el.querySelectorAll('p')[1];
+    const threeNode = el.querySelectorAll('p')[2];
+    twoNode.dataset.marked = '1';
+    threeNode.dataset.marked = '1';
+
+    const result = applyBlocks(el, blocks, render(after));
+    blocks = result.blocks;
+
+    // 追加された1ブロックだけが作られ、既存ノードは同一のまま
+    expect(result.replaced).toBe(1);
+    const paras = el.querySelectorAll('p');
+    expect(paras[2]).toBe(twoNode);
+    expect(paras[3]).toBe(threeNode);
+    expect(paras[2].dataset.marked).toBe('1');
+  });
+
+  it('保持したブロックの行番号は書き換えられる', () => {
+    const el = container();
+    let blocks = buildAll(el, render('one\n\ntwo\n'));
+    const twoNode = el.querySelectorAll('p')[1];
+    expect(twoNode.getAttribute('data-source-line')).toBe('3');
+
+    blocks = applyBlocks(el, blocks, render('one\n\nINSERTED\n\ntwo\n')).blocks;
+
+    // 同じノードのまま、行番号だけが追従している
+    expect(el.querySelectorAll('p')[2]).toBe(twoNode);
+    expect(twoNode.getAttribute('data-source-line')).toBe('5');
+  });
+
+  // 後段パスが <pre> をホルダに差し替えても、ホルダが属性を引き継ぐので
+  // 位置による対応付けは崩れない
+  it('図のホルダに差し替わっていても行番号を書き換えられる', () => {
+    const el = container();
+    let blocks = buildAll(el, render('one\n\n```plantuml\n@startuml\n@enduml\n```\n'));
+
+    const pre = el.querySelector('pre');
+    const holder = document.createElement('div');
+    holder.className = 'puml-diagram';
+    holder.setAttribute('data-source-line', pre.getAttribute('data-source-line'));
+    holder.textContent = 'rendered svg';
+    pre.replaceWith(holder);
+    expect(holder.getAttribute('data-source-line')).toBe('3');
+
+    const result = applyBlocks(
+      el,
+      blocks,
+      render('one\n\nINSERTED\n\n```plantuml\n@startuml\n@enduml\n```\n'),
+    );
+
+    expect(el.querySelector('.puml-diagram')).toBe(holder);
+    expect(holder.textContent).toBe('rendered svg');
+    expect(holder.getAttribute('data-source-line')).toBe('5');
+    expect(result.replaced).toBe(1);
+  });
+
+  it('行番号が変わっただけでも最終的な行番号はフル描画と一致する', () => {
+    const steps = [
+      'a\n\nb\n\nc\n',
+      'a\n\nX\n\nb\n\nc\n',
+      'a\n\nX\n\nY\n\nb\n\nc\n',
+      'a\n\nb\n\nc\n',
+    ];
+
+    const el = container();
+    let blocks = buildAll(el, render(steps[0]));
+
+    for (const step of steps.slice(1)) {
+      blocks = applyBlocks(el, blocks, render(step)).blocks;
+
+      const expected = container();
+      expected.innerHTML = render(step).join('');
+      expect(el.innerHTML).toBe(expected.innerHTML);
+      expected.remove();
+    }
   });
 });
