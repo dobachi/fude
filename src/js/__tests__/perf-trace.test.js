@@ -176,6 +176,54 @@ describe('perf-trace', () => {
     });
   });
 
+  describe('start', () => {
+    it('records nothing while disabled and returns a callable', () => {
+      const done = perf.start('a');
+      done();
+      expect(perf.rows()).toEqual([]);
+    });
+
+    it('records one sample when stopped', () => {
+      perf.enable();
+      perf.start('a')();
+
+      const [row] = perf.rows();
+      expect(row.label).toBe('a');
+      expect(row.count).toBe(1);
+    });
+
+    // The bug this exists to prevent: `timeAsync` stops the clock only after
+    // the caller's synchronous tail has run, because `await` yields to the
+    // microtask queue. A pass that returns immediately then gets billed for
+    // whatever the caller did next — which is how an empty PlantUML pass was
+    // measured at 95ms, exactly matching the caller's forced layout.
+    it("stopping from inside excludes the caller's synchronous tail", async () => {
+      perf.enable();
+
+      async function passThatReturnsImmediately() {
+        const done = perf.start('inside');
+        try {
+          return;
+        } finally {
+          done();
+        }
+      }
+
+      const pending = perf.timeAsync('outside', () => passThatReturnsImmediately());
+
+      // The caller keeps working synchronously after kicking off the pass.
+      const busyUntil = Date.now() + 15;
+      while (Date.now() < busyUntil) {
+        /* burn wall-clock the way a forced layout would */
+      }
+      await pending;
+
+      const totals = Object.fromEntries(perf.rows().map((r) => [r.label, r.total]));
+      expect(totals.outside).toBeGreaterThanOrEqual(10);
+      expect(totals.inside).toBeLessThan(5);
+    });
+  });
+
   describe('installGlobal', () => {
     it('exposes the control surface on the target', () => {
       const target = {};

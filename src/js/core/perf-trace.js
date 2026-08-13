@@ -67,7 +67,18 @@ export function time(label, fn) {
   }
 }
 
-/** Time an async call. Same contract as `time`, awaiting the result. */
+/**
+ * Time an async call from the outside. Same contract as `time`.
+ *
+ * CAUTION: `await` always yields to the microtask queue, so this stops the
+ * clock only after the caller's remaining SYNCHRONOUS work has run. Wrapping a
+ * pass that returns early therefore reports the caller's tail as if it were
+ * the pass's own cost — which is how a PlantUML pass with no diagrams to draw
+ * came out at 95 ms, exactly matching the caller's forced layout.
+ *
+ * Use `start()` from inside the measured function instead whenever the
+ * function can complete without a real await.
+ */
 export async function timeAsync(label, fn) {
   if (!enabled) return fn();
   const t0 = now();
@@ -76,6 +87,24 @@ export async function timeAsync(label, fn) {
   } finally {
     record(label, now() - t0);
   }
+}
+
+/**
+ * Start a timer, to be stopped from inside the measured function.
+ *
+ * Because the stop lands in that function's own `finally`, a body that
+ * finishes synchronously is charged nothing for whatever the caller does
+ * afterwards. Returns a no-op while disabled.
+ *
+ *   async function pass() {
+ *     const done = start('label');
+ *     try { ... } finally { done(); }
+ *   }
+ */
+export function start(label) {
+  if (!enabled) return () => {};
+  const t0 = now();
+  return () => record(label, now() - t0);
 }
 
 /** Round to 3 decimals so the table stays readable at sub-ms resolution. */

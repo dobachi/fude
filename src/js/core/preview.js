@@ -6,7 +6,7 @@ import { highlightCode } from './code-highlight.js';
 import { isLocalTauri } from '../backend.js';
 import { openExternal, isExternalUrl } from './external-link.js';
 import { resolveLinkTarget } from './link-target.js';
-import { time, timeAsync } from './perf-trace.js';
+import { time, start as startTimer } from './perf-trace.js';
 import {
   isQuartoFile,
   applyQuartoExtensions,
@@ -496,9 +496,14 @@ export async function enhancePreview(container) {
   // These re-run in full on every render because innerHTML replacement wipes
   // the dataset guards that would otherwise let them skip finished blocks, so
   // they are prime suspects on diagram- or code-heavy documents.
-  await timeAsync('preview:plantuml', () => renderPlantumlBlocks(container));
-  await timeAsync('preview:mermaid', () => renderMermaidBlocks(container));
-  await timeAsync('preview:highlight', () => highlightCodeBlocks(container));
+  //
+  // Each pass times ITSELF rather than being wrapped here. Wrapping meant the
+  // clock stopped only after the caller's remaining synchronous work, which
+  // charged a PlantUML pass with no diagrams to draw with the caller's forced
+  // layout — 95 ms of someone else's cost. See perf-trace's `start`.
+  await renderPlantumlBlocks(container);
+  await renderMermaidBlocks(container);
+  await highlightCodeBlocks(container);
 }
 
 /**
@@ -508,23 +513,29 @@ export async function enhancePreview(container) {
  * @param {HTMLElement} container
  */
 async function highlightCodeBlocks(container) {
-  if (!codeHighlightEnabled || !container) return;
-  const codes = container.querySelectorAll('pre > code[class*="language-"]');
-  await Promise.all(
-    Array.from(codes).map(async (code) => {
-      if (code.dataset.hlHandled) return;
-      const cls = Array.from(code.classList).find((c) => c.startsWith('language-'));
-      if (!cls) return;
-      const lang = cls.slice('language-'.length);
-      // PlantUML/Mermaid fences are handled by their own renderer (or left
-      // plain when that extension is off); never syntax-highlight them.
-      if (lang === 'plantuml' || lang === 'puml' || lang === 'mermaid') return;
-      code.dataset.hlHandled = '1';
-      const html = await highlightCode(code.textContent || '', lang);
-      // Re-check connectivity: preview may have re-rendered while awaiting.
-      if (html != null && code.isConnected) code.innerHTML = html;
-    }),
-  );
+  // Timed from inside so an early return is charged nothing; see enhancePreview.
+  const done = startTimer('preview:highlight');
+  try {
+    if (!codeHighlightEnabled || !container) return;
+    const codes = container.querySelectorAll('pre > code[class*="language-"]');
+    await Promise.all(
+      Array.from(codes).map(async (code) => {
+        if (code.dataset.hlHandled) return;
+        const cls = Array.from(code.classList).find((c) => c.startsWith('language-'));
+        if (!cls) return;
+        const lang = cls.slice('language-'.length);
+        // PlantUML/Mermaid fences are handled by their own renderer (or left
+        // plain when that extension is off); never syntax-highlight them.
+        if (lang === 'plantuml' || lang === 'puml' || lang === 'mermaid') return;
+        code.dataset.hlHandled = '1';
+        const html = await highlightCode(code.textContent || '', lang);
+        // Re-check connectivity: preview may have re-rendered while awaiting.
+        if (html != null && code.isConnected) code.innerHTML = html;
+      }),
+    );
+  } finally {
+    done();
+  }
 }
 
 /**
@@ -534,51 +545,57 @@ async function highlightCodeBlocks(container) {
  * @param {HTMLElement} container
  */
 async function renderPlantumlBlocks(container) {
-  if (!plantumlEnabled || !container) return;
-  const codes = container.querySelectorAll(
-    'pre > code.language-plantuml, pre > code.language-puml',
-  );
-  if (!codes.length) return;
-
-  let adapter;
+  // Timed from inside so an early return is charged nothing; see enhancePreview.
+  const done = startTimer('preview:plantuml');
   try {
-    adapter = await import('../features/plantuml/adapter.js');
-  } catch (e) {
-    console.error('Failed to load PlantUML adapter:', e);
-    return;
-  }
-
-  const jobs = [];
-  codes.forEach((code) => {
-    const pre = code.parentElement;
-    if (!pre || pre.dataset.pumlHandled) return;
-    pre.dataset.pumlHandled = '1';
-
-    const text = code.textContent || '';
-    const line = pre.getAttribute('data-source-line') || '';
-    const holder = document.createElement('div');
-    holder.className = 'puml-diagram';
-    if (line) holder.setAttribute('data-source-line', line);
-    holder.textContent = '⏳ PlantUML…';
-    pre.replaceWith(holder);
-
-    jobs.push(
-      adapter
-        .renderPlantUML(text, currentBasePath)
-        .then((svg) => {
-          if (!holder.isConnected) return;
-          holder.innerHTML = svg;
-          attachPanZoom(holder);
-        })
-        .catch((err) => {
-          if (!holder.isConnected) return;
-          holder.classList.add('puml-error');
-          holder.textContent = `PlantUML error: ${err.message}`;
-        }),
+    if (!plantumlEnabled || !container) return;
+    const codes = container.querySelectorAll(
+      'pre > code.language-plantuml, pre > code.language-puml',
     );
-  });
-  // See renderMermaidBlocks: await so an awaiting caller gets finished SVG.
-  await Promise.all(jobs);
+    if (!codes.length) return;
+
+    let adapter;
+    try {
+      adapter = await import('../features/plantuml/adapter.js');
+    } catch (e) {
+      console.error('Failed to load PlantUML adapter:', e);
+      return;
+    }
+
+    const jobs = [];
+    codes.forEach((code) => {
+      const pre = code.parentElement;
+      if (!pre || pre.dataset.pumlHandled) return;
+      pre.dataset.pumlHandled = '1';
+
+      const text = code.textContent || '';
+      const line = pre.getAttribute('data-source-line') || '';
+      const holder = document.createElement('div');
+      holder.className = 'puml-diagram';
+      if (line) holder.setAttribute('data-source-line', line);
+      holder.textContent = '⏳ PlantUML…';
+      pre.replaceWith(holder);
+
+      jobs.push(
+        adapter
+          .renderPlantUML(text, currentBasePath)
+          .then((svg) => {
+            if (!holder.isConnected) return;
+            holder.innerHTML = svg;
+            attachPanZoom(holder);
+          })
+          .catch((err) => {
+            if (!holder.isConnected) return;
+            holder.classList.add('puml-error');
+            holder.textContent = `PlantUML error: ${err.message}`;
+          }),
+      );
+    });
+    // See renderMermaidBlocks: await so an awaiting caller gets finished SVG.
+    await Promise.all(jobs);
+  } finally {
+    done();
+  }
 }
 
 /**
@@ -588,51 +605,57 @@ async function renderPlantumlBlocks(container) {
  * @param {HTMLElement} container
  */
 async function renderMermaidBlocks(container) {
-  if (!mermaidEnabled || !container) return;
-  const codes = container.querySelectorAll('pre > code.language-mermaid');
-  if (!codes.length) return;
-
-  let adapter;
+  // Timed from inside so an early return is charged nothing; see enhancePreview.
+  const done = startTimer('preview:mermaid');
   try {
-    adapter = await import('../features/mermaid/adapter.js');
-  } catch (e) {
-    console.error('Failed to load Mermaid adapter:', e);
-    return;
+    if (!mermaidEnabled || !container) return;
+    const codes = container.querySelectorAll('pre > code.language-mermaid');
+    if (!codes.length) return;
+
+    let adapter;
+    try {
+      adapter = await import('../features/mermaid/adapter.js');
+    } catch (e) {
+      console.error('Failed to load Mermaid adapter:', e);
+      return;
+    }
+
+    const jobs = [];
+    codes.forEach((code) => {
+      const pre = code.parentElement;
+      if (!pre || pre.dataset.mermaidHandled) return;
+      pre.dataset.mermaidHandled = '1';
+
+      const text = code.textContent || '';
+      const line = pre.getAttribute('data-source-line') || '';
+      const holder = document.createElement('div');
+      holder.className = 'mermaid-diagram';
+      if (line) holder.setAttribute('data-source-line', line);
+      holder.textContent = '⏳ Mermaid…';
+      pre.replaceWith(holder);
+
+      jobs.push(
+        adapter
+          .renderMermaid(text)
+          .then((svg) => {
+            if (!holder.isConnected) return;
+            holder.innerHTML = svg;
+            attachPanZoom(holder);
+          })
+          .catch((err) => {
+            if (!holder.isConnected) return;
+            holder.classList.add('mermaid-error');
+            holder.textContent = `Mermaid error: ${err.message}`;
+          }),
+      );
+    });
+    // Await SVG resolution so callers that await the render (e.g. printing) get a
+    // fully-rendered snapshot. Live callers fire this unawaited, so the preview
+    // UI still shows placeholders immediately and fills in progressively.
+    await Promise.all(jobs);
+  } finally {
+    done();
   }
-
-  const jobs = [];
-  codes.forEach((code) => {
-    const pre = code.parentElement;
-    if (!pre || pre.dataset.mermaidHandled) return;
-    pre.dataset.mermaidHandled = '1';
-
-    const text = code.textContent || '';
-    const line = pre.getAttribute('data-source-line') || '';
-    const holder = document.createElement('div');
-    holder.className = 'mermaid-diagram';
-    if (line) holder.setAttribute('data-source-line', line);
-    holder.textContent = '⏳ Mermaid…';
-    pre.replaceWith(holder);
-
-    jobs.push(
-      adapter
-        .renderMermaid(text)
-        .then((svg) => {
-          if (!holder.isConnected) return;
-          holder.innerHTML = svg;
-          attachPanZoom(holder);
-        })
-        .catch((err) => {
-          if (!holder.isConnected) return;
-          holder.classList.add('mermaid-error');
-          holder.textContent = `Mermaid error: ${err.message}`;
-        }),
-    );
-  });
-  // Await SVG resolution so callers that await the render (e.g. printing) get a
-  // fully-rendered snapshot. Live callers fire this unawaited, so the preview
-  // UI still shows placeholders immediately and fills in progressively.
-  await Promise.all(jobs);
 }
 
 export function setTheme(_theme) {
