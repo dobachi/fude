@@ -59,6 +59,7 @@ import {
   renderPreview,
   scrollToAnchor,
 } from './core/preview.js';
+import { createPreviewScheduler } from './core/preview-scheduler.js';
 import {
   openTab,
   closeTab,
@@ -266,8 +267,32 @@ function cycleSidebarFocus() {
   }
 }
 
+/**
+ * Render a pane's preview right now, preserving its scroll position.
+ *
+ * Replacing innerHTML resets scrollTop to 0 and fires a scroll event, which
+ * handlePreviewScroll would otherwise follow back into the editor. Claiming
+ * 'editor' as the recent sync source makes its lockout swallow that bounce.
+ */
+function renderPanePreviewNow({ pane, content, basePath, filePath }) {
+  const container = pane.previewContainer;
+  // The pane may have been closed while the render was queued.
+  if (!container || !container.isConnected) return;
+  recordScrollSync('editor');
+  const prevScrollTop = container.scrollTop;
+  renderPreview(content, basePath, container, filePath);
+  container.scrollTop = prevScrollTop;
+}
+
+// Typing schedules preview renders through here instead of rendering on every
+// keystroke; see core/preview-scheduler.js for why it is not a plain debounce.
+// Call sites that render a pane themselves cancel its queued job first, so the
+// same pane never renders twice for one change.
+const previewScheduler = createPreviewScheduler(renderPanePreviewNow);
+
 /** Re-render the preview in every pane (used after a live config change). */
 function rerenderPreviews() {
+  previewScheduler.cancelAll();
   for (const p of panesModule.getAllPanes()) {
     if (!p.previewContainer) continue;
     const mode = paneViewMode(p);
@@ -1107,23 +1132,21 @@ function handlePaneContentChange(pane, newContent) {
   scheduleOutlineUpdate(newContent);
 
   if (currentViewMode() === 'split' || currentViewMode() === 'preview') {
-    const basePath = dirnameOf(tab.path);
-    // Suppress the spurious preview→editor scroll sync caused by innerHTML
-    // replacement. When renderMarkdown resets innerHTML the browser drops
-    // scrollTop to 0, fires a scroll event, and handlePreviewScroll would
-    // otherwise drag the editor back to line ≈1 on every keystroke (vim x,
-    // delete, normal typing). Marking 'editor' as the recent sync source
-    // makes handlePreviewScroll's lockout swallow that bounce.
-    recordScrollSync('editor');
-    // Also gate editor→preview sync for a short window. CM reflows line
-    // wrap and may scrollIntoView the cursor on each keystroke, which
-    // would otherwise drive syncPreviewToLine and shake the preview.
+    // Gate editor→preview sync for a short window. CM reflows line wrap and
+    // may scrollIntoView the cursor on each keystroke, which would otherwise
+    // drive syncPreviewToLine and shake the preview. This tracks keystrokes,
+    // not renders, so it stays here rather than moving into the scheduler.
     typingLockoutUntil = Date.now() + TYPING_PREVIEW_SYNC_LOCKOUT_MS;
-    const prevScrollTop = pane.previewContainer.scrollTop;
-    renderPreview(newContent, basePath, pane.previewContainer, tab.path);
-    // Preserve preview scroll position across re-render so the preview
-    // doesn't visually jump to the top on every edit.
-    pane.previewContainer.scrollTop = prevScrollTop;
+    // Coalesced rather than rendered inline: a full markdown parse plus an
+    // innerHTML replacement per keystroke is the most expensive thing the
+    // editor does while typing, and it scales with document size. The
+    // scheduler's max wait keeps the preview live during a sustained burst.
+    previewScheduler.schedule(pane, {
+      pane,
+      content: newContent,
+      basePath: dirnameOf(tab.path),
+      filePath: tab.path,
+    });
   }
 
   scheduleSessionSave();
@@ -1743,6 +1766,10 @@ function applyReloadToAllPanes(path, content, tabId) {
       // setContentFromDisk also handles cursor + scroll restoration
       setContentFromDisk(p.editorView, content);
       p.content = content;
+      // Drop any render queued from typing before the reload landed. Without
+      // this, that job would fire afterwards and repaint the preview with the
+      // pre-reload text, leaving it disagreeing with the editor.
+      previewScheduler.cancel(p);
       // Re-render preview if visible
       const mode = paneViewMode(p);
       if ((mode === 'split' || mode === 'preview') && p.previewContainer) {
@@ -1840,6 +1867,10 @@ function applyViewMode() {
     if ((mode === 'split' || mode === 'preview') && p.previewContainer) {
       const tab = p.filePath ? getAllTabs().find((t) => t.path === p.filePath) : getActiveTab();
       if (tab) {
+        // This renders the pane from scratch, so a queued render would only
+        // repeat the work — and after a tab switch it would carry the
+        // previous tab's text.
+        previewScheduler.cancel(p);
         const basePath = dirnameOf(tab.path);
         renderPreview(tab.content, basePath, p.previewContainer, tab.path);
       }
