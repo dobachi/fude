@@ -11,6 +11,7 @@
 // returned SVG is sanitized before it ever touches the app DOM.
 import { readExtensionFile } from '../../backend.js';
 import { resolveIncludes } from './includes.js';
+import { memoizeRender } from '../../core/memoize-render.js';
 
 const EXT_ID = 'plantuml';
 const RENDER_TIMEOUT_MS = 20000;
@@ -19,7 +20,7 @@ let iframe = null;
 let enginePromise = null;
 let seq = 0;
 const pending = new Map(); // id -> { resolve, reject }
-const cache = new Map(); // diagram text -> sanitized svg
+const cache = new Map(); // `${baseDir}\x00${text}` -> Promise<sanitized svg>
 
 // NOTE on the design (verified in a real Chromium via puppeteer):
 //  - The engine entry is `render(lines, elementId)` which WRITES the SVG into a
@@ -168,7 +169,7 @@ async function ensureEngine() {
   return enginePromise;
 }
 
-async function doRenderPlantUML(text, baseDir, cacheKey) {
+async function doRenderPlantUML(text, baseDir) {
   // Resolve !include locally (stdlib packs + local files) before rendering,
   // since the engine has no filesystem/network.
   let source = text;
@@ -194,9 +195,7 @@ async function doRenderPlantUML(text, baseDir, cacheKey) {
       }
     }, RENDER_TIMEOUT_MS);
   });
-  const clean = sanitizeSvg(svg);
-  cache.set(cacheKey, clean);
-  return clean;
+  return sanitizeSvg(svg);
 }
 
 // Renders share one iframe with a single output element, so they must run one
@@ -213,8 +212,9 @@ let renderChain = Promise.resolve();
  */
 export function renderPlantUML(text, baseDir = '') {
   const cacheKey = `${baseDir}\x00${text}`;
-  if (cache.has(cacheKey)) return cache.get(cacheKey);
-  const run = renderChain.then(() => doRenderPlantUML(text, baseDir, cacheKey));
+  const run = memoizeRender(cache, cacheKey, () =>
+    renderChain.then(() => doRenderPlantUML(text, baseDir)),
+  );
   // Keep the chain alive regardless of individual success/failure.
   renderChain = run.then(
     () => {},

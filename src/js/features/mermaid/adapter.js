@@ -9,6 +9,7 @@
 // iframe, avoiding cross-origin script-load (CORS) problems with asset://. The
 // returned SVG is sanitized before it ever touches the app DOM.
 import { readExtensionFile } from '../../backend.js';
+import { memoizeRender } from '../../core/memoize-render.js';
 
 const EXT_ID = 'mermaid';
 const RENDER_TIMEOUT_MS = 20000;
@@ -228,30 +229,8 @@ export function renderMermaid(text, theme = currentMermaidTheme()) {
   return run;
 }
 
-/**
- * Memoize an async producer by key. The PROMISE is cached, never its resolved
- * value — caching the string made a second render of the same diagram return a
- * plain string, and callers doing `.then()` on it blew up with
- * "renderMermaid(...).then is not a function".
- *
- * Concurrent duplicate calls also share one render, and failures are evicted so
- * a transient error (engine not installed yet, timeout) doesn't poison the
- * cache forever.
- * @param {Map<string, Promise<*>>} cache
- * @param {string} key
- * @param {() => Promise<*>} produce
- * @returns {Promise<*>} always a promise, hit or miss
- */
-export function memoizeRender(cache, key, produce) {
-  const hit = cache.get(key);
-  if (hit) return hit;
-  const run = produce();
-  cache.set(key, run);
-  run.catch(() => {
-    if (cache.get(key) === run) cache.delete(key);
-  });
-  return run;
-}
+// memoizeRender now lives in core/ — the PlantUML adapter needs the same
+// guarantee, and it had the same bug from keeping its own copy of the idea.
 
 /** Drop the engine + cache (e.g. after re-install or a theme switch). */
 export function resetEngine() {

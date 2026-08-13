@@ -545,23 +545,26 @@ async function highlightCodeBlocks(container) {
  * @param {HTMLElement} container
  */
 async function renderPlantumlBlocks(container) {
-  // Timed from inside so an early return is charged nothing; see enhancePreview.
+  if (!plantumlEnabled || !container) return;
+  const codes = container.querySelectorAll(
+    'pre > code.language-plantuml, pre > code.language-puml',
+  );
+  if (!codes.length) return;
+
+  let adapter;
+  try {
+    adapter = await import('../features/plantuml/adapter.js');
+  } catch (e) {
+    console.error('Failed to load PlantUML adapter:', e);
+    return;
+  }
+
+  // The clock starts AFTER the dynamic import. Any `await` before this point
+  // yields to the microtask queue, so the caller's remaining synchronous work
+  // (its forced layout) would land in our number — which is how this pass read
+  // 149 ms while doing nothing but rethrowing.
   const done = startTimer('preview:plantuml');
   try {
-    if (!plantumlEnabled || !container) return;
-    const codes = container.querySelectorAll(
-      'pre > code.language-plantuml, pre > code.language-puml',
-    );
-    if (!codes.length) return;
-
-    let adapter;
-    try {
-      adapter = await import('../features/plantuml/adapter.js');
-    } catch (e) {
-      console.error('Failed to load PlantUML adapter:', e);
-      return;
-    }
-
     const jobs = [];
     codes.forEach((code) => {
       const pre = code.parentElement;
@@ -605,21 +608,22 @@ async function renderPlantumlBlocks(container) {
  * @param {HTMLElement} container
  */
 async function renderMermaidBlocks(container) {
-  // Timed from inside so an early return is charged nothing; see enhancePreview.
+  if (!mermaidEnabled || !container) return;
+  const codes = container.querySelectorAll('pre > code.language-mermaid');
+  if (!codes.length) return;
+
+  let adapter;
+  try {
+    adapter = await import('../features/mermaid/adapter.js');
+  } catch (e) {
+    console.error('Failed to load Mermaid adapter:', e);
+    return;
+  }
+
+  // See renderPlantumlBlocks: the clock starts after the dynamic import so the
+  // caller's synchronous tail is not charged to this pass.
   const done = startTimer('preview:mermaid');
   try {
-    if (!mermaidEnabled || !container) return;
-    const codes = container.querySelectorAll('pre > code.language-mermaid');
-    if (!codes.length) return;
-
-    let adapter;
-    try {
-      adapter = await import('../features/mermaid/adapter.js');
-    } catch (e) {
-      console.error('Failed to load Mermaid adapter:', e);
-      return;
-    }
-
     const jobs = [];
     codes.forEach((code) => {
       const pre = code.parentElement;
