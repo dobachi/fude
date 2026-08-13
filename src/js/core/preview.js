@@ -6,6 +6,7 @@ import { highlightCode } from './code-highlight.js';
 import { isLocalTauri } from '../backend.js';
 import { openExternal, isExternalUrl } from './external-link.js';
 import { resolveLinkTarget } from './link-target.js';
+import { time, timeAsync } from './perf-trace.js';
 import {
   isQuartoFile,
   applyQuartoExtensions,
@@ -327,8 +328,13 @@ export function renderMarkdown(text, basePath = '', container = null) {
   if (!container) return;
   currentBasePath = basePath;
   container.dataset.basePath = basePath || '';
-  const html = md.render(text);
-  container.innerHTML = html;
+  // Split so the report separates producing the HTML from installing it: the
+  // parse is CPU in JS, the assignment is DOM teardown plus layout, and which
+  // of the two dominates decides whether incremental rendering is worth it.
+  const html = time('preview:markdown-parse', () => md.render(text));
+  time('preview:innerHTML', () => {
+    container.innerHTML = html;
+  });
 }
 
 /**
@@ -341,8 +347,10 @@ export function renderQuartoMarkdown(text, basePath = '', container = null) {
   currentBasePath = basePath;
   container.dataset.basePath = basePath || '';
   qmdFrontMatterHtml = ''; // reset; set by the front-matter callback during render
-  const body = qmdMd.render(text);
-  container.innerHTML = qmdFrontMatterHtml + body;
+  const body = time('preview:markdown-parse', () => qmdMd.render(text));
+  time('preview:innerHTML', () => {
+    container.innerHTML = qmdFrontMatterHtml + body;
+  });
 }
 
 // ── PlantUML extension hook ────────────────────────────────
@@ -484,9 +492,13 @@ export async function enhancePreview(container) {
   if (!container) return;
   // Diagrams first: they replace their <pre> with an SVG, so those blocks are
   // gone before the syntax-highlight pass scans the remaining code blocks.
-  await renderPlantumlBlocks(container);
-  await renderMermaidBlocks(container);
-  await highlightCodeBlocks(container);
+  //
+  // These re-run in full on every render because innerHTML replacement wipes
+  // the dataset guards that would otherwise let them skip finished blocks, so
+  // they are prime suspects on diagram- or code-heavy documents.
+  await timeAsync('preview:plantuml', () => renderPlantumlBlocks(container));
+  await timeAsync('preview:mermaid', () => renderMermaidBlocks(container));
+  await timeAsync('preview:highlight', () => highlightCodeBlocks(container));
 }
 
 /**

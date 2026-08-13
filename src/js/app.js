@@ -60,6 +60,7 @@ import {
   scrollToAnchor,
 } from './core/preview.js';
 import { createPreviewScheduler } from './core/preview-scheduler.js';
+import * as perf from './core/perf-trace.js';
 import {
   openTab,
   closeTab,
@@ -280,8 +281,14 @@ function renderPanePreviewNow({ pane, content, basePath, filePath }) {
   if (!container || !container.isConnected) return;
   recordScrollSync('editor');
   const prevScrollTop = container.scrollTop;
-  renderPreview(content, basePath, container, filePath);
-  container.scrollTop = prevScrollTop;
+  // Only the synchronous half (parse + innerHTML) is inside this measure;
+  // renderPreview's diagram and highlight passes are async and report
+  // themselves. Writing scrollTop back forces a layout of the tree that was
+  // just rebuilt, so it is timed separately rather than folded into the render.
+  perf.time('preview:render-sync', () => renderPreview(content, basePath, container, filePath));
+  perf.time('preview:scroll-restore', () => {
+    container.scrollTop = prevScrollTop;
+  });
 }
 
 // Typing schedules preview renders through here instead of rendering on every
@@ -618,6 +625,9 @@ registerSaveHandler(() => performSave({ forceDialog: false }));
 
 // ── Initialization ─────────────────────────────────────────
 async function init() {
+  // Opt-in timing, driven from devtools as __fudePerf. Off until enabled, so
+  // this only costs the property assignment.
+  perf.installGlobal();
   try {
     config = await backend.getConfig();
   } catch {

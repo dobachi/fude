@@ -16,6 +16,7 @@ export default [
         setInterval: 'readonly',
         clearInterval: 'readonly',
         requestAnimationFrame: 'readonly',
+        performance: 'readonly',
         navigator: 'readonly',
         AbortController: 'readonly',
         TextDecoder: 'readonly',
