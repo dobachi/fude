@@ -212,7 +212,7 @@ let renderChain = Promise.resolve();
  * @returns {Promise<string>}
  */
 export function renderPlantUML(text, baseDir = '') {
-  const cacheKey = `${baseDir} ${text}`;
+  const cacheKey = `${baseDir}\x00${text}`;
   if (cache.has(cacheKey)) return cache.get(cacheKey);
   const run = renderChain.then(() => doRenderPlantUML(text, baseDir, cacheKey));
   // Keep the chain alive regardless of individual success/failure.
