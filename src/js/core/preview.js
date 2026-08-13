@@ -7,6 +7,7 @@ import { isLocalTauri } from '../backend.js';
 import { openExternal, isExternalUrl } from './external-link.js';
 import { resolveLinkTarget } from './link-target.js';
 import { time, start as startTimer } from './perf-trace.js';
+import { renderBlockHtml, applyBlocks } from './preview-blocks.js';
 import {
   isQuartoFile,
   applyQuartoExtensions,
@@ -328,13 +329,8 @@ export function renderMarkdown(text, basePath = '', container = null) {
   if (!container) return;
   currentBasePath = basePath;
   container.dataset.basePath = basePath || '';
-  // Split so the report separates producing the HTML from installing it: the
-  // parse is CPU in JS, the assignment is DOM teardown plus layout, and which
-  // of the two dominates decides whether incremental rendering is worth it.
-  const html = time('preview:markdown-parse', () => md.render(text));
-  time('preview:innerHTML', () => {
-    container.innerHTML = html;
-  });
+  const htmlList = time('preview:markdown-parse', () => renderBlockHtml(md, text, {}));
+  updatePreviewDom(container, md, basePath, htmlList);
 }
 
 /**
@@ -346,11 +342,48 @@ export function renderQuartoMarkdown(text, basePath = '', container = null) {
   if (!container) return;
   currentBasePath = basePath;
   container.dataset.basePath = basePath || '';
-  qmdFrontMatterHtml = ''; // reset; set by the front-matter callback during render
-  const body = time('preview:markdown-parse', () => qmdMd.render(text));
-  time('preview:innerHTML', () => {
-    container.innerHTML = qmdFrontMatterHtml + body;
-  });
+  qmdFrontMatterHtml = ''; // reset; set by the front-matter callback during parse
+  const body = time('preview:markdown-parse', () => renderBlockHtml(qmdMd, text, {}));
+  // The front-matter header is produced during the parse above, so it is known
+  // by now. It rides along as a synthetic leading block: it changes only when
+  // the front matter does, and then only that block is rebuilt.
+  const htmlList = qmdFrontMatterHtml ? [qmdFrontMatterHtml, ...body] : body;
+  updatePreviewDom(container, qmdMd, basePath, htmlList);
+}
+
+// container -> { md, basePath, blocks }. WeakMap so a closed pane's state goes
+// away with its element.
+const blockState = new WeakMap();
+
+/**
+ * Install `htmlList` into the container, rebuilding only the blocks that
+ * changed since the last call.
+ *
+ * A different markdown-it instance (Markdown vs Quarto) or a different base
+ * path means the previous HTML is not comparable — image URLs are resolved
+ * against the base path — so those force a full rebuild.
+ */
+function updatePreviewDom(container, mdInstance, basePath, htmlList) {
+  const prev = blockState.get(container);
+  const reusable = prev && prev.md === mdInstance && prev.basePath === basePath;
+  const result = time('preview:dom-update', () =>
+    applyBlocks(container, reusable ? prev.blocks : null, htmlList),
+  );
+  blockState.set(container, { md: mdInstance, basePath, blocks: result.blocks });
+  return result;
+}
+
+/**
+ * Forget a container's block state, so the next render rebuilds everything.
+ *
+ * Needed when something other than the document text changes what a block
+ * should look like — enabling the PlantUML/Mermaid/highlight extensions, or a
+ * theme switch. The HTML is identical in those cases, so an incremental update
+ * would correctly conclude there is nothing to do and the change would never
+ * appear.
+ */
+export function invalidatePreviewBlocks(container) {
+  if (container) blockState.delete(container);
 }
 
 // ── PlantUML extension hook ────────────────────────────────

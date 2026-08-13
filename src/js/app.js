@@ -58,6 +58,7 @@ import {
   setCodeHighlightEnabled,
   renderPreview,
   scrollToAnchor,
+  invalidatePreviewBlocks,
 } from './core/preview.js';
 import { createPreviewScheduler } from './core/preview-scheduler.js';
 import * as perf from './core/perf-trace.js';
@@ -302,6 +303,9 @@ function rerenderPreviews() {
   previewScheduler.cancelAll();
   for (const p of panesModule.getAllPanes()) {
     if (!p.previewContainer) continue;
+    // A config change (extensions on/off, theme) leaves the Markdown identical,
+    // so the incremental path would find nothing to do. Force a full rebuild.
+    invalidatePreviewBlocks(p.previewContainer);
     const mode = paneViewMode(p);
     if (mode !== 'split' && mode !== 'preview') continue;
     const basePath = dirnameOf(p.filePath);
