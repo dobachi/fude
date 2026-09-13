@@ -9,6 +9,78 @@ describe('sidebar module', () => {
     mod = await import('../core/sidebar.js');
   });
 
+  describe('root path (open folder) in the header', () => {
+    const rootHtml =
+      '<div id="app"><div id="sidebar-header"><span class="sidebar-title">Files</span>' +
+      '<button id="sidebar-root" class="sidebar-root is-empty" title=""></button></div>' +
+      '<div id="file-tree" tabindex="-1"></div></div>';
+
+    it('rootLabel returns the last segment and keeps bare roots', () => {
+      expect(mod.rootLabel('/home/me/notes')).toBe('notes');
+      expect(mod.rootLabel('/home/me/notes/')).toBe('notes');
+      expect(mod.rootLabel('C:\\Users\\me\\docs')).toBe('docs');
+      expect(mod.rootLabel('C:\\Users\\me\\docs\\')).toBe('docs');
+      expect(mod.rootLabel('/')).toBe('/');
+      expect(mod.rootLabel('C:\\')).toBe('C:\\');
+      expect(mod.rootLabel('notes')).toBe('notes');
+      expect(mod.rootLabel('')).toBe('');
+      expect(mod.rootLabel(null)).toBe('');
+    });
+
+    it('shows a placeholder until a folder is opened', () => {
+      document.body.innerHTML = rootHtml;
+      mod.initSidebar(document.getElementById('file-tree'), vi.fn());
+      const el = document.getElementById('sidebar-root');
+      expect(el.textContent).toBe('フォルダ未選択');
+      expect(el.title).toBe('');
+      expect(el.classList.contains('is-empty')).toBe(true);
+      expect(mod.getRootPath()).toBe('');
+    });
+
+    it('setRootPath shows the folder name and the full path as tooltip', () => {
+      document.body.innerHTML = rootHtml;
+      mod.initSidebar(document.getElementById('file-tree'), vi.fn());
+      mod.setRootPath('/home/me/vault');
+      const el = document.getElementById('sidebar-root');
+      expect(el.textContent).toBe('vault');
+      expect(el.title).toBe('/home/me/vault');
+      expect(el.classList.contains('is-empty')).toBe(false);
+      expect(mod.getRootPath()).toBe('/home/me/vault');
+
+      // Clearing goes back to the placeholder.
+      mod.setRootPath('');
+      expect(el.textContent).toBe('フォルダ未選択');
+      expect(el.classList.contains('is-empty')).toBe(true);
+    });
+
+    it('setRootPath before init is applied once the header exists', () => {
+      document.body.innerHTML = rootHtml;
+      mod.setRootPath('/v');
+      mod.initSidebar(document.getElementById('file-tree'), vi.fn());
+      expect(document.getElementById('sidebar-root').textContent).toBe('v');
+    });
+
+    it('clicking the root calls onRootClick with the full path, not when empty', () => {
+      document.body.innerHTML = rootHtml;
+      const onRootClick = vi.fn();
+      mod.initSidebar(document.getElementById('file-tree'), vi.fn(), { onRootClick });
+      const el = document.getElementById('sidebar-root');
+
+      el.click();
+      expect(onRootClick).not.toHaveBeenCalled();
+
+      mod.setRootPath('/home/me/vault');
+      el.click();
+      expect(onRootClick).toHaveBeenCalledWith('/home/me/vault');
+    });
+
+    it('does not throw when the header element is absent', () => {
+      mod.initSidebar(document.getElementById('file-tree'), vi.fn());
+      expect(() => mod.setRootPath('/x')).not.toThrow();
+      expect(mod.getRootPath()).toBe('/x');
+    });
+  });
+
   it('exports expected functions', () => {
     expect(typeof mod.initSidebar).toBe('function');
     expect(typeof mod.loadDirectory).toBe('function');

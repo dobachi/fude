@@ -116,6 +116,7 @@ import {
   toggleSidebar,
   highlightFile,
   getShowAllFiles,
+  setRootPath,
   isSidebarVisible,
   showSidebar,
   focusFiler,
@@ -198,6 +199,16 @@ const statusBar = createStatusBar({
 function updateStatusBar() {
   const tab = getActiveTab();
   statusBar.render(tab ? tab.path : null);
+}
+
+/**
+ * Single place to change the open folder: the status bar re-relativizes its
+ * path and the sidebar header shows the new root.
+ */
+function setVaultPath(path) {
+  vaultPath = path || '';
+  updateStatusBar();
+  setRootPath(vaultPath);
 }
 
 // Register panes module with editor.js so getCurrentView() works without circular imports
@@ -717,6 +728,7 @@ async function init() {
       showAllFiles: config.sidebar_show_all_files || false,
       onSettingsChange: handleSidebarSettingsChange,
       onContextMenu: handleFileContextMenu,
+      onRootClick: (path) => copyText(path),
     });
 
   // Init outline (document headings) below the file tree.
@@ -843,8 +855,7 @@ async function init() {
   // Try restore session — only the main window restores the global session.
   const session = isMainWindow ? await restoreSession() : null;
   if (session && session.open_tabs && session.open_tabs.length > 0) {
-    vaultPath = session.vault_path || '';
-    updateStatusBar(); // vault が決まるとパス表示が相対に変わる
+    setVaultPath(session.vault_path || ''); // vault が決まるとパス表示が相対に変わる
     defaultViewMode = session.view_mode || 'split';
     applyViewMode();
 
@@ -938,8 +949,7 @@ async function init() {
       try {
         const openDir = await backend.getOpenDir();
         if (openDir) {
-          vaultPath = openDir;
-          updateStatusBar();
+          setVaultPath(openDir);
           const tree = await backend.readDirTree(openDir, getShowAllFiles());
           loadDirectory(tree);
           watchVault(vaultPath);
@@ -1518,8 +1528,7 @@ function handleTabContextMenu(tabId, x, y) {
 async function openPath(path) {
   try {
     const tree = await backend.readDirTree(path, getShowAllFiles());
-    vaultPath = path;
-    updateStatusBar();
+    setVaultPath(path);
     loadDirectory(tree);
     watchVault(vaultPath);
     return true;
@@ -1567,8 +1576,7 @@ async function revealFileDir(filePath) {
 
   try {
     const tree = await backend.readDirTree(dir, getShowAllFiles());
-    vaultPath = dir;
-    updateStatusBar();
+    setVaultPath(dir);
     loadDirectory(tree);
     highlightFile(filePath, { scroll: true });
     watchVault(vaultPath);
@@ -2267,8 +2275,7 @@ async function handleOpenFolder() {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const folder = await open({ directory: true, multiple: false });
       if (folder) {
-        vaultPath = folder;
-        updateStatusBar();
+        setVaultPath(folder);
         const tree = await backend.readDirTree(folder, getShowAllFiles());
         loadDirectory(tree);
         watchVault(vaultPath);
@@ -2284,8 +2291,7 @@ async function handleOpenFolder() {
       }
     } else {
       openFolderPicker(async (folder) => {
-        vaultPath = folder;
-        updateStatusBar();
+        setVaultPath(folder);
         const tree = await backend.readDirTree(folder, getShowAllFiles());
         loadDirectory(tree);
         watchVault(vaultPath);

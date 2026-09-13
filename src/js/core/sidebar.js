@@ -14,6 +14,10 @@ let currentSort = 'name_asc';
 let showAllFiles = false;
 let onSettingsChange = null;
 let onContextMenu = null;
+let onRootClick = null;
+let rootPath = '';
+
+const ROOT_EMPTY_TEXT = 'フォルダ未選択';
 
 const SORT_OPTIONS = {
   name_asc: { key: 'name', order: 'asc' },
@@ -35,7 +39,10 @@ export function initSidebar(container, fileSelectCallback, opts) {
     if (opts.showAllFiles) showAllFiles = opts.showAllFiles;
     if (opts.onSettingsChange) onSettingsChange = opts.onSettingsChange;
     if (opts.onContextMenu) onContextMenu = opts.onContextMenu;
+    if (opts.onRootClick) onRootClick = opts.onRootClick;
   }
+
+  initRootLabel();
 
   if (container) {
     container.addEventListener(
@@ -124,6 +131,53 @@ function initPopover() {
       saveSettings();
     });
   }
+}
+
+/**
+ * Last path segment of a directory path, for the sidebar header. Trailing
+ * separators are ignored; a bare root ("/" or "C:\\") is returned as is.
+ * @param {string} path
+ * @returns {string}
+ */
+export function rootLabel(path) {
+  const p = String(path ?? '');
+  const trimmed = p.replace(/[/\\]+$/, '');
+  if (!trimmed || /^[A-Za-z]:$/.test(trimmed)) return p;
+  const idx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+}
+
+function initRootLabel() {
+  const el = document.getElementById('sidebar-root');
+  if (!el) return;
+  el.addEventListener('click', () => {
+    if (rootPath && onRootClick) onRootClick(rootPath);
+  });
+  renderRoot();
+}
+
+function renderRoot() {
+  const el = document.getElementById('sidebar-root');
+  if (!el) return;
+  if (rootPath) {
+    el.textContent = rootLabel(rootPath);
+    el.title = rootPath;
+    el.classList.remove('is-empty');
+  } else {
+    el.textContent = ROOT_EMPTY_TEXT;
+    el.title = '';
+    el.classList.add('is-empty');
+  }
+}
+
+/** Show `path` (the open folder / vault root) in the sidebar header. */
+export function setRootPath(path) {
+  rootPath = path || '';
+  renderRoot();
+}
+
+export function getRootPath() {
+  return rootPath;
 }
 
 function saveSettings() {
