@@ -69,10 +69,24 @@ describe('backend module (Tauri mode)', () => {
   it('readDirTree calls invoke with read_dir_tree command', async () => {
     const mod = await import('../backend.js');
     await mod.readDirTree('/vault');
+    // Tauri v2 maps Rust snake_case args to camelCase on the JS side. A
+    // snake_case key is silently ignored and the Option<bool> falls back to
+    // None, so "show all files" never reached the backend (regression).
     expect(mockInvoke).toHaveBeenCalledWith('read_dir_tree', {
       path: '/vault',
-      show_all_files: false,
+      showAllFiles: false,
     });
+  });
+
+  it('readDirTree forwards showAllFiles=true in camelCase', async () => {
+    const mod = await import('../backend.js');
+    await mod.readDirTree('/vault', true);
+    expect(mockInvoke).toHaveBeenCalledWith('read_dir_tree', {
+      path: '/vault',
+      showAllFiles: true,
+    });
+    const args = mockInvoke.mock.calls.at(-1)[1];
+    expect(args).not.toHaveProperty('show_all_files');
   });
 
   it('saveSession calls invoke with save_session command', async () => {

@@ -127,7 +127,7 @@ export async function checkTempFiles(paths) {
 }
 
 export async function readDirTree(path, showAllFiles) {
-  return doInvoke('read_dir_tree', { path, show_all_files: showAllFiles || false });
+  return doInvoke('read_dir_tree', { path, showAllFiles: showAllFiles || false });
 }
 
 export async function saveSession(session) {
