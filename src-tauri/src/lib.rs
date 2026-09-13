@@ -390,24 +390,69 @@ fn is_listed_file(name: &str) -> bool {
 }
 
 fn scan_dir_tree_filtered(dir: &Path, show_all_files: bool) -> Result<Vec<FileEntry>, String> {
+    let mut ancestors: Vec<PathBuf> = Vec::new();
+    scan_dir_tree_inner(dir, show_all_files, &mut ancestors)
+}
+
+/// Directory test that follows symlinks. `DirEntry::file_type()` reports a
+/// symlink as a symlink (never a directory), so a symlinked folder would be
+/// treated as a file and dropped by the extension filter. Common on WSL and
+/// in dotfile/skill setups where folders are linked into a vault.
+fn entry_is_dir(entry: &fs::DirEntry) -> bool {
+    match entry.file_type() {
+        Ok(ft) if ft.is_dir() => true,
+        Ok(ft) if ft.is_symlink() => fs::metadata(entry.path())
+            .map(|m| m.is_dir())
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// Recursive scan. `ancestors` holds the canonical paths of the directories
+/// currently being scanned so a symlink pointing back at an ancestor stops
+/// instead of recursing forever.
+fn scan_dir_tree_inner(
+    dir: &Path,
+    show_all_files: bool,
+    ancestors: &mut Vec<PathBuf>,
+) -> Result<Vec<FileEntry>, String> {
+    let canonical = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    if ancestors.contains(&canonical) {
+        return Ok(Vec::new());
+    }
+    ancestors.push(canonical);
+    let result = scan_dir_entries(dir, show_all_files, ancestors);
+    ancestors.pop();
+    result
+}
+
+fn scan_dir_entries(
+    dir: &Path,
+    show_all_files: bool,
+    ancestors: &mut Vec<PathBuf>,
+) -> Result<Vec<FileEntry>, String> {
     let mut entries = Vec::new();
 
     let read_dir = fs::read_dir(dir)
         .map_err(|e| format!("Failed to read directory '{}': {}", dir.display(), e))?;
 
-    let mut items: Vec<_> = read_dir.filter_map(|entry| entry.ok()).collect();
+    // Resolve is_dir once per entry (it may hit the filesystem for symlinks)
+    // and sort on it: directories first, then by name.
+    let mut items: Vec<(fs::DirEntry, bool)> = read_dir
+        .filter_map(|entry| entry.ok())
+        .map(|entry| {
+            let is_dir = entry_is_dir(&entry);
+            (entry, is_dir)
+        })
+        .collect();
 
-    items.sort_by(|a, b| {
-        let a_is_dir = a.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-        let b_is_dir = b.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-        match (a_is_dir, b_is_dir) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.file_name().cmp(&b.file_name()),
-        }
+    items.sort_by(|(a, a_is_dir), (b, b_is_dir)| match (a_is_dir, b_is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.file_name().cmp(&b.file_name()),
     });
 
-    for item in items {
+    for (item, is_dir) in items {
         let name = item.file_name().to_string_lossy().to_string();
         let path = item.path();
 
@@ -416,13 +461,12 @@ fn scan_dir_tree_filtered(dir: &Path, show_all_files: bool) -> Result<Vec<FileEn
             continue;
         }
 
-        let is_dir = item.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-
         if is_dir {
             // Be resilient: a subdirectory we can't read (permissions, special
             // network entries on WSL/UNC paths, etc.) must not abort the whole
             // scan — skip it instead.
-            let children = scan_dir_tree_filtered(&path, show_all_files).unwrap_or_default();
+            let children =
+                scan_dir_tree_inner(&path, show_all_files, ancestors).unwrap_or_default();
             // Only include directories that contain files (directly or nested)
             if !children.is_empty() {
                 let (modified, created, size) = get_file_metadata(&path);
@@ -1810,6 +1854,113 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "report.qmd");
         assert!(!entries[0].is_dir);
+    }
+
+    /// Regression: a symlink to a directory used to be classified as a file
+    /// (DirEntry::file_type never follows links) and dropped by the extension
+    /// filter, so whole linked folders vanished from the filer.
+    #[cfg(unix)]
+    #[test]
+    fn scan_dir_tree_follows_symlinked_dirs() {
+        use std::os::unix::fs::symlink;
+        let tmp = TempDir::new().unwrap();
+        let real = tmp.path().join("real");
+        fs::create_dir(&real).unwrap();
+        fs::write(real.join("note.md"), "# linked").unwrap();
+        fs::write(real.join("config.yaml"), "a: 1").unwrap();
+        let vault = tmp.path().join("vault");
+        fs::create_dir(&vault).unwrap();
+        symlink(&real, vault.join("linked")).unwrap();
+
+        let entries = scan_dir_tree(&vault).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "linked");
+        assert!(entries[0].is_dir);
+        let children = entries[0].children.as_ref().unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].name, "note.md");
+
+        // show_all_files applies inside the linked folder too
+        let entries = scan_dir_tree_filtered(&vault, true).unwrap();
+        let children = entries[0].children.as_ref().unwrap();
+        let names: Vec<&str> = children.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["config.yaml", "note.md"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_dir_tree_symlinked_dirs_sort_with_dirs() {
+        use std::os::unix::fs::symlink;
+        let tmp = TempDir::new().unwrap();
+        let real = tmp.path().join("real");
+        fs::create_dir(&real).unwrap();
+        fs::write(real.join("x.md"), "").unwrap();
+        let vault = tmp.path().join("vault");
+        fs::create_dir(&vault).unwrap();
+        fs::write(vault.join("a.md"), "").unwrap();
+        symlink(&real, vault.join("zlink")).unwrap();
+
+        let entries = scan_dir_tree(&vault).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["zlink", "a.md"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_dir_tree_symlinked_file_is_listed_by_extension() {
+        use std::os::unix::fs::symlink;
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("target.txt"), "x").unwrap();
+        let vault = tmp.path().join("vault");
+        fs::create_dir(&vault).unwrap();
+        symlink(tmp.path().join("target.txt"), vault.join("note.md")).unwrap();
+        symlink(tmp.path().join("target.txt"), vault.join("data.txt")).unwrap();
+
+        let entries = scan_dir_tree(&vault).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["note.md"]);
+        assert!(!entries[0].is_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_dir_tree_symlink_loop_terminates() {
+        use std::os::unix::fs::symlink;
+        let tmp = TempDir::new().unwrap();
+        let a = tmp.path().join("a");
+        fs::create_dir(&a).unwrap();
+        fs::write(a.join("note.md"), "").unwrap();
+        // a/loop -> a  (cycle) and vault/up -> vault (self-cycle)
+        symlink(&a, a.join("loop")).unwrap();
+        symlink(tmp.path(), tmp.path().join("up")).unwrap();
+
+        let entries = scan_dir_tree(tmp.path()).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        // "up" points at an ancestor -> scanned as empty -> excluded.
+        assert_eq!(names, vec!["a"]);
+        let children = entries[0].children.as_ref().unwrap();
+        let names: Vec<&str> = children.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["note.md"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_dir_tree_dangling_symlink_is_skipped() {
+        use std::os::unix::fs::symlink;
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("note.md"), "").unwrap();
+        symlink(tmp.path().join("missing"), tmp.path().join("dangling")).unwrap();
+        symlink(
+            tmp.path().join("missing.md"),
+            tmp.path().join("dangling.md"),
+        )
+        .unwrap();
+
+        // Must not error; the .md-named dangling link is listed like a file
+        // (opening it will surface the real error), the other is dropped.
+        let entries = scan_dir_tree_filtered(tmp.path(), false).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["dangling.md", "note.md"]);
     }
 
     #[test]
