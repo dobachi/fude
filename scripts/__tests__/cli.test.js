@@ -4,6 +4,7 @@
 // stating who may reach it, or without confining what they may touch, should be
 // impossible to do by accident.
 import { describe, it, expect } from 'vitest';
+import path from 'node:path';
 import cli from '../lib/cli.js';
 
 const { parseArgs, MIN_KEY_LENGTH } = cli;
@@ -105,14 +106,23 @@ describe('remote requires a confined root', () => {
     expect(c.rootOverride).toBe(true);
   });
 
+  // Compare against path.resolve, not a literal: on Windows '/tmp/notes'
+  // resolves to 'D:\\tmp\\notes', which is correct behaviour, not a bug.
   it('resolves --root to an absolute path', () => {
     const c = ok(['--listen', '0.0.0.0', '--allow', 'lan', '--root', '/tmp/notes']);
-    expect(c.root).toBe('/tmp/notes');
+    expect(c.root).toBe(path.resolve('/tmp/notes'));
+    expect(path.isAbsolute(c.root)).toBe(true);
+  });
+
+  it('resolves a relative --root against the working directory', () => {
+    const c = ok(['--listen', '0.0.0.0', '--allow', 'lan', '--root', 'notes']);
+    expect(c.root).toBe(path.resolve('notes'));
+    expect(path.isAbsolute(c.root)).toBe(true);
   });
 
   it('accepts FUDE_ROOT in place of --root', () => {
     const c = ok(['--listen', '0.0.0.0', '--allow', 'lan'], { FUDE_ROOT: '/tmp/notes' });
-    expect(c.root).toBe('/tmp/notes');
+    expect(c.root).toBe(path.resolve('/tmp/notes'));
   });
 });
 
