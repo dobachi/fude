@@ -7,6 +7,8 @@
 // If __TAURI_INTERNALS__ is not yet available (Windows timing issue tauri#12990),
 // wait briefly for it to become available before falling back to HTTP.
 
+import { authHeaders, captureTokenFromUrl, clearToken, isAuthenticated } from './browser-token.js';
+
 // Detect whether we're running inside a Tauri webview.
 //
 // Prefer the runtime-injected globals (`window.isTauri` / `__TAURI_INTERNALS__`),
@@ -59,19 +61,33 @@ async function doInvoke(cmd, args) {
     // __TAURI_INTERNALS__ not available even after waiting — should not happen
     console.error('Tauri webview detected but __TAURI_INTERNALS__ not available');
   }
-  // HTTP fallback for browser mode
+  // HTTP fallback for browser mode. The server requires a session token on
+  // every /api/* call; without it the same endpoints would let anyone who can
+  // reach the port read and write the user's files.
   const base = window.location.origin || 'http://localhost:3000';
   const res = await fetch(`${base}/api/${cmd}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(args || {}),
   });
-  if (!res.ok) throw new Error(`Backend call failed: ${cmd}`);
+  if (!res.ok) {
+    if (res.status === 401) {
+      // Stale or absent token. Drop it and raise the alarm once, centrally:
+      // callers catch their own errors, so without this a missing token just
+      // looks like "save does nothing".
+      clearToken();
+      throw new Error(
+        'Not authorized. Reopen Fude using the URL printed by fude-browser (it contains ?token=...).',
+      );
+    }
+    throw new Error(`Backend call failed: ${cmd}`);
+  }
   return res.json();
 }
 
 // Export isTauriWebview for use in app.js
 export { isTauriWebview as isLocalTauri };
+export { captureTokenFromUrl, isAuthenticated };
 
 // Whether an in-app update can complete here (see src-tauri/src/updater_env.rs).
 // Desktop-only: browser mode has no local install to replace, and the HTTP
@@ -294,12 +310,13 @@ export async function aiChatStream(messages, model, onChunk, onDone, onError, si
     try {
       const res = await fetch(`${base}/api/ai_chat_stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ messages, model }),
         signal,
       });
 
       if (!res.ok) {
+        if (res.status === 401) clearToken();
         const text = await res.text();
         onError(new Error(`AI request failed: ${text}`));
         return;

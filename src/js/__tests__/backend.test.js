@@ -237,6 +237,55 @@ describe('backend module (HTTP fallback mode)', () => {
     await expect(mod.readFile('/fail.md')).rejects.toThrow('Backend call failed: read_file');
   });
 
+  // The HTTP fallback exposes the same filesystem power as the Tauri backend,
+  // so serve.js requires a session token on every call. If these break, the
+  // browser-mode UI silently loses its authentication.
+  it('sends the session token on API calls', async () => {
+    window.location.search = '?token=secret-token';
+    window.history.replaceState = vi.fn();
+
+    const mod = await import('../backend.js');
+    mod.captureTokenFromUrl();
+    await mod.readFile('/test.md');
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/read_file',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'X-Fude-Token': 'secret-token' }),
+      }),
+    );
+  });
+
+  it('sends the session token on the AI stream call', async () => {
+    window.location.search = '?token=secret-token';
+    window.history.replaceState = vi.fn();
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, text: () => Promise.resolve('no') });
+
+    const mod = await import('../backend.js');
+    mod.captureTokenFromUrl();
+    await mod.aiChatStream(
+      [],
+      'x',
+      () => {},
+      () => {},
+      () => {},
+    );
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/ai_chat_stream',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'X-Fude-Token': 'secret-token' }),
+      }),
+    );
+  });
+
+  it('explains how to recover when the server rejects the token', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+
+    const mod = await import('../backend.js');
+    await expect(mod.readFile('/test.md')).rejects.toThrow(/token/i);
+  });
+
   it('uses https://tauri.localhost as Tauri mode', async () => {
     vi.resetModules();
 

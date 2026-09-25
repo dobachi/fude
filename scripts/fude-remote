@@ -13,6 +13,15 @@ fi
 FUDE_PORT="${FUDE_PORT:-3000}"
 FUDE_URL="http://localhost:$FUDE_PORT"
 FUDE_CACHE_DIR="$HOME/.cache/fude"
+
+# The browser-mode API can read and write any file the user can, so serve.js
+# requires this token on every call. Generate it here so we can hand the UI a
+# ready-to-open URL instead of scraping the server's stdout.
+if [ -z "${FUDE_TOKEN:-}" ]; then
+  FUDE_TOKEN="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+fi
+export FUDE_TOKEN
+FUDE_URL_WITH_TOKEN="$FUDE_URL/?token=$FUDE_TOKEN"
 FUDE_EXE_CACHED="$FUDE_CACHE_DIR/Fude.exe"
 REPO="dobachi/fude"
 
@@ -195,12 +204,12 @@ fi
 # Default: open in Windows browser (reliable)
 if [ "${1:-}" = "--native" ] && [ -n "$FUDE_EXE_PATH" ]; then
   echo "Launching Fude native: $WIN_EXE --remote $FUDE_URL"
-  powershell.exe -Command "Start-Process '$WIN_EXE' -ArgumentList '--remote','$FUDE_URL'" 2>/dev/null
+  powershell.exe -Command "Start-Process '$WIN_EXE' -ArgumentList '--remote','$FUDE_URL_WITH_TOKEN'" 2>/dev/null
 else
   echo "Opening Fude in browser: $FUDE_URL"
-  powershell.exe -Command "Start-Process '$FUDE_URL'" 2>/dev/null || \
-    cmd.exe /C "start $FUDE_URL" 2>/dev/null || \
-    echo "Please open $FUDE_URL in your browser."
+  powershell.exe -Command "Start-Process '$FUDE_URL_WITH_TOKEN'" 2>/dev/null || \
+    cmd.exe /C "start \"\" \"$FUDE_URL_WITH_TOKEN\"" 2>/dev/null || \
+    echo "Please open $FUDE_URL_WITH_TOKEN in your browser."
 fi
 
 echo ""

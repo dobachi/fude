@@ -21,6 +21,63 @@ describe('menubar module', () => {
     { label: '編集', items: [{ label: '太字', action: () => {} }] },
   ];
 
+  // In the desktop app a bare Alt tap reveals the hidden bar. A browser claims
+  // Alt for its own menu, so starting hidden there left every one of these
+  // commands with no discoverable route.
+  describe('default visibility', () => {
+    it('starts hidden when that is the default (desktop)', () => {
+      mod.initMenuBar(barEl, menus, { defaultVisible: false });
+      expect(mod.isMenuBarVisible()).toBe(false);
+    });
+
+    it('starts visible when that is the default (browser mode)', () => {
+      mod.initMenuBar(barEl, menus, { defaultVisible: true });
+      expect(mod.isMenuBarVisible()).toBe(true);
+      expect(barEl.classList.contains('hidden')).toBe(false);
+    });
+
+    it('keeps starting hidden when no default is given', () => {
+      mod.initMenuBar(barEl, menus);
+      expect(mod.isMenuBarVisible()).toBe(false);
+    });
+
+    it('an explicit choice beats the default', () => {
+      localStorage.setItem('fude.menuBarVisible', '0');
+      mod.initMenuBar(barEl, menus, { defaultVisible: true });
+      expect(mod.isMenuBarVisible()).toBe(false);
+    });
+
+    it('an explicit choice to show beats a hidden default', () => {
+      localStorage.setItem('fude.menuBarVisible', '1');
+      mod.initMenuBar(barEl, menus, { defaultVisible: false });
+      expect(mod.isMenuBarVisible()).toBe(true);
+    });
+
+    it('hiding it in browser mode sticks across a restart', () => {
+      mod.initMenuBar(barEl, menus, { defaultVisible: true });
+      mod.setMenuBarVisible(false);
+
+      barEl.className = '';
+      mod.initMenuBar(barEl, menus, { defaultVisible: true });
+      expect(mod.isMenuBarVisible()).toBe(false);
+    });
+  });
+
+  describe('getStoredMenuBarVisible', () => {
+    it('returns the default when nothing is stored', () => {
+      expect(mod.getStoredMenuBarVisible(true)).toBe(true);
+      expect(mod.getStoredMenuBarVisible(false)).toBe(false);
+      expect(mod.getStoredMenuBarVisible()).toBe(false);
+    });
+
+    it('returns the stored value when there is one', () => {
+      localStorage.setItem('fude.menuBarVisible', '1');
+      expect(mod.getStoredMenuBarVisible(false)).toBe(true);
+      localStorage.setItem('fude.menuBarVisible', '0');
+      expect(mod.getStoredMenuBarVisible(true)).toBe(false);
+    });
+  });
+
   it('renders a button per top-level menu', () => {
     mod.initMenuBar(barEl, menus);
     const btns = barEl.querySelectorAll('.menu-bar-item');

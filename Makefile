@@ -110,6 +110,20 @@ browser:
 	npm run build:frontend
 	FUDE_OPEN_DIR="$(PWD)" node scripts/serve.js
 
+# ブラウザモードをLAN（プライベートアドレス範囲）に公開
+# 例: make browser-lan ROOT=~/notes
+browser-lan:
+	npm run build:frontend
+	@test -n "$(ROOT)" || (echo "Usage: make browser-lan ROOT=<dir>"; exit 1)
+	node scripts/serve.js --listen 0.0.0.0 --allow lan --root "$(ROOT)"
+
+# ブラウザモードをTailscale経由でのみ公開
+# 例: make browser-tailscale ROOT=~/notes
+browser-tailscale:
+	npm run build:frontend
+	@test -n "$(ROOT)" || (echo "Usage: make browser-tailscale ROOT=<dir>"; exit 1)
+	node scripts/serve.js --listen 0.0.0.0 --allow tailscale --root "$(ROOT)"
+
 # フロントエンドのみビルド
 build-frontend:
 	npm run build:frontend
@@ -159,6 +173,8 @@ install: build
 	sudo mkdir -p /usr/lib/fude
 	sudo cp dist/* /usr/lib/fude/
 	sudo cp scripts/serve.js /usr/lib/fude/
+	sudo mkdir -p /usr/lib/fude/lib
+	sudo cp scripts/lib/*.js /usr/lib/fude/lib/
 	sudo cp scripts/fude-browser /usr/bin/fude-browser
 
 # アンインストール

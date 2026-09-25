@@ -68,6 +68,21 @@ fude-browser     # ブラウザモード (http://localhost:3000) - 日本語IME�
 fude-remote      # Windows版を自動取得して起動
 ```
 
+> **ブラウザモードは起動時に表示される `?token=...` 付きの URL で開いてください。**
+> この HTTP API は Tauri 版と同じ権限でファイルを読み書きするため、
+> 既定でループバック (`127.0.0.1`) のみにバインドし、全 API にトークンを要求します。
+
+スマートフォンなど別端末から開きたい場合は、**接続を許す範囲**と**鍵**と
+**公開するディレクトリ**を明示します（3つとも無いと起動しません）。
+
+```bash
+fude-browser --listen 0.0.0.0 --allow lan --root ~/notes
+fude-browser --listen 0.0.0.0 --allow tailscale --root ~/notes
+```
+
+リモート公開時は自己署名証明書で HTTPS になり、指紋が起動時に表示されます。
+詳細は [docs/BROWSER_MODE.md](docs/BROWSER_MODE.md)。
+
 > **日本語入力の変換候補が入力位置から遠くに出る場合**は
 > [docs/WSL_IME.md](docs/WSL_IME.md) を参照してください。
 > 原因は IM 側の構成で、**fcitx4 → fcitx5 への移行**で解決します
@@ -179,6 +194,7 @@ make setup       # 依存関係を一括インストール
 make dev         # 開発モード (Tauri dev)
 make build       # プロダクションビルド
 make browser     # ブラウザモード (WSL向け)
+make browser-lan ROOT=~/notes  # ブラウザモードをLANに公開
 make test        # 全テスト実行 (JS + Rust)
 make lint        # 全lint実行 (ESLint + Clippy)
 make format      # 全フォーマット実行 (Prettier + cargo fmt)

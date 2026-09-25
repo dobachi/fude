@@ -143,6 +143,8 @@ import { isOpenFileShortcut, isGoToPathShortcut, isPrintShortcut } from './core/
 import { normalizeInputPath, resolveRevealDir } from './core/pathnorm.js';
 
 import { isLocalTauri } from './backend.js';
+import { showAuthBanner } from './core/auth-banner.js';
+import { AUTH_FAILED_EVENT } from './browser-token.js';
 import { openHelp } from './help.js';
 import { checkForUpdates } from './core/updater.js';
 import {
@@ -836,9 +838,13 @@ async function init() {
     btn.addEventListener('click', () => setViewMode(btn.dataset.mode));
   });
 
-  // Menu bar (hidden by default; toggled with Ctrl+Shift+B).
+  // Menu bar. Toggled with Ctrl+Shift+B, and revealed by a bare Alt tap — but
+  // the browser claims Alt for its own menu, so in browser mode the bar starts
+  // visible instead of leaving these commands unreachable.
   const menuBarEl = document.getElementById('menu-bar');
-  if (menuBarEl) initMenuBar(menuBarEl, buildMenuDefinition());
+  if (menuBarEl) {
+    initMenuBar(menuBarEl, buildMenuDefinition(), { defaultVisible: !isLocalTauri() });
+  }
 
   // Additional windows are handed a file to open via take_open_request; the
   // main window relies on the cli-args event instead (so this stays null there).
@@ -2055,19 +2061,29 @@ function buildMenuDefinition() {
       accessKey: 'F',
       items: [
         { label: '新規タブ', shortcut: 'Ctrl+Shift+T', action: () => openTab(null, '') },
-        {
-          label: '新しいウィンドウ',
-          shortcut: 'Ctrl+Shift+N',
-          action: () => backend.newWindow(null),
-        },
+        // Desktop-only: both need the native window/opener plugins, so in
+        // browser mode they would be menu entries that quietly do nothing.
+        ...(isLocalTauri()
+          ? [
+              {
+                label: '新しいウィンドウ',
+                shortcut: 'Ctrl+Shift+N',
+                action: () => backend.newWindow(null),
+              },
+            ]
+          : []),
         { label: 'ファイルを開く', shortcut: 'Ctrl+O', action: handleOpenFile },
         { label: 'フォルダを開く', shortcut: 'Ctrl+Shift+O', action: handleOpenFolder },
         { label: 'パスを開く', shortcut: 'Ctrl+Shift+P', action: handleGoToPath },
-        {
-          label: 'このファイルの場所を開く',
-          shortcut: 'Ctrl+Shift+U',
-          action: handleRevealActiveFileDir,
-        },
+        ...(isLocalTauri()
+          ? [
+              {
+                label: 'このファイルの場所を開く',
+                shortcut: 'Ctrl+Shift+U',
+                action: handleRevealActiveFileDir,
+              },
+            ]
+          : []),
         { separator: true },
         { label: '保存', shortcut: 'Ctrl+S', action: () => performSave({}) },
         {
@@ -2801,4 +2817,14 @@ function handleGlobalKeys(e) {
 }
 
 // ── Start ──────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', init);
+// Browser mode hands us its API token once, in the URL. Claim it before any
+// code can issue a request, and before the address bar is copied anywhere.
+backend.captureTokenFromUrl();
+
+// A tab with no usable token can load the page but nothing else, so say so
+// plainly rather than letting every save fail on its own.
+window.addEventListener(AUTH_FAILED_EVENT, () => showAuthBanner());
+document.addEventListener('DOMContentLoaded', () => {
+  if (!backend.isLocalTauri() && !backend.isAuthenticated()) showAuthBanner();
+  init();
+});

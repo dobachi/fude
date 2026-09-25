@@ -2,7 +2,12 @@
 //
 // Renders a row of top-level menus ("ファイル", "編集", ...) whose dropdowns
 // reuse the tested showMenu() component. Visibility is toggled by a shortcut
-// (wired in app.js) and persisted to localStorage; the bar is hidden by default.
+// (wired in app.js) and persisted to localStorage.
+//
+// The default differs by environment. In the desktop app the bar starts hidden
+// because a bare Alt tap reveals it on demand. A browser eats Alt for its own
+// menu, so there the bar has to start visible or these commands have no
+// discoverable route at all.
 
 import { showMenu, closeMenu } from './menu.js';
 import { menuIndexForAccessKey } from './menu-nav.js';
@@ -43,12 +48,18 @@ export function toggleMenuBar() {
   setMenuBarVisible(!isMenuBarVisible());
 }
 
-/** Read the persisted visibility (default: hidden). */
-export function getStoredMenuBarVisible() {
+/**
+ * Read the persisted visibility, falling back to `defaultVisible` when the user
+ * has never expressed a preference. An explicit choice always wins, so someone
+ * who hides the bar in browser mode does not get it back on every launch.
+ */
+export function getStoredMenuBarVisible(defaultVisible = false) {
   try {
-    return localStorage.getItem(VISIBLE_KEY) === '1';
+    const raw = localStorage.getItem(VISIBLE_KEY);
+    if (raw === null) return defaultVisible;
+    return raw === '1';
   } catch {
-    return false;
+    return defaultVisible;
   }
 }
 
@@ -147,7 +158,7 @@ export function isMenuOpen() {
  * @param {HTMLElement} container the #menu-bar element
  * @param {Array<{label:string, items:any[]|(() => any[])}>} menus
  */
-export function initMenuBar(container, menus) {
+export function initMenuBar(container, menus, { defaultVisible = false } = {}) {
   barEl = container;
   menuDef = menus;
   container.innerHTML = '';
@@ -185,5 +196,5 @@ export function initMenuBar(container, menus) {
   });
 
   // Reflect the persisted state on startup (default hidden).
-  setMenuBarVisible(getStoredMenuBarVisible());
+  setMenuBarVisible(getStoredMenuBarVisible(defaultVisible));
 }

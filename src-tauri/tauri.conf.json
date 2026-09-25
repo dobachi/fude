@@ -37,6 +37,10 @@
       "../dist/style.css": "browser/style.css",
       "../dist/bundle.js": "browser/bundle.js",
       "../scripts/serve.js": "browser/serve.js",
+      "../scripts/lib/guard.js": "browser/lib/guard.js",
+      "../scripts/lib/netaccess.js": "browser/lib/netaccess.js",
+      "../scripts/lib/cli.js": "browser/lib/cli.js",
+      "../scripts/lib/selfsigned.js": "browser/lib/selfsigned.js",
       "../scripts/fude-browser": "browser/fude-browser",
       "../scripts/fude-remote": "browser/fude-remote"
     },

@@ -1,21 +1,63 @@
 #!/usr/bin/env node
 // serve.js - Lightweight HTTP server for WSL/browser fallback mode
 // Serves the frontend and provides REST API matching Tauri commands
+//
+// Security: the API below can read and write any path the user can, so it is
+// bound to loopback by default and every /api/* call must carry the session
+// token (see scripts/lib/guard.js). Set FUDE_HOST to bind elsewhere.
 
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const PORT = parseInt(process.env.FUDE_PORT || '3000', 10);
+const cli = require('./lib/cli');
+const guard = require('./lib/guard');
+const netaccess = require('./lib/netaccess');
+const selfsigned = require('./lib/selfsigned');
+
 const DIST_DIR = process.env.FUDE_DIST_DIR || path.join(__dirname, '..', 'dist');
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'fude');
 const TMP_DIR = path.join(CONFIG_DIR, 'tmp');
-const OPEN_DIR = process.env.FUDE_OPEN_DIR || '';
+const TOKEN_FILE = path.join(CONFIG_DIR, 'browser-token');
+
+// Settled by start() from the command line; the API handlers read them from
+// here rather than from the environment so the same handlers serve a local and
+// a remote instance.
+const runtime = {
+  openDir: process.env.FUDE_OPEN_DIR || '',
+  root: '',
+};
 
 // Ensure directories exist
 fs.mkdirSync(CONFIG_DIR, { recursive: true });
 fs.mkdirSync(TMP_DIR, { recursive: true });
+
+/**
+ * The token that authenticates every API call.
+ *
+ * Persisted at 0600 so that restarting the server does not invalidate an open
+ * tab or a bookmarked URL; FUDE_TOKEN overrides it for callers (fude-remote)
+ * that need to know the value up front.
+ */
+function loadOrCreateToken() {
+  if (process.env.FUDE_TOKEN) return process.env.FUDE_TOKEN;
+  try {
+    const existing = fs.readFileSync(TOKEN_FILE, 'utf-8').trim();
+    if (existing.length >= 32) return existing;
+  } catch {
+    /* no token yet */
+  }
+  const token = guard.generateToken();
+  fs.writeFileSync(TOKEN_FILE, token, { encoding: 'utf-8', mode: 0o600 });
+  try {
+    fs.chmodSync(TOKEN_FILE, 0o600);
+  } catch {
+    /* best effort on filesystems without POSIX modes (e.g. /mnt/c) */
+  }
+  return token;
+}
 
 // MIME types
 const MIME = {
@@ -43,6 +85,35 @@ function tempFilePath(originalPath) {
   return path.join(TMP_DIR, `${hash}_${fileName}`);
 }
 
+// Which argument of each command names a filesystem path, so FUDE_ROOT can be
+// enforced in one place instead of inside every handler.
+const PATH_ARGS = {
+  read_file: ['path'],
+  write_file: ['path'],
+  read_dir_tree: ['path'],
+  browse_dir: ['path'],
+  write_temp_file: ['path'],
+  delete_temp_file: ['path'],
+  check_temp_files: ['paths'],
+};
+
+function checkPathArgs(cmdName, args, root) {
+  if (!root) return null;
+  const fields = PATH_ARGS[cmdName];
+  if (!fields) return null;
+  for (const field of fields) {
+    const value = args[field];
+    if (value === undefined || value === null || value === '') continue;
+    const list = Array.isArray(value) ? value : [value];
+    for (const p of list) {
+      if (!guard.isPathAllowed(p, root)) {
+        return `Path outside FUDE_ROOT: ${p}`;
+      }
+    }
+  }
+  return null;
+}
+
 // API handlers (match Tauri commands)
 const api = {
   read_file({ path: filePath }) {
@@ -55,7 +126,12 @@ const api = {
     return null;
   },
 
-  read_dir_tree({ path: dirPath, show_all_files }) {
+  // Tauri maps snake_case Rust params to camelCase JS keys, so the frontend
+  // sends `showAllFiles`; older callers of this HTTP API send `show_all_files`.
+  // Accept both — reading only one silently dropped "show all files" here.
+  read_dir_tree({ path: dirPath, showAllFiles, show_all_files }) {
+    const includeAll = showAllFiles ?? show_all_files ?? false;
+
     function scan(dir) {
       const entries = [];
       let items;
@@ -90,7 +166,7 @@ const api = {
               size: stat.size,
             });
           }
-        } else if (show_all_files || item.name.endsWith('.md')) {
+        } else if (includeAll || item.name.endsWith('.md')) {
           const stat = fs.statSync(fullPath);
           entries.push({
             name: item.name,
@@ -111,7 +187,7 @@ const api = {
 
   // Browse directory (shallow, for folder picker dialog)
   browse_dir({ path: dirPath }) {
-    const target = dirPath || os.homedir();
+    const target = dirPath || runtime.root || os.homedir();
     const entries = [];
     try {
       const items = fs.readdirSync(target, { withFileTypes: true });
@@ -134,7 +210,7 @@ const api = {
 
   // Get initial directory (set via FUDE_OPEN_DIR env)
   get_open_dir() {
-    return OPEN_DIR || null;
+    return runtime.openDir || null;
   },
 
   load_session() {
@@ -339,7 +415,7 @@ function handleAiChatStream(req, res) {
 }
 
 // Non-streaming AI chat
-api.ai_chat = function ({ messages, model }) {
+api.ai_chat = function () {
   return { error: 'Use ai_chat_stream for AI requests' };
 };
 
@@ -359,70 +435,357 @@ api.ai_models = function () {
   return { data: [] };
 };
 
-// HTTP Server
-const server = http.createServer((req, res) => {
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+function sendJson(res, status, payload) {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(payload));
+}
 
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
+/**
+ * Build the HTTP server. Exported so tests can drive it on an ephemeral port
+ * without shelling out.
+ */
+function createFudeServer({
+  token,
+  remoteKey = '',
+  allowCidrs = [],
+  distDir = DIST_DIR,
+  root = '',
+  allowedHosts = [],
+  tls = null,
+  limiter = netaccess.createAttemptLimiter(),
+  onReject = () => {},
+} = {}) {
+  const handler = (req, res) => {
+    const clientIp = netaccess.normalizeIp(req.socket?.remoteAddress) || '';
+    const loopback = netaccess.isLoopbackIp(clientIp);
 
-  // SSE endpoint for AI streaming
-  if (req.method === 'POST' && req.url === '/api/ai_chat_stream') {
-    handleAiChatStream(req, res);
-    return;
-  }
-
-  // API endpoints
-  if (req.method === 'POST' && req.url.startsWith('/api/')) {
-    const cmdName = req.url.slice(5); // Remove '/api/'
-    let body = '';
-    req.on('data', (chunk) => (body += chunk));
-    req.on('end', () => {
-      try {
-        const args = body ? JSON.parse(body) : {};
-        const handler = api[cmdName];
-        if (!handler) {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: `Unknown command: ${cmdName}` }));
-          return;
-        }
-        const result = handler(args);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(result));
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
-      }
-    });
-    return;
-  }
-
-  // Static files
-  let filePath = req.url === '/' ? '/index.html' : req.url;
-  filePath = path.join(DIST_DIR, filePath);
-
-  const ext = path.extname(filePath);
-  const contentType = MIME[ext] || 'application/octet-stream';
-
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      res.writeHead(404);
-      res.end('Not Found');
+    // Re-check the range here as well as at the socket, so a handler can never
+    // be reached by a connection that slipped past the listener gate.
+    if (!loopback && !netaccess.isRemoteAllowed(clientIp, allowCidrs)) {
+      res.writeHead(403);
+      res.end('Forbidden');
       return;
     }
-    res.writeHead(200, { 'Content-Type': contentType });
-    res.end(data);
-  });
-});
+    // No Access-Control-Allow-Origin: the UI is served from this same origin,
+    // so nothing legitimate is cross-origin. Advertising `*` previously let any
+    // web page the user visited read the response of these calls.
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
 
-server.listen(PORT, () => {
-  console.log(`\n  Fude (browser mode) running at:\n`);
-  console.log(`    http://localhost:${PORT}\n`);
-  console.log(`  Press Ctrl+C to stop.\n`);
-});
+    const isApi = req.url && (req.url === '/api' || req.url.startsWith('/api/'));
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    if (isApi) {
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+      }
+
+      // An allowed range is not a trusted range. Lock out an address that keeps
+      // guessing before spending any more work on it.
+      if (!loopback) {
+        const locked = limiter.check(clientIp);
+        if (locked.locked) {
+          res.setHeader('Retry-After', String(Math.ceil(locked.retryAfterMs / 1000)));
+          sendJson(res, 429, { error: 'Too many failed attempts' });
+          return;
+        }
+      }
+
+      const verdict = guard.authorizeApi(req, {
+        token,
+        remoteKey,
+        isLoopback: loopback,
+        allowedHosts,
+      });
+      if (!verdict.ok) {
+        if (!loopback && verdict.status === 401) {
+          const result = limiter.recordFailure(clientIp);
+          onReject(clientIp, result.locked ? 'locked out' : 'bad key');
+        }
+        sendJson(res, verdict.status, { error: verdict.error });
+        return;
+      }
+      if (!loopback) limiter.recordSuccess(clientIp);
+    }
+
+    // SSE endpoint for AI streaming
+    const urlPath = (req.url || '/').split('?')[0];
+    if (req.method === 'POST' && urlPath === '/api/ai_chat_stream') {
+      handleAiChatStream(req, res);
+      return;
+    }
+
+    // API endpoints
+    if (isApi) {
+      const cmdName = urlPath.slice(5); // Remove '/api/'
+      let body = '';
+      let tooLarge = false;
+      req.on('data', (chunk) => {
+        body += chunk;
+        // The editor posts whole documents, so the cap is generous; it exists
+        // only so an unauthenticated-looking client cannot exhaust memory.
+        if (body.length > 64 * 1024 * 1024) {
+          tooLarge = true;
+          req.destroy();
+        }
+      });
+      req.on('end', () => {
+        if (tooLarge) return;
+        try {
+          const args = body ? JSON.parse(body) : {};
+          const handler = Object.prototype.hasOwnProperty.call(api, cmdName) ? api[cmdName] : null;
+          if (!handler) {
+            sendJson(res, 404, { error: `Unknown command: ${cmdName}` });
+            return;
+          }
+          const pathError = checkPathArgs(cmdName, args, root);
+          if (pathError) {
+            sendJson(res, 403, { error: pathError });
+            return;
+          }
+          const result = handler(args);
+          sendJson(res, 200, result);
+        } catch (err) {
+          sendJson(res, 500, { error: err.message });
+        }
+      });
+      return;
+    }
+
+    // Static files
+    const filePath = guard.resolveStaticPath(distDir, req.url);
+    if (!filePath) {
+      res.writeHead(403);
+      res.end('Forbidden');
+      return;
+    }
+
+    const ext = path.extname(filePath);
+    const contentType = MIME[ext] || 'application/octet-stream';
+
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        res.writeHead(404);
+        res.end('Not Found');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': contentType });
+      res.end(data);
+    });
+  };
+
+  const server = tls ? https.createServer(tls, handler) : http.createServer(handler);
+
+  // Drop disallowed sources at the TCP layer, before any HTTP (or TLS
+  // handshake) work. An address outside --allow gets no response at all, so the
+  // port does not answer to a scan, and a flood costs us nothing to parse.
+  if (allowCidrs.length > 0) {
+    server.on('connection', (socket) => {
+      const ip = netaccess.normalizeIp(socket.remoteAddress) || '';
+      if (netaccess.isLoopbackIp(ip)) return;
+      if (!netaccess.isRemoteAllowed(ip, allowCidrs)) {
+        onReject(ip, 'not in --allow');
+        socket.destroy();
+      }
+    });
+  }
+
+  return server;
+}
+
+/** Read a key from stdin, for `--key -` (keeps it out of `ps` and history). */
+function readStdin() {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf-8');
+    process.stdin.on('data', (chunk) => (data += chunk));
+    process.stdin.on('end', () => resolve(data.trim()));
+    process.stdin.on('error', reject);
+  });
+}
+
+/** Resolve the remote access key from whichever source the CLI selected. */
+async function resolveRemoteKey(keySource) {
+  switch (keySource.type) {
+    case 'literal':
+    case 'env':
+      return { key: keySource.value, generated: false, fromArgv: keySource.type === 'literal' };
+    case 'file': {
+      const key = fs.readFileSync(keySource.path, 'utf-8').trim();
+      if (key.length < cli.MIN_KEY_LENGTH) {
+        throw new Error(
+          `Key in ${keySource.path} must be at least ${cli.MIN_KEY_LENGTH} characters`,
+        );
+      }
+      return { key, generated: false, fromArgv: false };
+    }
+    case 'stdin': {
+      const key = await readStdin();
+      if (key.length < cli.MIN_KEY_LENGTH) {
+        throw new Error(`Key read from stdin must be at least ${cli.MIN_KEY_LENGTH} characters`);
+      }
+      return { key, generated: false, fromArgv: false };
+    }
+    default:
+      // Not persisted: a remote grant should end when the process does.
+      return { key: guard.generateToken(), generated: true, fromArgv: false };
+  }
+}
+
+/** Addresses a client could actually type, given what we bound and allowed. */
+function reachableAddresses(host, allowCidrs) {
+  if (host !== '0.0.0.0' && host !== '::') return [host];
+  const addrs = [];
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const iface of list || []) {
+      const ip = netaccess.normalizeIp(iface.address);
+      if (!ip || netaccess.isLoopbackIp(ip)) continue;
+      if (netaccess.isRemoteAllowed(ip, allowCidrs)) addrs.push(ip);
+    }
+  }
+  return addrs.length > 0 ? addrs : [host];
+}
+
+function formatUrl(scheme, address, port, key) {
+  const hostPart = address.includes(':') ? `[${address}]` : address;
+  return `${scheme}://${hostPart}:${port}/?token=${key}`;
+}
+
+async function start(argv = process.argv.slice(2), env = process.env) {
+  const parsed = cli.parseArgs(argv, env);
+  if (!parsed.ok) {
+    console.error(`\n${parsed.error}\n`);
+    process.exitCode = 1;
+    return null;
+  }
+  if (parsed.help) {
+    console.log(parsed.usage);
+    return null;
+  }
+
+  const cfg = parsed.config;
+  runtime.openDir = cfg.openDir;
+  runtime.root = cfg.root;
+
+  const localToken = loadOrCreateToken();
+
+  let remoteKey = '';
+  let keyGenerated = false;
+  let keyFromArgv = false;
+  if (cfg.remote) {
+    try {
+      const resolved = await resolveRemoteKey(cfg.keySource);
+      remoteKey = resolved.key;
+      keyGenerated = resolved.generated;
+      keyFromArgv = resolved.fromArgv;
+    } catch (err) {
+      console.error(`\n${err.message}\n`);
+      process.exitCode = 1;
+      return null;
+    }
+  }
+
+  // ── TLS ──────────────────────────────────────────────────
+  let tlsOptions = null;
+  let fingerprint = '';
+  let certGenerated = false;
+  if (cfg.tls.enabled) {
+    try {
+      if (cfg.tls.certPath) {
+        tlsOptions = {
+          cert: fs.readFileSync(cfg.tls.certPath),
+          key: fs.readFileSync(cfg.tls.keyPath),
+        };
+        fingerprint = selfsigned.fingerprint(cfg.tls.certPath);
+      } else {
+        const material = selfsigned.ensureCert({ configDir: CONFIG_DIR });
+        tlsOptions = { cert: material.cert, key: material.key };
+        fingerprint = material.fingerprint;
+        certGenerated = material.generated;
+      }
+    } catch (err) {
+      console.error(`\nTLS setup failed: ${err.message}\n`);
+      process.exitCode = 1;
+      return null;
+    }
+  }
+
+  const rejectLog = new Map();
+  const onReject = (ip, reason) => {
+    // Throttle: a scanner should not be able to fill the terminal, but a
+    // misconfigured --allow must still be visible to whoever started this.
+    const now = Date.now();
+    const last = rejectLog.get(ip) || 0;
+    if (now - last < 60_000) return;
+    rejectLog.set(ip, now);
+    console.log(`  rejected ${ip} (${reason})`);
+  };
+
+  const server = createFudeServer({
+    token: localToken,
+    remoteKey,
+    allowCidrs: cfg.allowCidrs,
+    root: cfg.root,
+    allowedHosts: cfg.allowedHosts,
+    tls: tlsOptions,
+    onReject,
+  });
+
+  const scheme = tlsOptions ? 'https' : 'http';
+
+  server.listen(cfg.port, cfg.host, () => {
+    console.log(`\n  Fude (browser mode) running at:\n`);
+
+    if (!cfg.remote) {
+      console.log(`    ${formatUrl(scheme, 'localhost', cfg.port, localToken)}\n`);
+    } else {
+      for (const addr of reachableAddresses(cfg.host, cfg.allowCidrs)) {
+        console.log(`    ${formatUrl(scheme, addr, cfg.port, remoteKey)}`);
+      }
+      console.log('');
+      console.log(`  Reachable from: ${cfg.allowCidrs.map((c) => c.source).join(', ')}`);
+      console.log(
+        `  File access:    ${cfg.root ? `confined to ${cfg.root}` : 'NOT CONFINED (--i-know-what-im-doing)'}`,
+      );
+      if (keyGenerated) {
+        console.log(`  Key:            generated for this session; it is not saved anywhere.`);
+      } else if (keyFromArgv) {
+        console.log(`  Key:            WARNING - passed on the command line, so it is visible`);
+        console.log(`                  to other users of this machine via 'ps'. Prefer`);
+        console.log(`                  --key-file, --key - (stdin), or omitting --key.`);
+      }
+      if (fingerprint) {
+        console.log(`  Certificate:    self-signed${certGenerated ? ' (newly generated)' : ''}.`);
+        console.log(`                  Your browser will warn once. Check this first:`);
+        console.log(`                  SHA-256 ${fingerprint}`);
+      } else {
+        console.log(`  WARNING:        TLS is off, so the key and your documents travel`);
+        console.log(`                  in the clear. Use an SSH tunnel or Tailscale.`);
+      }
+      console.log('');
+    }
+    console.log(`  Press Ctrl+C to stop.\n`);
+  });
+  return server;
+}
+
+if (require.main === module) {
+  start();
+}
+
+module.exports = {
+  createFudeServer,
+  loadOrCreateToken,
+  start,
+  api,
+  checkPathArgs,
+  PATH_ARGS,
+  reachableAddresses,
+  runtime,
+};

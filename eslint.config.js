@@ -22,6 +22,7 @@ export default [
         TextDecoder: 'readonly',
         TextEncoder: 'readonly',
         URL: 'readonly',
+        URLSearchParams: 'readonly',
         Blob: 'readonly',
         FormData: 'readonly',
         Image: 'readonly',
