@@ -18,9 +18,31 @@
 | 接続を許す範囲       | ループバックのみ            | `--allow` / `FUDE_ALLOW`        |
 | ファイルアクセス範囲 | 制限なし（Tauri 版と同等）  | `--root` / `FUDE_ROOT`          |
 | 許可するホスト名     | IP リテラルと `localhost`   | `--allowed-hosts`               |
+| 表示する URL のホスト | `localhost`（リモート時は待受アドレス） | `--hostname` / `FUDE_HOSTNAME` |
 | TLS                  | 無効（ループバックのため）  | `--tls` / `--tls-cert`          |
 
 `fude-browser --help` で全オプションが出ます。
+
+### 専用のホスト名で開く（`--hostname`）
+
+`localhost` のままだと、ブラウザ拡張（Vimium の除外 URL など）の URL ルールで
+Fude だけを他のローカルのサービスと区別できません。`*.localhost` はどの名前も
+ループバックを指すので、Fude 専用の名前で開けます。
+
+```
+fude-browser --hostname fude.localhost
+#   http://fude.localhost:3000/?token=...
+```
+
+- 毎回指定しないなら、シェルの設定に `export FUDE_HOSTNAME=fude.localhost` と
+  書けば既定になります（`--hostname` を付ければそちらが優先。空にすると無効）。
+- 指定した名前は Host ヘッダの許可リストにも自動で加わります。Tailscale の
+  名前（`box.tailnet.ts.net` など）でリモートから開く場合も `--allowed-hosts`
+  を重ねる必要はありません。
+- ブラウザにとって `localhost` と `fude.localhost` は別のサイトです。最初の
+  1 回は `?token=` 付きの URL で開いてください。再起動で鍵が変わらないよう
+  `--key-file` と併用すると、ブックマークがそのまま使えます。
+- Vimium の除外 URL の例: `http*://fude.localhost:*`
 
 ### 1. ループバックのみにバインドする
 

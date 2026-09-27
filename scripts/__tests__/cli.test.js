@@ -198,3 +198,91 @@ describe('tls', () => {
     expect(err([...remote, '--tls', '--no-tls'])).toMatch(/not both/);
   });
 });
+
+// --hostname: print the URL under a name of the user's choosing (e.g.
+// fude.localhost, so a browser extension's URL rules can single Fude out from
+// other services on localhost), with FUDE_HOSTNAME as a persistent default.
+describe('hostname', () => {
+  it('is unset by default', () => {
+    expect(ok([]).urlHost).toBeNull();
+  });
+
+  it('takes --hostname, normalised to lower case', () => {
+    expect(ok(['--hostname', 'Fude.Localhost']).urlHost).toBe('fude.localhost');
+    expect(ok(['--hostname=fude.localhost']).urlHost).toBe('fude.localhost');
+  });
+
+  it('takes FUDE_HOSTNAME as the default, and the option overrides it', () => {
+    expect(ok([], { FUDE_HOSTNAME: 'fude.localhost' }).urlHost).toBe('fude.localhost');
+    expect(ok(['--hostname', 'other.localhost'], { FUDE_HOSTNAME: 'fude.localhost' }).urlHost).toBe(
+      'other.localhost',
+    );
+  });
+
+  it('adds the name to the accepted Host names, once', () => {
+    const cfg = ok(['--hostname', 'box.tailnet.ts.net', '--allowed-hosts', 'a.example']);
+    expect(cfg.allowedHosts).toEqual(['a.example', 'box.tailnet.ts.net']);
+    const again = ok(['--hostname', 'a.example', '--allowed-hosts', 'A.example']);
+    expect(again.allowedHosts).toEqual(['A.example']);
+  });
+
+  it('accepts IP addresses, including bracketed IPv6', () => {
+    expect(ok(['--hostname', '100.64.0.1']).urlHost).toBe('100.64.0.1');
+    expect(ok(['--hostname', '[::1]']).urlHost).toBe('::1');
+  });
+
+  it('refuses anything that is not just a host', () => {
+    for (const bad of [
+      'http://fude.localhost',
+      'fude.localhost:3000',
+      'fude.localhost/x',
+      'bad_name',
+      '-lead.example',
+      'a..b',
+      ' ',
+    ]) {
+      const r = parseArgs(['--hostname', bad], {});
+      if (bad.trim() === '') {
+        expect(r.ok).toBe(true); // blank means "not set"
+        continue;
+      }
+      expect(r.ok, bad).toBe(false);
+      expect(r.error).toMatch(/Invalid --hostname/);
+    }
+  });
+});
+
+describe('startupUrls', () => {
+  const { startupUrls } = cli;
+  const base = { scheme: 'http', port: 3000, key: 'K' };
+
+  it('prints localhost for a loopback server', () => {
+    expect(startupUrls({ ...base, remote: false })).toEqual(['http://localhost:3000/?token=K']);
+  });
+
+  it('prints the chosen hostname instead', () => {
+    expect(startupUrls({ ...base, remote: false, urlHost: 'fude.localhost' })).toEqual([
+      'http://fude.localhost:3000/?token=K',
+    ]);
+  });
+
+  it('lists every reachable address for a remote server', () => {
+    const urls = startupUrls({
+      ...base,
+      scheme: 'https',
+      remote: true,
+      addresses: ['100.64.0.1', 'fd7a::1'],
+    });
+    expect(urls).toEqual(['https://100.64.0.1:3000/?token=K', 'https://[fd7a::1]:3000/?token=K']);
+  });
+
+  it('puts the chosen hostname first for a remote server, without repeating it', () => {
+    const urls = startupUrls({
+      ...base,
+      remote: true,
+      urlHost: '100.64.0.1',
+      addresses: ['100.64.0.1', '192.168.1.5'],
+    });
+    expect(urls).toEqual(['http://100.64.0.1:3000/?token=K', 'http://192.168.1.5:3000/?token=K']);
+  });
+});

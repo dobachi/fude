@@ -759,11 +759,6 @@ function reachableAddresses(host, allowCidrs) {
   return addrs.length > 0 ? addrs : [host];
 }
 
-function formatUrl(scheme, address, port, key) {
-  const hostPart = address.includes(':') ? `[${address}]` : address;
-  return `${scheme}://${hostPart}:${port}/?token=${key}`;
-}
-
 async function start(argv = process.argv.slice(2), env = process.env) {
   const parsed = cli.parseArgs(argv, env);
   if (!parsed.ok) {
@@ -855,12 +850,18 @@ async function start(argv = process.argv.slice(2), env = process.env) {
   server.listen(cfg.port, cfg.host, () => {
     console.log(`\n  Fude (browser mode) running at:\n`);
 
+    const urls = cli.startupUrls({
+      scheme,
+      port: cfg.port,
+      key: cfg.remote ? remoteKey : localToken,
+      remote: cfg.remote,
+      urlHost: cfg.urlHost,
+      addresses: cfg.remote ? reachableAddresses(cfg.host, cfg.allowCidrs) : [],
+    });
     if (!cfg.remote) {
-      console.log(`    ${formatUrl(scheme, 'localhost', cfg.port, localToken)}\n`);
+      console.log(`    ${urls[0]}\n`);
     } else {
-      for (const addr of reachableAddresses(cfg.host, cfg.allowCidrs)) {
-        console.log(`    ${formatUrl(scheme, addr, cfg.port, remoteKey)}`);
-      }
+      for (const url of urls) console.log(`    ${url}`);
       console.log('');
       console.log(`  Reachable from: ${cfg.allowCidrs.map((c) => c.source).join(', ')}`);
       console.log(

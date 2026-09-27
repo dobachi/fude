@@ -4,6 +4,7 @@
 // Reading a key file or stdin, and generating certificates, happen in serve.js
 // once this has said the combination is allowed.
 
+const net = require('net');
 const path = require('path');
 
 const guard = require('./guard');
@@ -37,6 +38,10 @@ Options:
       --key -             Read the key from stdin.
                           Omit all of these to have one generated and shown once.
       --allowed-hosts <h> Extra hostnames accepted in the Host header.
+      --hostname <name>   Hostname to put in the printed URL (default: localhost,
+                          or the listen addresses when remote). Also accepted
+                          in the Host header. E.g. fude.localhost, so browser
+                          extensions can tell Fude apart from other local apps.
       --open-dir <dir>    Directory to open on startup.
       --tls / --no-tls    Force TLS on or off (default: on when remote).
       --tls-cert <path>   Certificate to use instead of the generated one.
@@ -46,7 +51,9 @@ Options:
   -h, --help              Show this help.
 
 Environment: FUDE_HOST FUDE_PORT FUDE_ALLOW FUDE_ROOT FUDE_KEY
-             FUDE_ALLOWED_HOSTS FUDE_OPEN_DIR FUDE_DIST_DIR
+             FUDE_ALLOWED_HOSTS FUDE_HOSTNAME FUDE_OPEN_DIR FUDE_DIST_DIR
+             (options override these; e.g. set FUDE_HOSTNAME=fude.localhost
+             in your shell profile to make it the default)
 `;
 
 const FLAGS = new Set(['--tls', '--no-tls', '--i-know-what-im-doing', '-h', '--help']);
@@ -66,6 +73,7 @@ const VALUED = new Set([
   '--key',
   '--key-file',
   '--allowed-hosts',
+  '--hostname',
   '--open-dir',
   '--tls-cert',
   '--tls-key',
@@ -73,6 +81,50 @@ const VALUED = new Set([
 
 function fail(error) {
   return { ok: false, error };
+}
+
+const LABEL = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+const HOSTNAME_RE = new RegExp(`^(?=.{1,253}$)${LABEL}(?:\\.${LABEL})*$`);
+
+/**
+ * Validate a --hostname value: a DNS name or an IP address, nothing else (no
+ * scheme, port or path — it goes into a URL and into the Host allow-list).
+ * @param {string} value
+ * @returns {{ok: true, hostname: string} | {ok: false, error: string}}
+ */
+function parseHostname(value) {
+  const v = String(value).trim().toLowerCase();
+  const bare = v.startsWith('[') && v.endsWith(']') ? v.slice(1, -1) : v;
+  if (net.isIP(bare)) return { ok: true, hostname: bare };
+  if (HOSTNAME_RE.test(v)) return { ok: true, hostname: v };
+  return {
+    ok: false,
+    error:
+      `Invalid --hostname: ${value}\n` +
+      `Give just a host name or address, without scheme, port or path. For example:\n\n` +
+      `  --hostname fude.localhost`,
+  };
+}
+
+/**
+ * The URLs to print at startup, in order.
+ *
+ * With a hostname configured it comes first: that is the address the user
+ * asked to see. Otherwise loopback prints "localhost", and a remote bind every
+ * address a client can reach it on.
+ *
+ * @param {{scheme: string, port: number, key: string, remote: boolean,
+ *   urlHost?: string|null, addresses?: string[]}} p
+ * @returns {string[]}
+ */
+function startupUrls({ scheme, port, key, remote, urlHost = null, addresses = [] }) {
+  const format = (host) => {
+    const hostPart = host.includes(':') ? `[${host}]` : host;
+    return `${scheme}://${hostPart}:${port}/?token=${key}`;
+  };
+  if (!remote) return [format(urlHost || 'localhost')];
+  const hosts = urlHost ? [urlHost, ...addresses.filter((a) => a !== urlHost)] : addresses;
+  return hosts.map(format);
 }
 
 /**
@@ -203,6 +255,19 @@ function parseArgs(argv = [], env = {}) {
     .map((h) => h.trim())
     .filter(Boolean);
 
+  // ── Hostname for the printed URL ──────────────────────────
+  let urlHost = null;
+  // Blank (e.g. FUDE_HOSTNAME= to switch a profile default off) means unset.
+  const hostnameRaw = String(raw['--hostname'] ?? env.FUDE_HOSTNAME ?? '').trim();
+  if (hostnameRaw) {
+    const parsed = parseHostname(hostnameRaw);
+    if (!parsed.ok) return fail(parsed.error);
+    urlHost = parsed.hostname;
+    // The user will open this name, so the Host check must let it through.
+    // (IPs and *.localhost pass anyway; adding them is harmless.)
+    if (!allowedHosts.some((h) => h.toLowerCase() === urlHost)) allowedHosts.push(urlHost);
+  }
+
   return {
     ok: true,
     config: {
@@ -220,10 +285,19 @@ function parseArgs(argv = [], env = {}) {
         keyPath: raw['--tls-key'],
       },
       allowedHosts,
+      urlHost,
       openDir: raw['--open-dir'] ?? env.FUDE_OPEN_DIR ?? '',
       distDir: env.FUDE_DIST_DIR || '',
     },
   };
 }
 
-module.exports = { parseArgs, USAGE, MIN_KEY_LENGTH, DEFAULT_PORT, DEFAULT_HOST };
+module.exports = {
+  parseArgs,
+  parseHostname,
+  startupUrls,
+  USAGE,
+  MIN_KEY_LENGTH,
+  DEFAULT_PORT,
+  DEFAULT_HOST,
+};
