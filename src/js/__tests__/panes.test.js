@@ -105,6 +105,43 @@ describe('panes module', () => {
     expect(mod.getPaneCount()).toBe(1);
   });
 
+  // Split-pane view modes: each pane has its own, and the app hears about
+  // every change of the active pane so the buttons can follow it.
+  it('a new pane starts with the source pane view mode, then is independent', () => {
+    mod.initPanes();
+    const first = mod.getActivePane();
+    first.viewMode = 'preview';
+    mod.splitVertical();
+    const second = mod.getActivePane();
+    expect(second).not.toBe(first);
+    expect(second.viewMode).toBe('preview');
+    second.viewMode = 'editor';
+    expect(first.viewMode).toBe('preview');
+  });
+
+  it('marks the workspace as multi-pane only while split', () => {
+    mod.initPanes();
+    const ws = document.getElementById('workspace');
+    expect(ws.classList.contains('multi-pane')).toBe(false);
+    mod.splitVertical();
+    expect(ws.classList.contains('multi-pane')).toBe(true);
+    mod.closeActivePane();
+    expect(ws.classList.contains('multi-pane')).toBe(false);
+  });
+
+  it('reports active-pane changes on split, focus and close', () => {
+    mod.initPanes();
+    const seen = [];
+    mod.setCallbacks({ onActivePaneChange: (p) => seen.push(p && p.id) });
+    mod.splitVertical();
+    const second = mod.getActivePane().id;
+    mod.focusPane('left');
+    mod.closeActivePane();
+    expect(seen[0]).toBe(second);
+    expect(seen).toContain('default');
+    expect(seen[seen.length - 1]).toBe(mod.getActivePane().id);
+  });
+
   it('focusPane changes active pane', () => {
     mod.initPanes();
     const newPane = mod.splitVertical();

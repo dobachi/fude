@@ -40,6 +40,11 @@ import { createStatusBar } from './core/statusbar.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
 import { taskToggleChange } from './core/task-list.js';
+import {
+  resolvePaneViewMode,
+  ensurePaneViewControls,
+  markViewModeButtons,
+} from './core/pane-view-mode.js';
 import { localImageUrl, PLACEHOLDER_SRC } from './core/local-image.js';
 import { planStartup, startupNotice } from './core/startup-plan.js';
 import { tableCellText, editTableCell, tableSize, adjacentCell } from './core/table-cell-edit.js';
@@ -189,17 +194,23 @@ let defaultViewMode = 'split';
 // editor-only. Mirrors editor.js's flag so app-level open logic can branch.
 let sourceCodeModeEnabled = false;
 
-/** View mode of the currently active tab (falls back to the default). */
+/** View mode of the active pane. */
 function currentViewMode() {
-  const tab = getActiveTab();
-  return tab ? getTabViewMode(tab.id) : defaultViewMode;
+  return paneViewMode(getActivePane());
 }
 
-/** View mode of the tab a given pane is displaying (falls back to the default). */
+/**
+ * View mode a pane displays: its own choice, else the mode remembered for the
+ * file it shows, else the default. Never another pane's or the active tab's —
+ * that is what made one pane's switch flip the others (pane-view-mode.js).
+ */
 function paneViewMode(pane) {
-  const tab =
-    pane && pane.filePath ? getAllTabs().find((t) => t.path === pane.filePath) : getActiveTab();
-  return tab ? getTabViewMode(tab.id) : defaultViewMode;
+  const tab = pane && pane.filePath ? getAllTabs().find((t) => t.path === pane.filePath) : null;
+  return resolvePaneViewMode({
+    paneMode: pane ? pane.viewMode : null,
+    tabMode: tab ? getTabViewMode(tab.id) : null,
+    defaultMode: defaultViewMode,
+  });
 }
 
 // True for the primary "main" window. Only the main window restores and
@@ -741,6 +752,8 @@ async function init() {
     onFileLink: handlePreviewFileLink,
     onTaskToggle: handlePreviewTaskToggle,
     onBlockEdit: handlePreviewBlockEdit,
+    // Panes added/closed or focus moved: the buttons follow the active pane.
+    onActivePaneChange: () => syncViewModeButtons(),
     onEditorCreated: () => {
       reapplyMode();
     },
@@ -1903,6 +1916,7 @@ function handleTabChange(tab) {
   // Image tabs are a read-only viewer, not a text editor.
   if (tab.kind === 'image') {
     renderImageTab(pane, tab);
+    pane.viewMode = getTabViewMode(tab.id);
     pane.filePath = tab.path;
     pane.content = '';
     pane.editorView = null;
@@ -1927,6 +1941,9 @@ function handleTabChange(tab) {
   if (shouldOpenAsCode(tab.path, sourceCodeModeEnabled) && getTabViewMode(tab.id) !== 'editor') {
     setTabViewMode(tab.id, 'editor');
   }
+  // The pane takes on the layout last used for this file (the per-tab memory);
+  // after that it is the pane's own, independent of other panes.
+  pane.viewMode = getTabViewMode(tab.id);
 
   // Apply vim mode
   reapplyMode();
@@ -2066,15 +2083,17 @@ async function manualReload() {
 // ── View mode ──────────────────────────────────────────────
 // Each pane reflects the view mode of the tab it currently displays, so
 // switching tabs (or focusing a different pane) shows that file's own layout.
-/** タブバーのボタンに現在の表示モードを反映する */
+/**
+ * ボタンに表示モードを反映する。タブバーのボタンはアクティブなペインの、
+ * 各ペインのボタンはそのペインのモードを示す（aria-pressed で支援技術にも伝える）。
+ */
 function syncViewModeButtons() {
-  const mode = currentViewMode();
-  document.querySelectorAll('.view-mode-btn').forEach((btn) => {
-    const on = btn.dataset.mode === mode;
-    btn.classList.toggle('active', on);
-    // 現在のモードを支援技術にも伝える（見た目だけの active に留めない）
-    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-  });
+  markViewModeButtons(document.getElementById('view-mode-switch'), currentViewMode());
+  const template = document.getElementById('view-mode-switch');
+  for (const p of panesModule.getAllPanes()) {
+    const controls = ensurePaneViewControls(p.element, template, (mode) => setViewMode(mode, p));
+    markViewModeButtons(controls, paneViewMode(p));
+  }
 }
 
 function applyViewMode() {
@@ -2101,16 +2120,24 @@ function applyViewMode() {
   }
 }
 
-function setViewMode(mode) {
-  const tab = getActiveTab();
-  if (tab) setTabViewMode(tab.id, mode);
+/**
+ * Switch one pane's view mode (the active pane unless given). Only that pane
+ * changes, even when another pane shows the same file.
+ */
+function setViewMode(mode, pane = getActivePane()) {
+  if (pane) {
+    pane.viewMode = mode;
+    // Remember it for the file too, so switching back to this tab later opens
+    // it the same way. Other panes keep their own mode (pane.viewMode).
+    const tab = pane.filePath ? getAllTabs().find((t) => t.path === pane.filePath) : null;
+    if (tab) setTabViewMode(tab.id, mode);
+  }
   // Remember the most recently chosen mode as the default for new tabs.
   defaultViewMode = mode;
   applyViewMode();
 
   // Move focus to whichever half the new mode leaves visible, so the keymap
   // that mode implies (preview j/k/gg, editor Vim/Emacs) keeps working.
-  const pane = getActivePane();
   const target = focusTargetForViewMode(mode, paneFocusLocation(pane));
   if (target === 'preview' && pane && pane.previewContainer)
     pane.previewContainer.focus({ preventScroll: true });

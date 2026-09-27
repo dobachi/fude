@@ -14,6 +14,7 @@ import { initPreview } from './preview.js';
  * @property {string|null} filePath
  * @property {string} content
  * @property {boolean} dirty
+ * @property {string|null} viewMode  - this pane's own editor/split/preview mode
  */
 
 /** @type {Pane[]} */
@@ -28,6 +29,7 @@ let onSelectionChangeCallback = null; // (selectedText) => void
 let onEditorCreatedCallback = null; // (pane) => void — invoked after createEditorInPane
 let onSourceJumpCallback = null; // (line, previewContainer) => void — preview Ctrl+click
 let onFileLinkCallback = null; // (target, previewContainer) => void — preview file link click
+let onActivePaneChangeCallback = null; // (pane) => void — active pane switched or panes changed
 let onTaskToggleCallback = null; // (line, wasChecked, previewContainer) => void — preview checkbox
 let onBlockEditCallback = null; // ({line, blockEl, word, container}) => void — preview dblclick
 
@@ -41,6 +43,7 @@ export function setCallbacks({
   onFileLink,
   onTaskToggle,
   onBlockEdit,
+  onActivePaneChange,
 }) {
   onChangeCallback = onChange;
   onScrollCallback = onScroll;
@@ -51,6 +54,7 @@ export function setCallbacks({
   onFileLinkCallback = onFileLink;
   onTaskToggleCallback = onTaskToggle;
   onBlockEditCallback = onBlockEdit;
+  onActivePaneChangeCallback = onActivePaneChange;
 }
 
 // Preview-init options shared by every pane so the preview's click actions work in
@@ -108,6 +112,7 @@ function makePaneObject(id, element) {
     filePath: null,
     content: '',
     dirty: false,
+    viewMode: null,
   };
 }
 
@@ -197,6 +202,9 @@ function doSplit(cssClass) {
 
   // Init preview for the new pane
   initPreview(pane.previewContainer, previewInitOpts());
+
+  // Start in the layout the source pane had; from here on it is independent.
+  if (source) pane.viewMode = source.viewMode;
 
   // Copy file from source pane
   if (source && source.editorView) {
@@ -418,6 +426,12 @@ function updatePaneStyles() {
   workspace.querySelectorAll('.pane').forEach((el) => {
     el.classList.toggle('active', el.dataset.paneId === activePaneId);
   });
+  // Per-pane controls are only shown while there is more than one pane.
+  workspace.classList.toggle('multi-pane', panes.length > 1);
+  // Every change of the active pane or the pane set passes through here, so
+  // this is where the app hears about it (e.g. to show the active pane's mode
+  // on the tab bar buttons).
+  if (onActivePaneChangeCallback) onActivePaneChangeCallback(getActivePane());
 }
 
 // ── Clear panes showing a closed file ─────────────────────

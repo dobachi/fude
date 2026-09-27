@@ -2989,6 +2989,33 @@ body:has(#app.ai-panel-open) #mode-indicator {
   outline-offset: 1px;
 }
 
+/* 分割時だけ各ペインの右上に出す表示切替。本文に重なるので普段は薄く、
+   ホバー・フォーカス中とアクティブなペインでは濃くする。 */
+.pane-view-controls {
+  display: none;
+  position: absolute;
+  top: 4px;
+  right: 18px;
+  z-index: 20;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  opacity: 0.45;
+  transition: opacity 0.15s;
+}
+
+#workspace.multi-pane .pane-view-controls {
+  display: flex;
+}
+
+.pane.active > .pane-view-controls,
+.pane-view-controls:hover,
+.pane-view-controls:focus-within {
+  opacity: 1;
+}
+
 /* ===== Status bar ===== */
 /* 画面最下部の細い帯。開いているファイルのパスを常時出す。
    色は各テーマの変数に乗せてあるので、テーマ切替にそのまま追従する。 */
