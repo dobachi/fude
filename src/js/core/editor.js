@@ -799,15 +799,20 @@ const inlineTheme = EditorView.theme({
  *
  * @param {HTMLElement} parent
  * @param {string} content
- * @param {{commit: () => void}} handlers
+ * @param {{commit: () => void, move?: (dir: 1|-1) => void}} handlers
  * @param {number} [cursor] initial caret offset
  * @param {{singleLine?: boolean}} [opts] singleLine: Enter finishes the edit
- *   instead of starting a new line (a table cell)
+ *   instead of starting a new line, and Tab / Shift+Tab move (a table cell)
  */
 export function createInlineEditor(parent, content, handlers, cursor = 0, opts = {}) {
   const keymodeCompartment = new Compartment();
   const done = () => {
     handlers.commit();
+    return true;
+  };
+  const move = (dir) => {
+    if (handlers.move) handlers.move(dir);
+    else handlers.commit();
     return true;
   };
   const view = new EditorView({
@@ -818,7 +823,15 @@ export function createInlineEditor(parent, content, handlers, cursor = 0, opts =
         Prec.highest(
           keymap.of([
             { key: 'Mod-Enter', run: done },
-            ...(opts.singleLine ? [{ key: 'Enter', run: done }] : []),
+            ...(opts.singleLine
+              ? [
+                  { key: 'Enter', run: done },
+                  // Tab / Shift+Tab: on to the neighbouring cell, when the
+                  // caller supports it (handlers.move); otherwise just finish.
+                  { key: 'Tab', run: () => move(1) },
+                  { key: 'Shift-Tab', run: () => move(-1) },
+                ]
+              : []),
           ]),
         ),
         keymodeCompartment.of([]),

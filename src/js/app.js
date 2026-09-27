@@ -40,7 +40,7 @@ import { createStatusBar } from './core/statusbar.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
 import { taskToggleChange } from './core/task-list.js';
-import { tableCellText, editTableCell } from './core/table-cell-edit.js';
+import { tableCellText, editTableCell, tableSize, adjacentCell } from './core/table-cell-edit.js';
 import {
   initMenuBar,
   toggleMenuBar,
@@ -69,6 +69,8 @@ import {
   commitInlineEdit,
   cancelInlineEdit,
   guessCursor,
+  previewTableAt,
+  tableCellElement,
 } from './core/preview-edit.js';
 import { createPreviewScheduler } from './core/preview-scheduler.js';
 import * as perf from './core/perf-trace.js';
@@ -1295,7 +1297,7 @@ function handlePreviewTaskToggle(line, wasChecked, container) {
 // is written back as one change to the pane's editor when it finishes, so it
 // is a single undo step there, and everything downstream (dirty state, pane
 // mirroring, preview re-render) follows as for typing.
-function handlePreviewBlockEdit({ line, blockEl, word, container, cell }) {
+function handlePreviewBlockEdit({ line, blockEl, word, container, cell, caretAtEnd = false }) {
   const pane = getPaneByPreviewContainer(container) || getActivePane();
   const view = pane && pane.editorView;
   if (!view) return;
@@ -1337,7 +1339,7 @@ function handlePreviewBlockEdit({ line, blockEl, word, container, cell }) {
       blockEl,
       cellEl: cell.cellEl,
       text: cellText,
-      cursor: guessCursor(cellText, word),
+      cursor: caretAtEnd ? cellText.length : guessCursor(cellText, word),
       mountEditor: (host, text, handlers, cursor) => {
         const inline = createInlineEditor(host, text, handlers, cursor, { singleLine: true });
         applyKeymode(inline);
@@ -1350,6 +1352,26 @@ function handlePreviewBlockEdit({ line, blockEl, word, container, cell }) {
       },
       onCancel: (edited) => {
         if (edited !== cellText) keepUnappliedEdit(edited);
+      },
+      onMove: (dir) => {
+        const size = tableSize(original);
+        const next = size && adjacentCell(size.rows, size.cols, cell.row, cell.col, dir);
+        if (!next) return;
+        // The commit queued a re-render that will rebuild this table. Run it
+        // now, so the neighbour is opened in the table that stays on screen
+        // rather than in one about to be replaced.
+        previewScheduler.flush(pane);
+        const table = previewTableAt(container, line);
+        const cellEl = table && tableCellElement(table, next.row, next.col);
+        if (!cellEl) return;
+        handlePreviewBlockEdit({
+          line,
+          blockEl: table,
+          word: '',
+          container,
+          cell: { cellEl, ...next },
+          caretAtEnd: true,
+        });
       },
     });
     return;

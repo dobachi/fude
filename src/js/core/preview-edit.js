@@ -98,6 +98,25 @@ export function tableCellOf(blockEl, el) {
   return { cellEl, row, col };
 }
 
+/**
+ * The top-level table block that starts on source `line` in a preview
+ * container, or null.
+ */
+export function previewTableAt(container, line) {
+  for (const el of container.children) {
+    if (el.tagName === 'TABLE' && el.getAttribute('data-source-line') === String(line)) return el;
+  }
+  return null;
+}
+
+/** Cell (row, col) of a rendered table, row 0 being the header row; or null. */
+export function tableCellElement(table, row, col) {
+  if (!table || row < 0 || col < 0) return null;
+  const tr =
+    row === 0 ? table.querySelector('thead > tr') : table.querySelectorAll('tbody > tr')[row - 1];
+  return (tr && tr.children[col]) || null;
+}
+
 // At most one edit is open at a time, across all panes.
 let active = null;
 
@@ -118,6 +137,8 @@ let active = null;
  *   cursor: number) => {state: {doc: {toString(): string}}, destroy(): void, focus?(): void}} opts.mountEditor
  * @param {(edited: string) => void} opts.onCommit
  * @param {(edited: string) => void} [opts.onCancel]
+ * @param {(dir: 1|-1) => void} [opts.onMove] called after onCommit when the
+ *   editor asked to move to the next (1) or previous (-1) cell
  */
 export function startInlineEdit(opts) {
   commitInlineEdit();
@@ -145,7 +166,10 @@ export function startInlineEdit(opts) {
   edit.view = opts.mountEditor(
     host,
     opts.text,
-    { commit: () => finish(edit, 'commit', true) },
+    {
+      commit: () => finish(edit, 'commit', true),
+      move: (dir) => finish(edit, 'commit', true, dir),
+    },
     opts.cursor || 0,
   );
 
@@ -163,7 +187,7 @@ export function startInlineEdit(opts) {
   return edit;
 }
 
-function finish(edit, kind, refocus) {
+function finish(edit, kind, refocus, moveDir = 0) {
   if (active !== edit) return;
   active = null;
   const edited = edit.view ? edit.view.state.doc.toString() : edit.opts.text;
@@ -179,6 +203,9 @@ function finish(edit, kind, refocus) {
   }
   if (kind === 'commit') edit.opts.onCommit(edited);
   else if (edit.opts.onCancel) edit.opts.onCancel(edited);
+  // Moving (Tab in a table cell) is "commit, then open the neighbour"; the
+  // caller opens it once the commit has been rendered.
+  if (moveDir && edit.opts.onMove) edit.opts.onMove(moveDir);
 }
 
 /** Finish the open edit (if any), applying it. */

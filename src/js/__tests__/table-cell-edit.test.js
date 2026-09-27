@@ -1,5 +1,12 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { cellSpans, sanitizeCell, tableCellText, editTableCell } from '../core/table-cell-edit.js';
+import {
+  cellSpans,
+  sanitizeCell,
+  tableCellText,
+  editTableCell,
+  adjacentCell,
+  tableSize,
+} from '../core/table-cell-edit.js';
 import { formatTableText, parseTableBlock, splitRow } from '../core/table.js';
 import {
   tableCellOf,
@@ -7,6 +14,8 @@ import {
   commitInlineEdit,
   cancelInlineEdit,
   INLINE_EDITOR_CLASS,
+  previewTableAt,
+  tableCellElement,
 } from '../core/preview-edit.js';
 import { renderMarkdown, initPreview } from '../core/preview.js';
 import { createInlineEditor } from '../core/editor.js';
@@ -265,6 +274,161 @@ describe('createInlineEditor singleLine', () => {
       new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
     );
     expect(commit).not.toHaveBeenCalled();
+    view.destroy();
+    parent.remove();
+  });
+});
+
+describe('adjacentCell', () => {
+  // 3 rows (header + 2) × 2 columns
+  it('moves along the row', () => {
+    expect(adjacentCell(3, 2, 0, 0, 1)).toEqual({ row: 0, col: 1 });
+    expect(adjacentCell(3, 2, 1, 1, -1)).toEqual({ row: 1, col: 0 });
+  });
+
+  it('wraps to the next / previous row', () => {
+    expect(adjacentCell(3, 2, 0, 1, 1)).toEqual({ row: 1, col: 0 });
+    expect(adjacentCell(3, 2, 2, 0, -1)).toEqual({ row: 1, col: 1 });
+  });
+
+  it('stops past either end of the table', () => {
+    expect(adjacentCell(3, 2, 2, 1, 1)).toBeNull();
+    expect(adjacentCell(3, 2, 0, 0, -1)).toBeNull();
+  });
+
+  it('handles a single-cell table and degenerate sizes', () => {
+    expect(adjacentCell(1, 1, 0, 0, 1)).toBeNull();
+    expect(adjacentCell(0, 2, 0, 0, 1)).toBeNull();
+    expect(adjacentCell(2, 0, 0, 0, 1)).toBeNull();
+  });
+});
+
+describe('tableSize', () => {
+  it('counts the header as a row', () => {
+    expect(tableSize(loose)).toEqual({ rows: 3, cols: 2 });
+    expect(tableSize('| a |\n|---|')).toEqual({ rows: 1, cols: 1 });
+  });
+
+  it('is null for non-tables', () => {
+    expect(tableSize('para')).toBeNull();
+  });
+});
+
+describe('previewTableAt / tableCellElement', () => {
+  function preview(src) {
+    const c = document.createElement('div');
+    renderMarkdown(src, '', c);
+    return c;
+  }
+
+  it('finds the top-level table by its start line', () => {
+    const c = preview('para\n\n| a | b |\n|---|---|\n| c | d |\n');
+    expect(previewTableAt(c, 3)).toBe(c.querySelector('table'));
+    expect(previewTableAt(c, 1)).toBeNull(); // a paragraph, not a table
+    expect(previewTableAt(c, 9)).toBeNull();
+  });
+
+  it('ignores tables nested in other blocks', () => {
+    const c = preview('> | a |\n> |---|\n');
+    expect(previewTableAt(c, 1)).toBeNull();
+  });
+
+  it('returns header and body cells by (row, col)', () => {
+    const c = preview('| a | b |\n|---|---|\n| c | d |\n');
+    const table = c.querySelector('table');
+    expect(tableCellElement(table, 0, 1).textContent).toBe('b');
+    expect(tableCellElement(table, 1, 0).textContent).toBe('c');
+    expect(tableCellElement(table, 2, 0)).toBeNull();
+    expect(tableCellElement(table, 0, 5)).toBeNull();
+    expect(tableCellElement(table, -1, 0)).toBeNull();
+    expect(tableCellElement(null, 0, 0)).toBeNull();
+  });
+});
+
+describe('inline edit move (Tab)', () => {
+  afterEach(() => cancelInlineEdit());
+
+  function fakeMount(host, text, handlers) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    host.appendChild(ta);
+    fakeMount.last = { ta, handlers };
+    return { state: { doc: { toString: () => ta.value } }, destroy: () => ta.remove() };
+  }
+
+  it('commits first, restores the cell, then asks to move', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    renderMarkdown('| a | b |\n|---|---|\n', '', container);
+    const table = container.querySelector('table');
+    const th = table.querySelector('th');
+    const order = [];
+    startInlineEdit({
+      container,
+      blockEl: table,
+      cellEl: th,
+      text: 'a',
+      mountEditor: fakeMount,
+      onCommit: (t) => order.push(['commit', t, th.textContent]),
+      onMove: (dir) => order.push(['move', dir]),
+    });
+    fakeMount.last.ta.value = 'A';
+    fakeMount.last.handlers.move(1);
+    expect(order).toEqual([
+      ['commit', 'A', 'a'],
+      ['move', 1],
+    ]);
+    container.remove();
+  });
+
+  it('a plain commit does not move', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    renderMarkdown('para\n', '', container);
+    const onMove = vi.fn();
+    startInlineEdit({
+      container,
+      blockEl: container.querySelector('p'),
+      text: 'para',
+      mountEditor: fakeMount,
+      onCommit: () => {},
+      onMove,
+    });
+    fakeMount.last.handlers.commit();
+    expect(onMove).not.toHaveBeenCalled();
+    container.remove();
+  });
+});
+
+describe('createInlineEditor Tab keys', () => {
+  function keydown(view, init) {
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }),
+    );
+  }
+
+  it('Tab / Shift+Tab ask to move in a single-line editor', () => {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const move = vi.fn();
+    const view = createInlineEditor(parent, 'x', { commit: () => {}, move }, 0, {
+      singleLine: true,
+    });
+    keydown(view, { key: 'Tab' });
+    keydown(view, { key: 'Tab', shiftKey: true });
+    expect(move.mock.calls).toEqual([[1], [-1]]);
+    expect(view.state.doc.toString()).toBe('x');
+    view.destroy();
+    parent.remove();
+  });
+
+  it('Tab just finishes when the caller cannot move', () => {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const commit = vi.fn();
+    const view = createInlineEditor(parent, 'x', { commit }, 0, { singleLine: true });
+    keydown(view, { key: 'Tab' });
+    expect(commit).toHaveBeenCalledTimes(1);
     view.destroy();
     parent.remove();
   });

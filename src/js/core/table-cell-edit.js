@@ -136,3 +136,32 @@ export function editTableCell(tableText, row, col, text) {
   cells[col] = value;
   return formatTableText(model);
 }
+
+/**
+ * The cell Tab (dir = 1) or Shift+Tab (dir = -1) moves to, reading order:
+ * along the row, then on to the next/previous row. The header is row 0.
+ *
+ * @param {number} rows total rows including the header
+ * @param {number} cols columns
+ * @param {number} row
+ * @param {number} col
+ * @param {1|-1} dir
+ * @returns {{row: number, col: number} | null} null past either end
+ */
+export function adjacentCell(rows, cols, row, col, dir) {
+  if (rows < 1 || cols < 1) return null;
+  const index = row * cols + col + dir;
+  if (index < 0 || index >= rows * cols) return null;
+  return { row: Math.floor(index / cols), col: index % cols };
+}
+
+/**
+ * Size of a table as the preview shows it: rows including the header, and
+ * columns. Null when `tableText` is not a table.
+ * @returns {{rows: number, cols: number} | null}
+ */
+export function tableSize(tableText) {
+  const model = parseTableBlock(tableText.split('\n'));
+  if (!model) return null;
+  return { rows: model.rows.length + 1, cols: model.header.length };
+}
