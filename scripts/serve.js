@@ -72,6 +72,21 @@ const MIME = {
   '.svg': 'image/svg+xml',
 };
 
+// Image types the preview may display from the user's files (read_image_file).
+// Deliberately images only: the endpoint exists to show pictures, not to hand
+// out arbitrary binaries.
+const IMAGE_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+  '.avif': 'image/avif',
+};
+
 // Hash function for temp file paths (matches Rust implementation)
 function hashPath(str) {
   let hash = 0n;
@@ -97,6 +112,7 @@ const PATH_ARGS = {
   write_temp_file: ['path'],
   delete_temp_file: ['path'],
   check_temp_files: ['paths'],
+  read_image_file: ['path'],
 };
 
 function checkPathArgs(cmdName, args, root) {
@@ -335,6 +351,51 @@ const api = {
   },
 };
 
+/**
+ * Send an image file's bytes (browser mode's stand-in for Tauri's asset
+ * protocol). An <img> cannot carry the auth header, so the frontend fetches
+ * through here and shows the result as a blob: URL.
+ */
+function handleReadImageFile(req, res, root) {
+  readBody(req, {}, (bodyErr, body) => {
+    if (bodyErr) return;
+    let args;
+    try {
+      args = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: 'Invalid JSON' });
+      return;
+    }
+    const filePath = args && args.path;
+    if (typeof filePath !== 'string' || !filePath) {
+      sendJson(res, 400, { error: 'path is required' });
+      return;
+    }
+    const pathError = checkPathArgs('read_image_file', args, root);
+    if (pathError) {
+      sendJson(res, 403, { error: pathError });
+      return;
+    }
+    const type = IMAGE_MIME[path.extname(filePath).toLowerCase()];
+    if (!type) {
+      sendJson(res, 415, { error: `Not an image: ${filePath}` });
+      return;
+    }
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        sendJson(res, err.code === 'ENOENT' ? 404 : 500, { error: err.message });
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': type,
+        'Content-Length': data.length,
+        'Cache-Control': 'no-store',
+      });
+      res.end(data);
+    });
+  });
+}
+
 // SSE handler for AI chat streaming
 function handleAiChatStream(req, res) {
   readBody(req, {}, async (bodyErr, body) => {
@@ -556,6 +617,10 @@ function createFudeServer({
     const urlPath = (req.url || '/').split('?')[0];
     if (req.method === 'POST' && urlPath === '/api/ai_chat_stream') {
       handleAiChatStream(req, res);
+      return;
+    }
+    if (req.method === 'POST' && urlPath === '/api/read_image_file') {
+      handleReadImageFile(req, res, root);
       return;
     }
 

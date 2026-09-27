@@ -40,6 +40,7 @@ import { createStatusBar } from './core/statusbar.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
 import { taskToggleChange } from './core/task-list.js';
+import { localImageUrl, PLACEHOLDER_SRC } from './core/local-image.js';
 import { planStartup, startupNotice } from './core/startup-plan.js';
 import { tableCellText, editTableCell, tableSize, adjacentCell } from './core/table-cell-edit.js';
 import {
@@ -1844,7 +1845,20 @@ function renderImageTab(pane, tab) {
   const holder = document.createElement('div');
   holder.className = 'puml-diagram image-view';
   const img = document.createElement('img');
-  img.src = isLocalTauri() ? convertFileSrc(tab.path) : tab.path;
+  if (isLocalTauri()) {
+    img.src = convertFileSrc(tab.path);
+  } else {
+    // Browser mode: fetch through the authenticated API (see local-image.js).
+    img.src = PLACEHOLDER_SRC;
+    localImageUrl(tab.path)
+      .then((url) => {
+        if (img.isConnected) img.src = url;
+      })
+      .catch((e) => {
+        console.warn('Failed to load image:', tab.path, e);
+        showToast(`画像を読み込めませんでした: ${tab.path}`, { type: 'error', duration: 6000 });
+      });
+  }
   img.alt = tab.name || '';
   img.draggable = false;
   holder.appendChild(img);

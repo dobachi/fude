@@ -384,3 +384,67 @@ describe('request bodies are decoded as a whole', () => {
     expect(saved).toBe(content);
   });
 });
+
+// Browser mode showed no local images: an <img> cannot send the auth header,
+// and there was no route for file bytes at all. read_image_file is that route,
+// authenticated like every other API call and limited to images.
+describe('read_image_file', () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2, 255]);
+
+  function post(body, headers = auth()) {
+    return new Promise((resolve, reject) => {
+      const payload = JSON.stringify(body);
+      const req = http.request(
+        {
+          host: '127.0.0.1',
+          port,
+          method: 'POST',
+          path: '/api/read_image_file',
+          headers: { 'Content-Type': 'application/json', ...headers },
+        },
+        (res) => {
+          const chunks = [];
+          res.on('data', (c) => chunks.push(c));
+          res.on('end', () =>
+            resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }),
+          );
+        },
+      );
+      req.on('error', reject);
+      req.write(payload);
+      req.end();
+    });
+  }
+
+  it('returns the image bytes unchanged with an image content type', async () => {
+    const file = path.join(tmpDir, '画像 1.png');
+    fs.writeFileSync(file, PNG);
+    const res = await post({ path: file });
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('image/png');
+    expect(res.body.equals(PNG)).toBe(true);
+  });
+
+  it('refuses without a token', async () => {
+    const file = path.join(tmpDir, 'x.png');
+    fs.writeFileSync(file, PNG);
+    const res = await post({ path: file }, {});
+    expect(res.status).toBe(401);
+  });
+
+  it('refuses files that are not images', async () => {
+    const res = await post({ path: secretFile });
+    expect(res.status).toBe(415);
+    expect(res.body.toString()).not.toContain('TOP SECRET');
+  });
+
+  it('reports a missing image as 404', async () => {
+    const res = await post({ path: path.join(tmpDir, 'missing.png') });
+    expect(res.status).toBe(404);
+  });
+
+  it('requires a path', async () => {
+    const res = await post({});
+    expect(res.status).toBe(400);
+  });
+});

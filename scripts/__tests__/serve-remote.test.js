@@ -133,6 +133,28 @@ describeRemote('remote mode', () => {
       expect(res.body).not.toContain('TOP SECRET');
     });
 
+    it('refuses an image outside --root', async () => {
+      const outsideImg = path.join(tmpDir, 'outside.png');
+      fs.writeFileSync(outsideImg, Buffer.from([0x89, 0x50]));
+      const res = await request({
+        urlPath: '/api/read_image_file',
+        headers: withKey(REMOTE_KEY),
+        body: { path: outsideImg },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it('serves an image inside --root', async () => {
+      const img = path.join(notesDir, 'in.png');
+      fs.writeFileSync(img, Buffer.from([0x89, 0x50]));
+      const res = await request({
+        urlPath: '/api/read_image_file',
+        headers: withKey(REMOTE_KEY),
+        body: { path: img },
+      });
+      expect(res.status).toBe(200);
+    });
+
     it('refuses a write outside --root', async () => {
       const target = path.join(tmpDir, 'escaped.txt');
       const res = await request({

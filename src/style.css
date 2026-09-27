@@ -3070,3 +3070,12 @@ body:has(#app.ai-panel-open) #mode-indicator {
 #auth-banner .auth-banner-dismiss:hover {
   opacity: 1;
 }
+
+/* Browser mode: a local image that could not be loaded (see local-image.js). */
+.preview-pane img.local-image-error {
+  display: inline-block;
+  min-width: 2em;
+  min-height: 1.2em;
+  outline: 1px dashed var(--fg-secondary);
+  color: var(--fg-secondary);
+}

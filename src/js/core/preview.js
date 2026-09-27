@@ -10,6 +10,12 @@ import { time, start as startTimer } from './perf-trace.js';
 import { renderBlockHtml, applyBlocks } from './preview-blocks.js';
 import { taskListPlugin, isTaskCheckbox } from './task-list.js';
 import {
+  LOCAL_SRC_ATTR,
+  PLACEHOLDER_SRC,
+  resolveLocalImages,
+  srcToFilePath,
+} from './local-image.js';
+import {
   blockLineRange,
   topLevelBlockOf,
   isInsideInlineEditor,
@@ -80,8 +86,11 @@ function createMd() {
       if (currentBasePath && !isRemote) {
         // Treat both POSIX and Windows roots as "absolute". A leading drive
         // letter like "C:\..." is also taken as absolute.
-        const isAbsolute = /^(\/|\\|[A-Za-z]:[/\\])/.test(src);
-        const joined = isAbsolute ? src : `${currentBasePath}/${src}`;
+        // markdown-it hands us a percent-encoded URL; files are named by the
+        // decoded form (non-ASCII names, spaces).
+        const file = srcToFilePath(src);
+        const isAbsolute = /^(\/|\\|[A-Za-z]:[/\\])/.test(file);
+        const joined = isAbsolute ? file : `${currentBasePath}/${file}`;
         // Convert any backslashes to forward slashes so the Tauri asset
         // protocol gets a clean URL path on Windows too.
         const abs = joined.replace(/\\/g, '/');
@@ -90,9 +99,14 @@ function createMd() {
         // app.security.assetProtocol.enable = true in tauri.conf.json.
         if (isLocalTauri()) {
           token.attrs[srcIndex][1] = convertFileSrc(abs);
+        } else {
+          // Browser mode: there is no asset protocol, and an <img> cannot send
+          // the auth header, so a bare path would only 404. Render a
+          // placeholder that names the file; resolveLocalImages (run after
+          // every render) fetches it through the API and swaps it in.
+          token.attrs[srcIndex][1] = PLACEHOLDER_SRC;
+          token.attrSet(LOCAL_SRC_ATTR, abs);
         }
-        // In browser/dev mode leave the path untouched; the bundled server
-        // can serve it from disk via its own routes if configured.
       }
     }
     return defaultImageRender(tokens, idx, options, env, self);
@@ -604,6 +618,8 @@ export async function enhancePreview(container) {
   await renderPlantumlBlocks(container);
   await renderMermaidBlocks(container);
   await highlightCodeBlocks(container);
+  // Browser mode's local images (no-op on the desktop: nothing is marked).
+  await resolveLocalImages(container);
 }
 
 /**

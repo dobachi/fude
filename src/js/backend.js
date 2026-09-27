@@ -74,18 +74,14 @@ export function retryAfterSeconds(value) {
   return Number.isFinite(n) && n >= 0 ? Math.ceil(n) : null;
 }
 
-async function doInvoke(cmd, args) {
-  if (isTauriWebview()) {
-    const internals = await waitForInternals();
-    if (internals?.invoke) {
-      return args !== undefined ? internals.invoke(cmd, args) : internals.invoke(cmd);
-    }
-    // __TAURI_INTERNALS__ not available even after waiting — should not happen
-    console.error('Tauri webview detected but __TAURI_INTERNALS__ not available');
-  }
-  // HTTP fallback for browser mode. The server requires a session token on
-  // every /api/* call; without it the same endpoints would let anyone who can
-  // reach the port read and write the user's files.
+/**
+ * POST to a browser-mode API endpoint and return the (ok) Response.
+ *
+ * The server requires a session token on every /api/* call; without it the
+ * same endpoints would let anyone who can reach the port read and write the
+ * user's files. Auth failures are handled here, once, for every caller.
+ */
+async function httpApi(cmd, args) {
   // Once the key has been rejected, further calls cannot succeed until the
   // page is reopened with a fresh one; stop instead of hammering the server.
   if (isRejected()) throw new Error(NOT_AUTHORIZED);
@@ -112,6 +108,19 @@ async function doInvoke(cmd, args) {
     }
     throw new Error(`Backend call failed: ${cmd}`);
   }
+  return res;
+}
+
+async function doInvoke(cmd, args) {
+  if (isTauriWebview()) {
+    const internals = await waitForInternals();
+    if (internals?.invoke) {
+      return args !== undefined ? internals.invoke(cmd, args) : internals.invoke(cmd);
+    }
+    // __TAURI_INTERNALS__ not available even after waiting — should not happen
+    console.error('Tauri webview detected but __TAURI_INTERNALS__ not available');
+  }
+  const res = await httpApi(cmd, args);
   return res.json();
 }
 
@@ -209,6 +218,18 @@ export async function getOpenDir() {
  * The desktop app has neither, so it gets null without a round trip.
  * @returns {Promise<{open_dir: string|null, root: string|null} | null>}
  */
+/**
+ * Browser mode only: an image file's bytes as a Blob, for showing local images
+ * (an <img> cannot send the auth header, so it cannot load them directly).
+ * The desktop app uses Tauri's asset protocol instead and never calls this.
+ * @param {string} path absolute path
+ * @returns {Promise<Blob>}
+ */
+export async function readImageBlob(path) {
+  const res = await httpApi('read_image_file', { path });
+  return res.blob();
+}
+
 export async function getStartupDirs() {
   if (isTauriWebview()) return null;
   return doInvoke('get_startup_dirs');

@@ -332,6 +332,23 @@ describe('backend module (HTTP fallback mode)', () => {
     expect(heard.mock.calls[0][0].detail).toEqual({ retryAfterSec: null });
   });
 
+  it('fetches an image as a Blob with the auth header', async () => {
+    window.location.search = '?token=secret-token';
+    window.history.replaceState = vi.fn();
+    const blob = new Blob(['png'], { type: 'image/png' });
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(blob) });
+    const mod = await import('../backend.js');
+    mod.captureTokenFromUrl();
+    await expect(mod.readImageBlob('/n/a.png')).resolves.toBe(blob);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/read_image_file',
+      expect.objectContaining({
+        body: JSON.stringify({ path: '/n/a.png' }),
+        headers: expect.objectContaining({ 'X-Fude-Token': 'secret-token' }),
+      }),
+    );
+  });
+
   it('asks the server for the startup folders in browser mode', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
