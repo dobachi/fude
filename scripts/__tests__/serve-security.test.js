@@ -448,3 +448,42 @@ describe('read_image_file', () => {
     expect(res.status).toBe(400);
   });
 });
+
+// Pasting an image failed in browser mode: the server had no save_image_bytes.
+describe('save_image_bytes', () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 255]);
+
+  it('saves base64 image bytes into assets/ and returns the relative path', async () => {
+    const doc = path.join(tmpDir, 'paste-doc', 'note.md');
+    fs.mkdirSync(path.dirname(doc), { recursive: true });
+    const res = await request({
+      urlPath: '/api/save_image_bytes',
+      headers: auth(),
+      body: { base64: PNG.toString('base64'), docPath: doc, ext: 'png' },
+    });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toBe('assets/pasted-image.png');
+    expect(fs.readFileSync(path.join(tmpDir, 'paste-doc/assets/pasted-image.png')).equals(PNG)).toBe(
+      true,
+    );
+  });
+
+  it('refuses a traversal attempt through the extension', async () => {
+    const doc = path.join(tmpDir, 'paste-doc2', 'note.md');
+    const res = await request({
+      urlPath: '/api/save_image_bytes',
+      headers: auth(),
+      body: { base64: PNG.toString('base64'), docPath: doc, ext: '../../evil' },
+    });
+    expect(res.status).toBe(500);
+    expect(fs.existsSync(path.join(tmpDir, 'evil'))).toBe(false);
+  });
+
+  it('refuses without a token', async () => {
+    const res = await request({
+      urlPath: '/api/save_image_bytes',
+      body: { base64: PNG.toString('base64'), docPath: path.join(tmpDir, 'n.md'), ext: 'png' },
+    });
+    expect(res.status).toBe(401);
+  });
+});

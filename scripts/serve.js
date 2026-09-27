@@ -17,6 +17,7 @@ const cli = require('./lib/cli');
 const guard = require('./lib/guard');
 const netaccess = require('./lib/netaccess');
 const { readBody } = require('./lib/body');
+const assets = require('./lib/assets');
 const selfsigned = require('./lib/selfsigned');
 
 const DIST_DIR = process.env.FUDE_DIST_DIR || path.join(__dirname, '..', 'dist');
@@ -113,6 +114,7 @@ const PATH_ARGS = {
   delete_temp_file: ['path'],
   check_temp_files: ['paths'],
   read_image_file: ['path'],
+  save_image_bytes: ['docPath'],
 };
 
 function checkPathArgs(cmdName, args, root) {
@@ -227,6 +229,15 @@ const api = {
   },
 
   // Get initial directory (set via FUDE_OPEN_DIR env)
+  // Paste an image: write it into assets/ beside the document and return the
+  // relative path to insert (see lib/assets.js). docPath is confined to
+  // --root by checkPathArgs like every other path argument.
+  save_image_bytes(args) {
+    const bytes = assets.imageBytesFromArgs(args);
+    if (!bytes) throw new Error('image bytes are required');
+    return assets.saveImageBytes({ docPath: args.docPath, bytes, ext: args.ext });
+  },
+
   get_open_dir() {
     return runtime.openDir || null;
   },

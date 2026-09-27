@@ -155,6 +155,16 @@ describeRemote('remote mode', () => {
       expect(res.status).toBe(200);
     });
 
+    it('refuses to paste an image beside a document outside --root', async () => {
+      const res = await request({
+        urlPath: '/api/save_image_bytes',
+        headers: withKey(REMOTE_KEY),
+        body: { base64: 'iVBO', docPath: path.join(tmpDir, 'outside.md'), ext: 'png' },
+      });
+      expect(res.status).toBe(403);
+      expect(fs.existsSync(path.join(tmpDir, 'assets'))).toBe(false);
+    });
+
     it('refuses a write outside --root', async () => {
       const target = path.join(tmpDir, 'escaped.txt');
       const res = await request({

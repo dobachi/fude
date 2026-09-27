@@ -166,7 +166,25 @@ export async function copyImageToAssets(srcPath, docPath) {
 }
 
 export async function saveImageBytes(bytes, docPath, ext) {
-  return doInvoke('save_image_bytes', { bytes, docPath, ext });
+  if (isTauriWebview()) return doInvoke('save_image_bytes', { bytes, docPath, ext });
+  // Over HTTP a JSON number array is 3-4x the image size; base64 is 1.33x.
+  return doInvoke('save_image_bytes', { base64: bytesToBase64(bytes), docPath, ext });
+}
+
+/**
+ * Base64 of a byte array, in slices so a large image does not overflow the
+ * argument limit of String.fromCharCode.
+ * @param {ArrayLike<number>} bytes
+ * @returns {string}
+ */
+export function bytesToBase64(bytes) {
+  const u8 = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+  let bin = '';
+  const STEP = 0x8000;
+  for (let i = 0; i < u8.length; i += STEP) {
+    bin += String.fromCharCode.apply(null, u8.subarray(i, i + STEP));
+  }
+  return globalThis.btoa(bin);
 }
 
 export async function writeTempFile(path, content) {

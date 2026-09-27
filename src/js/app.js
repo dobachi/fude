@@ -652,11 +652,10 @@ async function handleImagePaste(view, images) {
   }
 }
 
-// Wire the image-paste handler into the editor (Tauri only — relies on the
-// native fs commands to write into assets/).
-if (isLocalTauri()) {
-  registerImagePasteHandler(handleImagePaste);
-}
+// Wire the image-paste handler into the editor. The desktop writes into
+// assets/ with a native command; browser mode's server has the same command
+// (scripts/lib/assets.js).
+registerImagePasteHandler(handleImagePaste);
 
 // Let Emacs mode's native C-x C-s save the file.
 registerSaveHandler(() => performSave({ forceDialog: false }));

@@ -349,6 +349,19 @@ describe('backend module (HTTP fallback mode)', () => {
     );
   });
 
+  it('sends a pasted image as base64 in browser mode', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve('assets/pasted-image.png'),
+    });
+    const mod = await import('../backend.js');
+    await expect(mod.saveImageBytes([137, 80, 0, 255], '/n/doc.md', 'png')).resolves.toBe(
+      'assets/pasted-image.png',
+    );
+    const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
+    expect(body).toEqual({ base64: 'iVAA/w==', docPath: '/n/doc.md', ext: 'png' });
+  });
+
   it('asks the server for the startup folders in browser mode', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -419,5 +432,15 @@ describe('retryAfterSeconds', () => {
     expect(retryAfterSeconds('')).toBeNull();
     expect(retryAfterSeconds('-5')).toBeNull();
     expect(retryAfterSeconds('Wed, 21 Oct 2015 07:28:00 GMT')).toBeNull();
+  });
+});
+
+describe('bytesToBase64', () => {
+  it('matches the standard encoding, including for large inputs', async () => {
+    const { bytesToBase64 } = await import('../backend.js');
+    expect(bytesToBase64([])).toBe('');
+    expect(bytesToBase64([137, 80, 0, 255])).toBe('iVAA/w==');
+    const big = new Uint8Array(200000).map((_, i) => i % 256);
+    expect(bytesToBase64(big)).toBe(Buffer.from(big).toString('base64'));
   });
 });
