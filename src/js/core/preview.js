@@ -8,6 +8,7 @@ import { openExternal, isExternalUrl } from './external-link.js';
 import { resolveLinkTarget } from './link-target.js';
 import { time, start as startTimer } from './perf-trace.js';
 import { renderBlockHtml, applyBlocks } from './preview-blocks.js';
+import { taskListPlugin, isTaskCheckbox } from './task-list.js';
 import {
   isQuartoFile,
   applyQuartoExtensions,
@@ -52,6 +53,7 @@ function createMd() {
     typographer: true,
     breaks: true,
   });
+  md.use(taskListPlugin);
 
   // Custom image renderer: resolve relative paths for local files
   const defaultImageRender =
@@ -267,6 +269,7 @@ export function sourceLineFromElement(el) {
  * @param {{
  *   onSourceJump?: (line: number, container: HTMLElement) => void,
  *   onFileLink?: (target: {path: string, hash: string}, container: HTMLElement) => void,
+ *   onTaskToggle?: (line: number, wasChecked: boolean, container: HTMLElement) => void,
  * }} [opts]
  */
 export function initPreview(container, opts = {}) {
@@ -279,6 +282,8 @@ export function initPreview(container, opts = {}) {
   // rule); we resolve the nearest one and hand the line to the app.
   container.addEventListener('dblclick', (e) => {
     if (!opts.onSourceJump) return;
+    // A fast double-toggle of a checkbox is not a request to jump to source.
+    if (isTaskCheckbox(e.target)) return;
     const line = sourceLineFromElement(e.target);
     if (line === null) return;
     // The two clicks leave a word selected; clear it so it doesn't linger and
@@ -297,6 +302,19 @@ export function initPreview(container, opts = {}) {
   //   local file path   → hand to onFileLink so the app opens it in a tab
   //   anything else     → no-op
   container.addEventListener('click', (e) => {
+    // Task checkbox: never let the browser flip it on its own — the box must
+    // only change by way of the source, or preview and source would disagree.
+    // The `checked` attribute is what was rendered; the property has already
+    // been toggled by the time the click handler runs.
+    if (isTaskCheckbox(e.target)) {
+      e.preventDefault();
+      const line = sourceLineFromElement(e.target);
+      if (line !== null && opts.onTaskToggle) {
+        opts.onTaskToggle(line, e.target.hasAttribute('checked'), container);
+      }
+      return;
+    }
+
     const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
     if (!a) return;
     const href = a.getAttribute('href');

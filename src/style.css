@@ -1213,6 +1213,18 @@ body {
   vertical-align: middle;
 }
 
+/* Task list items: the checkbox replaces the bullet, and clicking it edits the
+   source ([ ] ⇄ [x]). */
+.preview-pane li.task-list-item {
+  list-style: none;
+}
+
+.preview-pane li.task-list-item > .task-list-item-checkbox,
+.preview-pane li.task-list-item > p > .task-list-item-checkbox {
+  margin-left: -1.4em;
+  cursor: pointer;
+}
+
 .preview-pane table {
   width: 100%;
   border-collapse: collapse;

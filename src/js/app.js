@@ -38,6 +38,7 @@ import { showToast } from './core/toast.js';
 import { createStatusBar } from './core/statusbar.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
+import { taskToggleChange } from './core/task-list.js';
 import {
   initMenuBar,
   toggleMenuBar,
@@ -705,6 +706,7 @@ async function init() {
     initPreview(previewEl, {
       onSourceJump: handlePreviewSourceJump,
       onFileLink: handlePreviewFileLink,
+      onTaskToggle: handlePreviewTaskToggle,
     });
 
   initPanes();
@@ -717,6 +719,7 @@ async function init() {
     onSelectionChange: handleSelectionChange,
     onSourceJump: handlePreviewSourceJump,
     onFileLink: handlePreviewFileLink,
+    onTaskToggle: handlePreviewTaskToggle,
     onEditorCreated: () => {
       reapplyMode();
     },
@@ -1255,6 +1258,19 @@ function handlePreviewSourceJump(line, container) {
   if (currentViewMode() === 'preview') setViewMode('split');
   jumpToLine(pane.editorView, line);
   flashLine(pane.editorView, line);
+}
+
+// Checkbox click in the preview → flip the task marker in the source. The edit
+// goes through the pane's editor like any keystroke, so undo, dirty state,
+// pane mirroring and the preview re-render all follow from it.
+function handlePreviewTaskToggle(line, wasChecked, container) {
+  const pane = getPaneByPreviewContainer(container) || getActivePane();
+  const view = pane && pane.editorView;
+  if (!view || line < 1 || line > view.state.doc.lines) return;
+  const docLine = view.state.doc.line(line);
+  const change = taskToggleChange(docLine.text, docLine.from, wasChecked);
+  if (!change) return;
+  view.dispatch({ changes: change, userEvent: 'input.task-toggle' });
 }
 
 function handleSelectionChange(selectedText) {

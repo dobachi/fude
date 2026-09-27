@@ -28,6 +28,7 @@ let onSelectionChangeCallback = null; // (selectedText) => void
 let onEditorCreatedCallback = null; // (pane) => void — invoked after createEditorInPane
 let onSourceJumpCallback = null; // (line, previewContainer) => void — preview dblclick
 let onFileLinkCallback = null; // (target, previewContainer) => void — preview file link click
+let onTaskToggleCallback = null; // (line, wasChecked, previewContainer) => void — preview checkbox
 
 export function setCallbacks({
   onChange,
@@ -37,6 +38,7 @@ export function setCallbacks({
   onEditorCreated,
   onSourceJump,
   onFileLink,
+  onTaskToggle,
 }) {
   onChangeCallback = onChange;
   onScrollCallback = onScroll;
@@ -45,6 +47,7 @@ export function setCallbacks({
   onEditorCreatedCallback = onEditorCreated;
   onSourceJumpCallback = onSourceJump;
   onFileLinkCallback = onFileLink;
+  onTaskToggleCallback = onTaskToggle;
 }
 
 // Preview-init options shared by every pane so double-click-to-source works in
@@ -56,6 +59,9 @@ function previewInitOpts() {
     },
     onFileLink: (target, container) => {
       if (onFileLinkCallback) onFileLinkCallback(target, container);
+    },
+    onTaskToggle: (line, wasChecked, container) => {
+      if (onTaskToggleCallback) onTaskToggleCallback(line, wasChecked, container);
     },
   };
 }
