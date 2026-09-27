@@ -333,3 +333,54 @@ describe('FUDE_ROOT confinement', () => {
     expect(fs.existsSync(target)).toBe(false);
   });
 });
+
+// Saving in browser mode corrupted Japanese text: the body was decoded chunk
+// by chunk, so a character split across two network chunks became "��". HTTPS
+// delivers ≤16 KB records, so ordinary documents hit it, at the same spots on
+// every save.
+describe('request bodies are decoded as a whole', () => {
+  /** POST `payload` split into `size`-byte writes, each flushed separately. */
+  function postInPieces(urlPath, payload, size) {
+    const buf = Buffer.from(payload, 'utf8');
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: '127.0.0.1',
+          port,
+          method: 'POST',
+          path: urlPath,
+          headers: { 'Content-Type': 'application/json', ...auth(), 'Content-Length': buf.length },
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (c) => (data += c));
+          res.on('end', () => resolve({ status: res.statusCode, body: data }));
+        },
+      );
+      req.on('error', reject);
+      req.setNoDelay(true);
+      let i = 0;
+      const next = () => {
+        if (i >= buf.length) {
+          req.end();
+          return;
+        }
+        req.write(buf.subarray(i, i + size));
+        i += size;
+        setTimeout(next, 2); // separate packets, separate 'data' events
+      };
+      next();
+    });
+  }
+
+  it('saves Japanese text split mid-character without corrupting it', async () => {
+    const file = path.join(tmpDir, 'nihongo.md');
+    const content = '# 見出し\n\n日本語の本文。絵文字🎉も入れる。\n'.repeat(3);
+    // 7 bytes per piece guarantees splits inside 3- and 4-byte characters.
+    const res = await postInPieces('/api/write_file', JSON.stringify({ path: file, content }), 7);
+    expect(res.status).toBe(200);
+    const saved = fs.readFileSync(file, 'utf8');
+    expect(saved).not.toContain('�');
+    expect(saved).toBe(content);
+  });
+});

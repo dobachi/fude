@@ -41,6 +41,7 @@
       "../scripts/lib/netaccess.js": "browser/lib/netaccess.js",
       "../scripts/lib/cli.js": "browser/lib/cli.js",
       "../scripts/lib/selfsigned.js": "browser/lib/selfsigned.js",
+      "../scripts/lib/body.js": "browser/lib/body.js",
       "../scripts/fude-browser": "browser/fude-browser",
       "../scripts/fude-remote": "browser/fude-remote"
     },

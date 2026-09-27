@@ -16,6 +16,7 @@ const crypto = require('crypto');
 const cli = require('./lib/cli');
 const guard = require('./lib/guard');
 const netaccess = require('./lib/netaccess');
+const { readBody } = require('./lib/body');
 const selfsigned = require('./lib/selfsigned');
 
 const DIST_DIR = process.env.FUDE_DIST_DIR || path.join(__dirname, '..', 'dist');
@@ -336,9 +337,14 @@ const api = {
 
 // SSE handler for AI chat streaming
 function handleAiChatStream(req, res) {
-  let body = '';
-  req.on('data', (chunk) => (body += chunk));
-  req.on('end', async () => {
+  readBody(req, {}, async (bodyErr, body) => {
+    if (bodyErr) {
+      if (!res.headersSent) {
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: bodyErr.message }));
+      }
+      return;
+    }
     let args;
     try {
       args = JSON.parse(body);
@@ -556,19 +562,12 @@ function createFudeServer({
     // API endpoints
     if (isApi) {
       const cmdName = urlPath.slice(5); // Remove '/api/'
-      let body = '';
-      let tooLarge = false;
-      req.on('data', (chunk) => {
-        body += chunk;
-        // The editor posts whole documents, so the cap is generous; it exists
-        // only so an unauthenticated-looking client cannot exhaust memory.
-        if (body.length > 64 * 1024 * 1024) {
-          tooLarge = true;
-          req.destroy();
-        }
-      });
-      req.on('end', () => {
-        if (tooLarge) return;
+      // Bytes are decoded once, at the end: decoding chunk by chunk corrupted
+      // any multi-byte character split across a chunk boundary (see body.js).
+      // The editor posts whole documents, so the cap is generous; it exists
+      // only so an unauthenticated-looking client cannot exhaust memory.
+      readBody(req, { limitBytes: 64 * 1024 * 1024 }, (bodyErr, body) => {
+        if (bodyErr) return;
         try {
           const args = body ? JSON.parse(body) : {};
           const handler = Object.prototype.hasOwnProperty.call(api, cmdName) ? api[cmdName] : null;
