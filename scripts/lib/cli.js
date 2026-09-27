@@ -107,6 +107,34 @@ function parseHostname(value) {
 }
 
 /**
+ * Names the generated TLS certificate must cover: this machine's addresses,
+ * plus every host name the user said they will open it by (--hostname,
+ * --allowed-hosts). Without those names a browser reports a name mismatch on
+ * top of the self-signed warning — and on HSTS-preloaded domains it will not
+ * let the user proceed at all.
+ *
+ * Names go into an openssl -addext argument, so only well-formed host names
+ * and IPs are passed through (a comma would smuggle in extra SAN entries).
+ *
+ * @param {string[]} addresses local interface addresses
+ * @param {{urlHost?: string|null, allowedHosts?: string[]}} cfg
+ * @returns {string[]}
+ */
+function certHosts(addresses, { urlHost = null, allowedHosts = [] } = {}) {
+  const out = [];
+  const add = (h) => {
+    if (h && !out.includes(h)) out.push(h);
+  };
+  for (const a of addresses) add(a);
+  for (const name of [urlHost, ...allowedHosts]) {
+    if (!name) continue;
+    const parsed = parseHostname(name);
+    if (parsed.ok) add(parsed.hostname);
+  }
+  return out;
+}
+
+/**
  * The URLs to print at startup, in order.
  *
  * With a hostname configured it comes first: that is the address the user
@@ -296,6 +324,7 @@ module.exports = {
   parseArgs,
   parseHostname,
   startupUrls,
+  certHosts,
   USAGE,
   MIN_KEY_LENGTH,
   DEFAULT_PORT,

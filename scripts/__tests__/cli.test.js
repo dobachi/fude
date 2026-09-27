@@ -286,3 +286,33 @@ describe('startupUrls', () => {
     expect(urls).toEqual(['http://100.64.0.1:3000/?token=K', 'http://192.168.1.5:3000/?token=K']);
   });
 });
+
+describe('certHosts', () => {
+  const { certHosts } = cli;
+
+  it('covers the local addresses plus the names the user opens', () => {
+    expect(
+      certHosts(['127.0.0.1', '100.64.0.2'], {
+        urlHost: 'box.tailnet.ts.net',
+        allowedHosts: ['notes.example'],
+      }),
+    ).toEqual(['127.0.0.1', '100.64.0.2', 'box.tailnet.ts.net', 'notes.example']);
+  });
+
+  it('does not repeat names', () => {
+    expect(certHosts(['100.64.0.2'], { urlHost: '100.64.0.2', allowedHosts: ['100.64.0.2'] })).toEqual(
+      ['100.64.0.2'],
+    );
+  });
+
+  it('drops malformed names so nothing extra reaches the openssl SAN argument', () => {
+    expect(
+      certHosts(['127.0.0.1'], { allowedHosts: ['evil.example,DNS:bank.example', 'ok.example'] }),
+    ).toEqual(['127.0.0.1', 'ok.example']);
+  });
+
+  it('works with nothing configured', () => {
+    expect(certHosts(['127.0.0.1'], {})).toEqual(['127.0.0.1']);
+    expect(certHosts([], undefined)).toEqual([]);
+  });
+});

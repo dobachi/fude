@@ -43,6 +43,17 @@ fude-browser --hostname fude.localhost
   1 回は `?token=` 付きの URL で開いてください。再起動で鍵が変わらないよう
   `--key-file` と併用すると、ブックマークがそのまま使えます。
 - Vimium の除外 URL の例: `http*://fude.localhost:*`
+- 別の端末から Tailscale で開くときは、`fude.localhost` は使えません（`*.localhost`
+  は常に「開いている端末自身」を指すため）。MagicDNS の名前を指定します。
+
+  ```
+  fude-browser --listen 0.0.0.0 --allow tailscale --root ~/notes \
+    --hostname box.tailnet.ts.net --key-file ~/.config/fude/remote.key
+  ```
+
+  自動生成の自己署名証明書には `--hostname` / `--allowed-hosts` の名前も入るので、
+  名前の不一致の警告は出ません（自己署名である旨の警告は初回に出ます）。
+  Vimium の除外 URL はその端末側で `https://box.tailnet.ts.net:*` のように指定します。
 
 ### 1. ループバックのみにバインドする
 

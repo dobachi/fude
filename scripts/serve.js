@@ -806,7 +806,12 @@ async function start(argv = process.argv.slice(2), env = process.env) {
         };
         fingerprint = selfsigned.fingerprint(cfg.tls.certPath);
       } else {
-        const material = selfsigned.ensureCert({ configDir: CONFIG_DIR });
+        // Cover the names the user will actually open (--hostname, e.g. a
+        // Tailscale MagicDNS name), not only this machine's addresses.
+        const material = selfsigned.ensureCert({
+          configDir: CONFIG_DIR,
+          hosts: cli.certHosts(selfsigned.localAddresses(), cfg),
+        });
         tlsOptions = { cert: material.cert, key: material.key };
         fingerprint = material.fingerprint;
         certGenerated = material.generated;
