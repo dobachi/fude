@@ -286,6 +286,65 @@ describe('backend module (HTTP fallback mode)', () => {
     await expect(mod.readFile('/test.md')).rejects.toThrow(/token/i);
   });
 
+  // #20: a rejected key must not keep firing requests (each counted as a
+  // failure by the server), and a lockout must be reported, not swallowed.
+  it('stops calling the server once the key has been rejected', async () => {
+    window.location.search = '?token=stale';
+    window.history.replaceState = vi.fn();
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+
+    const mod = await import('../backend.js');
+    mod.captureTokenFromUrl();
+    await expect(mod.readFile('/a.md')).rejects.toThrow(/token/i);
+    await expect(mod.readFile('/b.md')).rejects.toThrow(/token/i);
+    await expect(mod.loadSession()).rejects.toThrow(/token/i);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a lockout (429) with the Retry-After seconds', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: { get: (h) => (h.toLowerCase() === 'retry-after' ? '840' : null) },
+    });
+    const mod = await import('../backend.js');
+    const { LOCKED_OUT_EVENT } = await import('../browser-token.js');
+    const heard = vi.fn();
+    window.addEventListener(LOCKED_OUT_EVENT, heard);
+    await expect(mod.readFile('/a.md')).rejects.toThrow(/locked out/i);
+    window.removeEventListener(LOCKED_OUT_EVENT, heard);
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(heard.mock.calls[0][0].detail).toEqual({ retryAfterSec: 840 });
+  });
+
+  it('reports a lockout without Retry-After as unknown duration', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: { get: () => null },
+    });
+    const mod = await import('../backend.js');
+    const { LOCKED_OUT_EVENT } = await import('../browser-token.js');
+    const heard = vi.fn();
+    window.addEventListener(LOCKED_OUT_EVENT, heard);
+    await expect(mod.readFile('/a.md')).rejects.toThrow();
+    window.removeEventListener(LOCKED_OUT_EVENT, heard);
+    expect(heard.mock.calls[0][0].detail).toEqual({ retryAfterSec: null });
+  });
+
+  it('asks the server for the startup folders in browser mode', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ open_dir: '/r/sub', root: '/r' }),
+    });
+    const mod = await import('../backend.js');
+    await expect(mod.getStartupDirs()).resolves.toEqual({ open_dir: '/r/sub', root: '/r' });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/get_startup_dirs',
+      expect.anything(),
+    );
+  });
+
   it('uses https://tauri.localhost as Tauri mode', async () => {
     vi.resetModules();
 
@@ -330,5 +389,18 @@ describe('backend module (HTTP fallback mode)', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
 
     delete window.__TAURI_INTERNALS__;
+  });
+});
+
+describe('retryAfterSeconds', () => {
+  it('parses delta-seconds and rejects junk', async () => {
+    const { retryAfterSeconds } = await import('../backend.js');
+    expect(retryAfterSeconds('900')).toBe(900);
+    expect(retryAfterSeconds('0')).toBe(0);
+    expect(retryAfterSeconds('1.2')).toBe(2);
+    expect(retryAfterSeconds(null)).toBeNull();
+    expect(retryAfterSeconds('')).toBeNull();
+    expect(retryAfterSeconds('-5')).toBeNull();
+    expect(retryAfterSeconds('Wed, 21 Oct 2015 07:28:00 GMT')).toBeNull();
   });
 });

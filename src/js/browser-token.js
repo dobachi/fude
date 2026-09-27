@@ -15,6 +15,8 @@
 const STORAGE_KEY = 'fude.browserToken';
 export const TOKEN_HEADER = 'X-Fude-Token';
 export const AUTH_FAILED_EVENT = 'fude:auth-required';
+// Fired with `detail.retryAfterSec` when the server has locked this device out.
+export const LOCKED_OUT_EVENT = 'fude:locked-out';
 
 let memoryToken = '';
 // Set once the server has rejected this token. Without it, the URL fallback in
@@ -140,6 +142,24 @@ export function clearToken() {
   removeStored();
   try {
     window.dispatchEvent(new CustomEvent(AUTH_FAILED_EVENT));
+  } catch {
+    /* no CustomEvent in this host */
+  }
+}
+
+/**
+ * True once the server has rejected this tab's token. Until the page is opened
+ * again with a fresh `?token=`, every further call would fail the same way, so
+ * callers stop sending them.
+ */
+export function isRejected() {
+  return rejected;
+}
+
+/** Tell the app the server is refusing this device for a while. */
+export function reportLockout(retryAfterSec) {
+  try {
+    window.dispatchEvent(new CustomEvent(LOCKED_OUT_EVENT, { detail: { retryAfterSec } }));
   } catch {
     /* no CustomEvent in this host */
   }

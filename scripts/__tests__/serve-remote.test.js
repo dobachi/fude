@@ -256,6 +256,78 @@ describeRemote('remote mode', () => {
       expect(res.status).toBe(200);
     });
   });
+
+  // #20: a browser tab replaying a stale key (or sending none after it was
+  // rejected) must not lock its own device out, and a lockout must be logged.
+  describe('lockout accounting', () => {
+    let srv;
+    let srvPort;
+    const rejects = [];
+    const lockouts = [];
+
+    beforeAll(async () => {
+      srv = createFudeServer({
+        token: LOCAL_TOKEN,
+        remoteKey: REMOTE_KEY,
+        allowCidrs: netaccess.parseAllowSpec(`${LAN_IP}/32`).cidrs,
+        distDir,
+        root: notesDir,
+        limiter: netaccess.createAttemptLimiter({ maxFailures: 3, baseLockoutMs: 60000 }),
+        onReject: (ip, reason) => rejects.push(reason),
+        onLockout: (ip, ms) => lockouts.push(ms),
+      });
+      await new Promise((resolve) => srv.listen(0, '0.0.0.0', resolve));
+      srvPort = srv.address().port;
+    });
+
+    afterAll(async () => {
+      if (srv) await new Promise((resolve) => srv.close(resolve));
+    });
+
+    it('does not count the same stale key more than once', async () => {
+      const stale = 'stale'.padEnd(64, 's');
+      for (let i = 0; i < 6; i++) {
+        const res = await request({ headers: withKey(stale), body: inside(), to: srvPort });
+        expect(res.status).toBe(401);
+      }
+    });
+
+    it('does not count requests without any key', async () => {
+      for (let i = 0; i < 6; i++) {
+        const res = await request({ body: inside(), to: srvPort });
+        expect(res.status).toBe(401);
+      }
+      expect(rejects).toContain('no key');
+      const ok = await request({ headers: withKey(REMOTE_KEY), body: inside(), to: srvPort });
+      expect(ok.status).toBe(200);
+    });
+
+    it('logs entering a lockout and every refused request while locked', async () => {
+      for (const k of ['w1', 'w2', 'w3']) {
+        await request({ headers: withKey(k.padEnd(64, 'z')), body: inside(), to: srvPort });
+      }
+      expect(lockouts).toHaveLength(1);
+      expect(lockouts[0]).toBe(60000);
+      const res = await request({ headers: withKey(REMOTE_KEY), body: inside(), to: srvPort });
+      expect(res.status).toBe(429);
+      expect(JSON.parse(res.body).retryAfter).toBeGreaterThan(0);
+      expect(rejects.some((r) => /^locked out, \d+ min left$/.test(r))).toBe(true);
+    });
+  });
+
+  describe('startup folders (#21)', () => {
+    it('reports --root to the frontend', async () => {
+      const res = await request({
+        urlPath: '/api/get_startup_dirs',
+        headers: withKey(REMOTE_KEY),
+        body: {},
+      });
+      expect(res.status).toBe(200);
+      const dirs = JSON.parse(res.body);
+      expect(dirs).toHaveProperty('open_dir');
+      expect(dirs).toHaveProperty('root');
+    });
+  });
 });
 
 describe('remote mode (environment check)', () => {

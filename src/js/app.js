@@ -40,6 +40,7 @@ import { createStatusBar } from './core/statusbar.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
 import { taskToggleChange } from './core/task-list.js';
+import { planStartup, startupNotice } from './core/startup-plan.js';
 import { tableCellText, editTableCell, tableSize, adjacentCell } from './core/table-cell-edit.js';
 import {
   initMenuBar,
@@ -163,7 +164,7 @@ import { normalizeInputPath, resolveRevealDir } from './core/pathnorm.js';
 
 import { isLocalTauri } from './backend.js';
 import { showAuthBanner } from './core/auth-banner.js';
-import { AUTH_FAILED_EVENT } from './browser-token.js';
+import { AUTH_FAILED_EVENT, LOCKED_OUT_EVENT } from './browser-token.js';
 import { openHelp } from './help.js';
 import { checkForUpdates } from './core/updater.js';
 import {
@@ -883,8 +884,23 @@ async function init() {
 
   // Try restore session — only the main window restores the global session.
   const session = isMainWindow ? await restoreSession() : null;
-  if (session && session.open_tabs && session.open_tabs.length > 0) {
-    setVaultPath(session.vault_path || ''); // vault が決まるとパス表示が相対に変わる
+  // Browser mode: the launch options (--open-dir / --root) decide, together
+  // with the session, what opens. See startup-plan.js.
+  let startup = null;
+  if (isMainWindow && !isLocalTauri()) {
+    try {
+      startup = await backend.getStartupDirs();
+    } catch {
+      /* older/unauthorized server: fall back to the session alone */
+    }
+  }
+  const plan = planStartup({ session, startup });
+  // Anything that could not be restored is reported once, instead of the
+  // silent empty sidebar this used to produce.
+  const failedPaths = [];
+
+  if (plan.restoreSession) {
+    setVaultPath(plan.vault || ''); // vault が決まるとパス表示が相対に変わる
     defaultViewMode = session.view_mode || 'split';
     applyViewMode();
 
@@ -893,13 +909,14 @@ async function init() {
         const tree = await backend.readDirTree(vaultPath, getShowAllFiles());
         loadDirectory(tree);
         watchVault(vaultPath);
-      } catch {
-        /* ignore */
+      } catch (e) {
+        console.warn('Failed to open folder from session:', vaultPath, e);
+        failedPaths.push(vaultPath);
       }
     }
 
     // Check for crash recovery temp files
-    const tabPaths = session.open_tabs.map((t) => t.path).filter(Boolean);
+    const tabPaths = plan.tabs.map((t) => t.path).filter(Boolean);
     const recoverable = await checkRecovery(tabPaths);
     const recoverableMap = {};
     for (const info of recoverable) {
@@ -908,7 +925,7 @@ async function init() {
     const recoverablePaths = Object.keys(recoverableMap);
 
     // First, open all tabs with saved content
-    for (const tabInfo of session.open_tabs) {
+    for (const tabInfo of plan.tabs) {
       try {
         const viewMode = tabInfo.view_mode || defaultViewMode;
         if (isImagePath(tabInfo.path)) {
@@ -918,8 +935,9 @@ async function init() {
         const content = await backend.readFile(tabInfo.path);
         const restored = openTab(tabInfo.path, content, { viewMode });
         if (restored) await markTabSynced(restored.id, content);
-      } catch {
-        /* ignore */
+      } catch (e) {
+        console.warn('Failed to reopen tab from session:', tabInfo.path, e);
+        failedPaths.push(tabInfo.path);
       }
     }
 
@@ -973,18 +991,20 @@ async function init() {
     // A new window opened with a specific file (e.g. "open in new window").
     await openPath(pendingOpen.path);
   } else {
-    // Check if server specified an initial directory
+    // The folder fude-browser was launched with (--open-dir, else --root).
     if (!isLocalTauri()) {
+      let openDir = null;
       try {
-        const openDir = await backend.getOpenDir();
+        openDir = startup ? plan.vault : await backend.getOpenDir();
         if (openDir) {
           setVaultPath(openDir);
           const tree = await backend.readDirTree(openDir, getShowAllFiles());
           loadDirectory(tree);
           watchVault(vaultPath);
         }
-      } catch {
-        /* ignore */
+      } catch (e) {
+        console.warn('Failed to open the startup folder:', openDir, e);
+        if (openDir) failedPaths.push(openDir);
       }
     }
     openTab(
@@ -993,6 +1013,9 @@ async function init() {
     );
     applyViewMode();
   }
+
+  const notice = startupNotice({ skipped: plan.skipped, failed: failedPaths });
+  if (notice) showToast(notice, { type: 'error', duration: 10000 });
 
   // Listen for CLI args and drag-drop events from Tauri
   if (isLocalTauri()) {
@@ -2987,6 +3010,9 @@ backend.captureTokenFromUrl();
 // A tab with no usable token can load the page but nothing else, so say so
 // plainly rather than letting every save fail on its own.
 window.addEventListener(AUTH_FAILED_EVENT, () => showAuthBanner());
+window.addEventListener(LOCKED_OUT_EVENT, (e) =>
+  showAuthBanner(document, { lockedOutSec: e.detail ? e.detail.retryAfterSec : null }),
+);
 document.addEventListener('DOMContentLoaded', () => {
   if (!backend.isLocalTauri() && !backend.isAuthenticated()) showAuthBanner();
   init();

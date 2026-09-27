@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { showAuthBanner, hideAuthBanner, isAuthBannerVisible } from '../core/auth-banner.js';
+import {
+  showAuthBanner,
+  hideAuthBanner,
+  isAuthBannerVisible,
+  authBannerMessage,
+} from '../core/auth-banner.js';
 
 describe('auth banner', () => {
   beforeEach(() => {
@@ -52,5 +57,40 @@ describe('auth banner', () => {
     document.body.innerHTML = '';
     showAuthBanner(document);
     expect(document.body.querySelector('#auth-banner')).not.toBeNull();
+  });
+});
+
+describe('auth banner lockout (#20)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('says the device is locked out and for how long', () => {
+    const msg = authBannerMessage({ lockedOutSec: 14 * 60 + 5 });
+    expect(msg).toMatch(/locked out/i);
+    expect(msg).toMatch(/about 15 min/);
+    expect(msg).toMatch(/restart fude-browser/i);
+  });
+
+  it('rounds a short remaining time up to one minute', () => {
+    expect(authBannerMessage({ lockedOutSec: 3 })).toMatch(/about 1 min/);
+  });
+
+  it('copes with an unknown duration', () => {
+    const msg = authBannerMessage({ lockedOutSec: null });
+    expect(msg).toMatch(/locked out/i);
+    expect(msg).toMatch(/a while/);
+  });
+
+  it('keeps the no-key message by default', () => {
+    expect(authBannerMessage()).toMatch(/not authorized/i);
+  });
+
+  it('updates the text of a banner that is already showing', () => {
+    showAuthBanner(document);
+    showAuthBanner(document, { lockedOutSec: 600 });
+    const banners = document.querySelectorAll('#auth-banner');
+    expect(banners).toHaveLength(1);
+    expect(banners[0].textContent).toMatch(/locked out/i);
   });
 });

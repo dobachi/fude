@@ -11,6 +11,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 const cli = require('./lib/cli');
 const guard = require('./lib/guard');
@@ -211,6 +212,13 @@ const api = {
   // Get initial directory (set via FUDE_OPEN_DIR env)
   get_open_dir() {
     return runtime.openDir || null;
+  },
+
+  // What the startup code needs to decide between the saved session and the
+  // launch options: the folder asked for with --open-dir, and the --root every
+  // path is confined to (either may be null).
+  get_startup_dirs() {
+    return { open_dir: runtime.openDir || null, root: runtime.root || null };
   },
 
   load_session() {
@@ -440,6 +448,16 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+/** A stable, non-reversible label for a presented key (never logged). */
+function keyFingerprint(key) {
+  return crypto.createHash('sha256').update(String(key)).digest('hex');
+}
+
+/** "15 min" style duration for log lines; rounds up so 1 s left is "1 min". */
+function formatMinutes(ms) {
+  return `${Math.max(1, Math.ceil(ms / 60000))} min`;
+}
+
 /**
  * Build the HTTP server. Exported so tests can drive it on an ephemeral port
  * without shelling out.
@@ -454,6 +472,7 @@ function createFudeServer({
   tls = null,
   limiter = netaccess.createAttemptLimiter(),
   onReject = () => {},
+  onLockout = () => {},
 } = {}) {
   const handler = (req, res) => {
     const clientIp = netaccess.normalizeIp(req.socket?.remoteAddress) || '';
@@ -491,8 +510,12 @@ function createFudeServer({
       if (!loopback) {
         const locked = limiter.check(clientIp);
         if (locked.locked) {
-          res.setHeader('Retry-After', String(Math.ceil(locked.retryAfterMs / 1000)));
-          sendJson(res, 429, { error: 'Too many failed attempts' });
+          const retryAfterSec = Math.ceil(locked.retryAfterMs / 1000);
+          res.setHeader('Retry-After', String(retryAfterSec));
+          // Say so in the log too: from the outside a lockout looks exactly
+          // like "the right URL shows an empty editor".
+          onReject(clientIp, `locked out, ${formatMinutes(locked.retryAfterMs)} left`);
+          sendJson(res, 429, { error: 'Too many failed attempts', retryAfter: retryAfterSec });
           return;
         }
       }
@@ -505,8 +528,17 @@ function createFudeServer({
       });
       if (!verdict.ok) {
         if (!loopback && verdict.status === 401) {
-          const result = limiter.recordFailure(clientIp);
-          onReject(clientIp, result.locked ? 'locked out' : 'bad key');
+          const provided = guard.extractToken(req);
+          if (!provided) {
+            // No key is not a guess: it reveals nothing about the key, so it
+            // does not count toward a lockout. (A tab whose key was rejected
+            // stops sending one, and used to lock itself out this way.)
+            onReject(clientIp, 'no key');
+          } else {
+            const result = limiter.recordFailure(clientIp, keyFingerprint(provided));
+            if (result.locked) onLockout(clientIp, result.retryAfterMs);
+            else onReject(clientIp, 'bad key');
+          }
         }
         sendJson(res, verdict.status, { error: verdict.error });
         return;
@@ -726,6 +758,11 @@ async function start(argv = process.argv.slice(2), env = process.env) {
     rejectLog.set(ip, now);
     console.log(`  rejected ${ip} (${reason})`);
   };
+  // Entering a lockout is rare and the one thing an operator must see, so it
+  // is never throttled.
+  const onLockout = (ip, ms) => {
+    console.log(`  locked out ${ip} for ${formatMinutes(ms)} (too many failed keys)`);
+  };
 
   const server = createFudeServer({
     token: localToken,
@@ -735,6 +772,7 @@ async function start(argv = process.argv.slice(2), env = process.env) {
     allowedHosts: cfg.allowedHosts,
     tls: tlsOptions,
     onReject,
+    onLockout,
   });
 
   const scheme = tlsOptions ? 'https' : 'http';

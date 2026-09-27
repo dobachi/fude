@@ -223,16 +223,28 @@ function createAttemptLimiter({
       return { locked: false };
     },
 
-    recordFailure(ip) {
+    /**
+     * Count a failed attempt. `fingerprint` identifies the credential that was
+     * tried: the same wrong credential sent again (a browser tab replaying a
+     * stale key on every startup call) is one guess, not several, so it is
+     * counted once. A brute-forcer has to vary the key, and every new key
+     * still counts.
+     */
+    recordFailure(ip, fingerprint) {
       const e = entryFor(ip);
       const t = now();
       if (e.lockedUntil > t) return { locked: true, retryAfterMs: e.lockedUntil - t };
 
+      if (fingerprint !== undefined && fingerprint === e.lastFingerprint) {
+        return { locked: false, repeated: true, remaining: maxFailures - e.failures };
+      }
+      e.lastFingerprint = fingerprint;
       e.failures += 1;
       if (e.failures >= maxFailures) {
         const ms = Math.min(baseLockoutMs * 2 ** e.lockouts, maxLockoutMs);
         e.lockouts += 1;
         e.failures = 0;
+        e.lastFingerprint = undefined;
         e.lockedUntil = t + ms;
         return { locked: true, retryAfterMs: ms };
       }
@@ -243,7 +255,10 @@ function createAttemptLimiter({
       // Keep the lockout counter: a successful guess should not wipe the
       // history of how hard this address has been trying.
       const e = state.get(ip);
-      if (e) e.failures = 0;
+      if (e) {
+        e.failures = 0;
+        e.lastFingerprint = undefined;
+      }
     },
 
     reset(ip) {

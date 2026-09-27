@@ -7,7 +7,14 @@
 // If __TAURI_INTERNALS__ is not yet available (Windows timing issue tauri#12990),
 // wait briefly for it to become available before falling back to HTTP.
 
-import { authHeaders, captureTokenFromUrl, clearToken, isAuthenticated } from './browser-token.js';
+import {
+  authHeaders,
+  captureTokenFromUrl,
+  clearToken,
+  isAuthenticated,
+  isRejected,
+  reportLockout,
+} from './browser-token.js';
 
 // Detect whether we're running inside a Tauri webview.
 //
@@ -52,6 +59,21 @@ function waitForInternals() {
   return _internalsReady;
 }
 
+const NOT_AUTHORIZED =
+  'Not authorized. Reopen Fude using the URL printed by fude-browser (it contains ?token=...).';
+
+/**
+ * Seconds from a Retry-After header (delta-seconds form, which is what
+ * fude-browser sends). Null when absent or unparseable.
+ * @param {string|null} value
+ * @returns {number|null}
+ */
+export function retryAfterSeconds(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.ceil(n) : null;
+}
+
 async function doInvoke(cmd, args) {
   if (isTauriWebview()) {
     const internals = await waitForInternals();
@@ -64,6 +86,9 @@ async function doInvoke(cmd, args) {
   // HTTP fallback for browser mode. The server requires a session token on
   // every /api/* call; without it the same endpoints would let anyone who can
   // reach the port read and write the user's files.
+  // Once the key has been rejected, further calls cannot succeed until the
+  // page is reopened with a fresh one; stop instead of hammering the server.
+  if (isRejected()) throw new Error(NOT_AUTHORIZED);
   const base = window.location.origin || 'http://localhost:3000';
   const res = await fetch(`${base}/api/${cmd}`, {
     method: 'POST',
@@ -76,9 +101,14 @@ async function doInvoke(cmd, args) {
       // callers catch their own errors, so without this a missing token just
       // looks like "save does nothing".
       clearToken();
-      throw new Error(
-        'Not authorized. Reopen Fude using the URL printed by fude-browser (it contains ?token=...).',
-      );
+      throw new Error(NOT_AUTHORIZED);
+    }
+    if (res.status === 429) {
+      // Locked out after too many failed keys. Every call fails the same way
+      // until it expires; say so once, centrally, with how long it lasts.
+      const retryAfterSec = retryAfterSeconds(res.headers.get('Retry-After'));
+      reportLockout(retryAfterSec);
+      throw new Error('This device is temporarily locked out by the server.');
     }
     throw new Error(`Backend call failed: ${cmd}`);
   }
@@ -172,6 +202,16 @@ export async function deleteApiKey() {
 
 export async function getOpenDir() {
   return doInvoke('get_open_dir');
+}
+
+/**
+ * Browser mode only: `{open_dir, root}` from fude-browser's launch options.
+ * The desktop app has neither, so it gets null without a round trip.
+ * @returns {Promise<{open_dir: string|null, root: string|null} | null>}
+ */
+export async function getStartupDirs() {
+  if (isTauriWebview()) return null;
+  return doInvoke('get_startup_dirs');
 }
 
 export async function browseDir(path) {

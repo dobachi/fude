@@ -230,3 +230,51 @@ describe('createAttemptLimiter', () => {
     expect(Math.max(...seen)).toBe(4000);
   });
 });
+
+describe('createAttemptLimiter credential fingerprints (#20)', () => {
+  const make = () => createAttemptLimiter({ maxFailures: 3, baseLockoutMs: 1000, now: () => 0 });
+
+  it('counts the same wrong key sent repeatedly as one failure', () => {
+    const l = make();
+    for (let i = 0; i < 10; i++) l.recordFailure('10.0.0.1', 'stale');
+    expect(l.check('10.0.0.1').locked).toBe(false);
+  });
+
+  it('still counts every different key', () => {
+    const l = make();
+    l.recordFailure('10.0.0.1', 'k1');
+    l.recordFailure('10.0.0.1', 'k2');
+    const r = l.recordFailure('10.0.0.1', 'k3');
+    expect(r.locked).toBe(true);
+    expect(l.check('10.0.0.1').locked).toBe(true);
+  });
+
+  it('counts a key again after a different one came in between', () => {
+    const l = make();
+    l.recordFailure('10.0.0.1', 'a');
+    l.recordFailure('10.0.0.1', 'b');
+    expect(l.recordFailure('10.0.0.1', 'a').locked).toBe(true);
+  });
+
+  it('forgets the last key on success', () => {
+    const l = make();
+    l.recordFailure('10.0.0.1', 'a');
+    l.recordSuccess('10.0.0.1');
+    const r = l.recordFailure('10.0.0.1', 'a');
+    expect(r.repeated).toBeUndefined();
+    expect(r.remaining).toBe(2);
+  });
+
+  it('keeps counting every call when no fingerprint is given (old callers)', () => {
+    const l = make();
+    l.recordFailure('10.0.0.1');
+    l.recordFailure('10.0.0.1');
+    expect(l.recordFailure('10.0.0.1').locked).toBe(true);
+  });
+
+  it('tracks addresses independently', () => {
+    const l = make();
+    l.recordFailure('10.0.0.1', 'x');
+    expect(l.recordFailure('10.0.0.2', 'x').repeated).toBeUndefined();
+  });
+});
