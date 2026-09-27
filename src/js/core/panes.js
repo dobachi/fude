@@ -26,9 +26,10 @@ let onScrollCallback = null; // (pane, info) => void
 let onPreviewScrollCallback = null; // (pane) => void
 let onSelectionChangeCallback = null; // (selectedText) => void
 let onEditorCreatedCallback = null; // (pane) => void — invoked after createEditorInPane
-let onSourceJumpCallback = null; // (line, previewContainer) => void — preview dblclick
+let onSourceJumpCallback = null; // (line, previewContainer) => void — preview Ctrl+click
 let onFileLinkCallback = null; // (target, previewContainer) => void — preview file link click
 let onTaskToggleCallback = null; // (line, wasChecked, previewContainer) => void — preview checkbox
+let onBlockEditCallback = null; // ({line, blockEl, word, container}) => void — preview dblclick
 
 export function setCallbacks({
   onChange,
@@ -39,6 +40,7 @@ export function setCallbacks({
   onSourceJump,
   onFileLink,
   onTaskToggle,
+  onBlockEdit,
 }) {
   onChangeCallback = onChange;
   onScrollCallback = onScroll;
@@ -48,9 +50,10 @@ export function setCallbacks({
   onSourceJumpCallback = onSourceJump;
   onFileLinkCallback = onFileLink;
   onTaskToggleCallback = onTaskToggle;
+  onBlockEditCallback = onBlockEdit;
 }
 
-// Preview-init options shared by every pane so double-click-to-source works in
+// Preview-init options shared by every pane so the preview's click actions work in
 // split panes too (not just the default pane initialised by app.js).
 function previewInitOpts() {
   return {
@@ -62,6 +65,9 @@ function previewInitOpts() {
     },
     onTaskToggle: (line, wasChecked, container) => {
       if (onTaskToggleCallback) onTaskToggleCallback(line, wasChecked, container);
+    },
+    onBlockEdit: (req) => {
+      if (onBlockEditCallback) onBlockEditCallback(req);
     },
   };
 }

@@ -776,6 +776,66 @@ export function createEditor(
   return view;
 }
 
+const inlineTheme = EditorView.theme({
+  '&': { height: 'auto' },
+  '.cm-scroller': {
+    overflow: 'visible',
+    fontFamily: 'var(--font-mono)',
+    fontSize: 'var(--font-size)',
+  },
+});
+
+/**
+ * A small editor for editing one block's source inside the preview.
+ *
+ * The same Markdown editing aids as the main editor (lists, bold, tables),
+ * minus everything tied to a pane or a file. It carries a keymode compartment
+ * like the main editor, so toggleVim/toggleEmacs (and keymode's applyKeymode)
+ * work on it unchanged.
+ *
+ * Mod-Enter and Escape finish the edit. In Vim mode Escape belongs to Vim
+ * (the keymode sits at the highest precedence), so Mod-Enter or clicking away
+ * finishes it there.
+ *
+ * @param {HTMLElement} parent
+ * @param {string} content
+ * @param {{commit: () => void}} handlers
+ * @param {number} [cursor] initial caret offset
+ */
+export function createInlineEditor(parent, content, handlers, cursor = 0) {
+  const keymodeCompartment = new Compartment();
+  const done = () => {
+    handlers.commit();
+    return true;
+  };
+  const view = new EditorView({
+    state: EditorState.create({
+      doc: content,
+      selection: { anchor: Math.min(Math.max(0, cursor), content.length) },
+      extensions: [
+        Prec.highest(keymap.of([{ key: 'Mod-Enter', run: done }])),
+        keymodeCompartment.of([]),
+        EditorState.allowMultipleSelections.of(true),
+        drawSelection(),
+        history(),
+        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        markdown({ base: markdownLanguage, codeLanguages: languages }),
+        keymap.of([{ key: 'Escape', run: done }, ...defaultKeymap, ...historyKeymap]),
+        autoListExtension(),
+        boldKeymap(),
+        listKeymap(),
+        Prec.high(tableKeymap()),
+        inlineTheme,
+        themeExtensionFor(document.documentElement.getAttribute('data-theme')),
+        EditorView.lineWrapping,
+      ],
+    }),
+    parent,
+  });
+  view._keymodeCompartment = keymodeCompartment;
+  return view;
+}
+
 export function setContent(view, content) {
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content } });
 }

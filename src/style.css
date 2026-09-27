@@ -1213,6 +1213,20 @@ body {
   vertical-align: middle;
 }
 
+/* Inline block editor: double-clicking a preview block swaps it for this, an
+   editor on the block's Markdown source. */
+.preview-pane .preview-inline-editor {
+  margin-bottom: 1em;
+  border: 1px solid var(--fg-accent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: var(--bg-primary);
+}
+
+.preview-pane .preview-inline-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
 /* Task list items: the checkbox replaces the bullet, and clicking it edits the
    source ([ ] ⇄ [x]). */
 .preview-pane li.task-list-item {

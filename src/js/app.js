@@ -13,6 +13,7 @@ import {
   scrollEditorToLine,
   jumpToLine,
   flashLine,
+  createInlineEditor,
   registerPanesModule,
   registerImagePasteHandler,
   registerSaveHandler,
@@ -60,7 +61,14 @@ import {
   renderPreview,
   scrollToAnchor,
   invalidatePreviewBlocks,
+  previewBlockRange,
 } from './core/preview.js';
+import {
+  startInlineEdit,
+  commitInlineEdit,
+  cancelInlineEdit,
+  guessCursor,
+} from './core/preview-edit.js';
 import { createPreviewScheduler } from './core/preview-scheduler.js';
 import * as perf from './core/perf-trace.js';
 import {
@@ -136,7 +144,14 @@ import {
   showReloadBanner,
   dismissReloadBanner,
 } from './core/file-watcher.js';
-import { initKeymode, reapplyMode, cycleMode, setAppVersion, getMode } from './core/keymode.js';
+import {
+  initKeymode,
+  reapplyMode,
+  cycleMode,
+  setAppVersion,
+  getMode,
+  applyKeymode,
+} from './core/keymode.js';
 import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
@@ -707,6 +722,7 @@ async function init() {
       onSourceJump: handlePreviewSourceJump,
       onFileLink: handlePreviewFileLink,
       onTaskToggle: handlePreviewTaskToggle,
+      onBlockEdit: handlePreviewBlockEdit,
     });
 
   initPanes();
@@ -720,6 +736,7 @@ async function init() {
     onSourceJump: handlePreviewSourceJump,
     onFileLink: handlePreviewFileLink,
     onTaskToggle: handlePreviewTaskToggle,
+    onBlockEdit: handlePreviewBlockEdit,
     onEditorCreated: () => {
       reapplyMode();
     },
@@ -1244,7 +1261,7 @@ function handlePreviewScroll(pane) {
   scrollEditorToLine(pane.editorView, line);
 }
 
-// Double-click in the preview → move the editor cursor to the matching source
+// Ctrl/Cmd+click in the preview → move the editor cursor to the matching source
 // line. Mirrors the outline "jump to heading" wiring (recordScrollSync +
 // jumpToLine), plus a flash so the landing spot is obvious.
 function handlePreviewSourceJump(line, container) {
@@ -1271,6 +1288,74 @@ function handlePreviewTaskToggle(line, wasChecked, container) {
   const change = taskToggleChange(docLine.text, docLine.from, wasChecked);
   if (!change) return;
   view.dispatch({ changes: change, userEvent: 'input.task-toggle' });
+}
+
+// Double-click in the preview → edit that block's source in place. The edit
+// is written back as one change to the pane's editor when it finishes, so it
+// is a single undo step there, and everything downstream (dirty state, pane
+// mirroring, preview re-render) follows as for typing.
+function handlePreviewBlockEdit({ line, blockEl, word, container }) {
+  const pane = getPaneByPreviewContainer(container) || getActivePane();
+  const view = pane && pane.editorView;
+  if (!view) return;
+  const doc = view.state.doc;
+  const range = previewBlockRange(doc.toString(), line, pane.filePath);
+  // No block-level source for this spot (e.g. a whole-file diagram): the next
+  // best thing is taking the user to the source.
+  if (!range || range.to > doc.lines) {
+    handlePreviewSourceJump(line, container);
+    return;
+  }
+  const from = doc.line(range.from).from;
+  const to = doc.line(range.to).to;
+  const original = doc.sliceString(from, to);
+  const filePath = pane.filePath;
+
+  startInlineEdit({
+    container,
+    blockEl,
+    text: original,
+    cursor: guessCursor(original, word),
+    mountEditor: (host, text, handlers, cursor) => {
+      const inline = createInlineEditor(host, text, handlers, cursor);
+      applyKeymode(inline);
+      return inline;
+    },
+    onCommit: (edited) => {
+      if (edited === original) return;
+      // The source may have moved on while the edit was open (typing in the
+      // editor, a reload, another tab in this pane). Writing at stale offsets
+      // would corrupt it, so only apply onto exactly what was edited.
+      const intact =
+        pane.editorView === view &&
+        pane.filePath === filePath &&
+        view.state.sliceDoc(from, to) === original;
+      if (!intact) {
+        keepUnappliedEdit(edited);
+        return;
+      }
+      view.dispatch({ changes: { from, to, insert: edited }, userEvent: 'input.preview-edit' });
+    },
+    onCancel: (edited) => {
+      if (edited !== original) keepUnappliedEdit(edited);
+    },
+  });
+}
+
+// An inline edit that could not be written back is not thrown away silently.
+function keepUnappliedEdit(text) {
+  try {
+    navigator.clipboard.writeText(text);
+  } catch {
+    /* clipboard unavailable — the toast still explains */
+  }
+  showToast(
+    'プレビューでの編集を反映できませんでした（文書が変わったため）。編集内容はクリップボードにコピーしました',
+    {
+      type: 'error',
+      duration: 8000,
+    },
+  );
 }
 
 function handleSelectionChange(selectedText) {
@@ -1696,6 +1781,12 @@ function renderImageTab(pane, tab) {
 
 // ── Tab change handler ─────────────────────────────────────
 function handleTabChange(tab) {
+  // The active tab has already changed, so an edit still open in the preview
+  // belongs to the previous document and can't be applied here; it is closed
+  // and its text kept (see keepUnappliedEdit). Paths that switch tabs on
+  // purpose commit it before switching.
+  cancelInlineEdit();
+
   // タブの切替・開閉のたびに下部のパス表示を合わせる（pane の有無に依らず先に反映）
   statusBar.render(tab ? tab.path : null);
 
@@ -2351,6 +2442,8 @@ function saveActivePaneTabState() {
 // ── Global keyboard shortcuts ──────────────────────────────
 // Save the active tab to disk. Used by Ctrl+Shift+S (save) and Ctrl+Alt+S (save as).
 async function performSave({ forceDialog }) {
+  // Save what the user sees: an edit still open in the preview goes in first.
+  commitInlineEdit();
   const tab = getActiveTab();
   const view = currentView();
   if (!tab || tab.kind === 'image' || !view) return;
@@ -2532,6 +2625,8 @@ function handleGlobalKeys(e) {
   if (tabAction) {
     e.preventDefault();
     e.stopPropagation();
+    // Apply an open preview edit while its tab is still the active one.
+    commitInlineEdit();
     saveActivePaneTabState();
     if (tabAction === 'next') nextTab();
     else prevTab();

@@ -12,8 +12,8 @@ afterEach(() => {
   container.remove();
 });
 
-function dblclick(el) {
-  el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+function ctrlClick(el, opts = { ctrlKey: true }) {
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...opts }));
 }
 
 describe('sourceLineFromElement', () => {
@@ -47,17 +47,24 @@ describe('sourceLineFromElement', () => {
   });
 });
 
-describe('initPreview double-click to source', () => {
+describe('initPreview Ctrl+click to source', () => {
   it('calls onSourceJump with the block line and container', () => {
     const onSourceJump = vi.fn();
     initPreview(container, { onSourceJump });
     renderMarkdown('# Title\n\npara text\n', '', container);
 
-    const p = container.querySelector('p');
-    dblclick(p);
+    ctrlClick(container.querySelector('p'));
 
     expect(onSourceJump).toHaveBeenCalledTimes(1);
     expect(onSourceJump).toHaveBeenCalledWith(3, container);
+  });
+
+  it('accepts Cmd (meta) as well as Ctrl', () => {
+    const onSourceJump = vi.fn();
+    initPreview(container, { onSourceJump });
+    renderMarkdown('para\n', '', container);
+    ctrlClick(container.querySelector('p'), { metaKey: true });
+    expect(onSourceJump).toHaveBeenCalledWith(1, container);
   });
 
   it('resolves the line from an inline descendant of a block', () => {
@@ -65,24 +72,37 @@ describe('initPreview double-click to source', () => {
     initPreview(container, { onSourceJump });
     renderMarkdown('# Heading with **bold**\n', '', container);
 
-    const strong = container.querySelector('strong');
-    dblclick(strong);
+    ctrlClick(container.querySelector('strong'));
 
     expect(onSourceJump).toHaveBeenCalledWith(1, container);
+  });
+
+  it('ignores a plain click', () => {
+    const onSourceJump = vi.fn();
+    initPreview(container, { onSourceJump });
+    renderMarkdown('para\n', '', container);
+    ctrlClick(container.querySelector('p'), {});
+    expect(onSourceJump).not.toHaveBeenCalled();
+  });
+
+  it('does not jump when Ctrl+clicking a link', () => {
+    const onSourceJump = vi.fn();
+    initPreview(container, { onSourceJump });
+    renderMarkdown('[a](#x)\n', '', container);
+    ctrlClick(container.querySelector('a'));
+    expect(onSourceJump).not.toHaveBeenCalled();
   });
 
   it('does nothing when the target has no source line', () => {
     const onSourceJump = vi.fn();
     initPreview(container, { onSourceJump });
-    // Container itself carries no data-source-line.
-    dblclick(container);
+    ctrlClick(container);
     expect(onSourceJump).not.toHaveBeenCalled();
   });
 
   it('is a no-op when no onSourceJump callback is provided', () => {
     initPreview(container);
     renderMarkdown('para\n', '', container);
-    const p = container.querySelector('p');
-    expect(() => dblclick(p)).not.toThrow();
+    expect(() => ctrlClick(container.querySelector('p'))).not.toThrow();
   });
 });

@@ -9,6 +9,7 @@ import { resolveLinkTarget } from './link-target.js';
 import { time, start as startTimer } from './perf-trace.js';
 import { renderBlockHtml, applyBlocks } from './preview-blocks.js';
 import { taskListPlugin, isTaskCheckbox } from './task-list.js';
+import { blockLineRange, topLevelBlockOf, isInsideInlineEditor } from './preview-edit.js';
 import {
   isQuartoFile,
   applyQuartoExtensions,
@@ -166,6 +167,8 @@ function escapeHtml(s) {
 function handlePreviewKeys(e) {
   const container = e.currentTarget;
   if (!container) return;
+  // Keys typed into an inline block editor are text, not preview navigation.
+  if (isInsideInlineEditor(e.target)) return;
 
   const scrollAmount = 60;
   const pageAmount = container.clientHeight * 0.8;
@@ -270,6 +273,8 @@ export function sourceLineFromElement(el) {
  *   onSourceJump?: (line: number, container: HTMLElement) => void,
  *   onFileLink?: (target: {path: string, hash: string}, container: HTMLElement) => void,
  *   onTaskToggle?: (line: number, wasChecked: boolean, container: HTMLElement) => void,
+ *   onBlockEdit?: (req: {line: number, blockEl: HTMLElement, word: string,
+ *     container: HTMLElement}) => void,
  * }} [opts]
  */
 export function initPreview(container, opts = {}) {
@@ -277,20 +282,24 @@ export function initPreview(container, opts = {}) {
   container.setAttribute('tabindex', '0');
   container.addEventListener('keydown', handlePreviewKeys);
 
-  // Double-click any rendered block to jump to the matching source line in the
-  // editor. Blocks carry `data-source-line` (added by the source_line core
-  // rule); we resolve the nearest one and hand the line to the app.
+  // Double-click = edit here. The top-level block under the pointer is handed
+  // to the app, which swaps it for an inline editor on its source (see
+  // preview-edit.js). Checkboxes and links already acted on the first click.
   container.addEventListener('dblclick', (e) => {
-    if (!opts.onSourceJump) return;
-    // A fast double-toggle of a checkbox is not a request to jump to source.
+    if (!opts.onBlockEdit) return;
+    if (isInsideInlineEditor(e.target)) return;
     if (isTaskCheckbox(e.target)) return;
-    const line = sourceLineFromElement(e.target);
+    if (e.target.closest && e.target.closest('a[href]')) return;
+    const blockEl = topLevelBlockOf(container, e.target);
+    if (!blockEl) return;
+    const line = sourceLineFromElement(blockEl);
     if (line === null) return;
-    // The two clicks leave a word selected; clear it so it doesn't linger and
-    // distract from the editor cursor we're about to place.
+    // The two clicks leave a word selected. Take it as a hint for where to put
+    // the caret, then clear it so it doesn't linger.
     const sel = window.getSelection && window.getSelection();
+    const word = sel ? String(sel) : '';
     if (sel) sel.removeAllRanges();
-    opts.onSourceJump(line, container);
+    opts.onBlockEdit({ line, blockEl, word, container });
   });
 
   // Intercept ALL link clicks inside the preview. Without this the Tauri
@@ -302,12 +311,17 @@ export function initPreview(container, opts = {}) {
   //   local file path   → hand to onFileLink so the app opens it in a tab
   //   anything else     → no-op
   container.addEventListener('click', (e) => {
+    if (isInsideInlineEditor(e.target)) return;
+
     // Task checkbox: never let the browser flip it on its own — the box must
     // only change by way of the source, or preview and source would disagree.
     // The `checked` attribute is what was rendered; the property has already
     // been toggled by the time the click handler runs.
     if (isTaskCheckbox(e.target)) {
       e.preventDefault();
+      // Only the first click of a double-click toggles, so a double-click
+      // means the same "one change" it would anywhere else.
+      if (e.detail > 1) return;
       const line = sourceLineFromElement(e.target);
       if (line !== null && opts.onTaskToggle) {
         opts.onTaskToggle(line, e.target.hasAttribute('checked'), container);
@@ -316,7 +330,17 @@ export function initPreview(container, opts = {}) {
     }
 
     const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
-    if (!a) return;
+    if (!a) {
+      // Ctrl/Cmd+click on a block jumps to its line in the source editor.
+      if ((e.ctrlKey || e.metaKey) && opts.onSourceJump) {
+        const line = sourceLineFromElement(e.target);
+        if (line !== null) {
+          e.preventDefault();
+          opts.onSourceJump(line, container);
+        }
+      }
+      return;
+    }
     const href = a.getAttribute('href');
     if (!href) return;
     e.preventDefault();
@@ -497,6 +521,23 @@ function renderPlantumlDocument(content, container, baseDir) {
       holder.classList.add('puml-error');
       holder.textContent = `PlantUML error: ${err.message}`;
     });
+}
+
+/**
+ * Source line range (1-based, inclusive) of the preview block starting on
+ * `line`, parsed the same way the preview renders `filePath`. Null when the
+ * document is not rendered block by block (a whole-file diagram) or no block
+ * starts there.
+ * @param {string} content
+ * @param {number} line
+ * @param {string} [filePath]
+ * @returns {{from: number, to: number} | null}
+ */
+export function previewBlockRange(content, line, filePath) {
+  ensureMd();
+  if (plantumlEnabled && isPlantumlFile(filePath)) return null;
+  if (mermaidEnabled && isMermaidFile(filePath)) return null;
+  return blockLineRange(isQuartoFile(filePath) ? qmdMd : md, content, line);
 }
 
 /**

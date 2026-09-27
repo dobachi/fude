@@ -40,6 +40,11 @@ export async function setMode(mode) {
   updateModeIndicator(mode);
 }
 
+/** Apply the current keymode to a view outside the panes (e.g. an inline editor). */
+export function applyKeymode(view) {
+  return applyToView(view, currentMode);
+}
+
 export function getMode() {
   return currentMode;
 }

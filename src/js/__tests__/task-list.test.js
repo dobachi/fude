@@ -209,13 +209,25 @@ describe('preview checkbox click', () => {
     expect(box.checked).toBe(false);
   });
 
-  it('does not treat a checkbox double-click as a jump to source', () => {
-    const onSourceJump = vi.fn();
-    initPreview(container, { onSourceJump });
+  it('toggles only on the first click of a double-click', () => {
+    const onTaskToggle = vi.fn();
+    initPreview(container, { onTaskToggle });
+    renderMarkdown('- [ ] a\n', '', container);
+    const box = container.querySelector('input.task-list-item-checkbox');
+    for (const detail of [1, 2]) {
+      box.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail }));
+    }
+    expect(onTaskToggle).toHaveBeenCalledTimes(1);
+    expect(box.checked).toBe(false);
+  });
+
+  it('does not open a block edit on a checkbox double-click', () => {
+    const onBlockEdit = vi.fn();
+    initPreview(container, { onBlockEdit });
     renderMarkdown('- [ ] a\n', '', container);
     container
       .querySelector('input.task-list-item-checkbox')
       .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-    expect(onSourceJump).not.toHaveBeenCalled();
+    expect(onBlockEdit).not.toHaveBeenCalled();
   });
 });
