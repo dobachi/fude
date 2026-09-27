@@ -1223,6 +1223,13 @@ body {
   background: var(--bg-primary);
 }
 
+/* In a table cell: fit the cell rather than stand as a block. */
+.preview-pane .preview-inline-editor--cell {
+  margin: -4px -8px;
+  padding: 2px 6px;
+  min-width: 4em;
+}
+
 .preview-pane .preview-inline-editor .cm-editor.cm-focused {
   outline: none;
 }

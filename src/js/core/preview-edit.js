@@ -74,6 +74,30 @@ export function isInsideInlineEditor(el) {
   return !!(el && el.closest && el.closest(`.${INLINE_EDITOR_CLASS}`));
 }
 
+/**
+ * The table cell under `el`, when `el` is inside a table that is itself a
+ * top-level block (`blockEl`). Nested tables (in a list or quote) are edited
+ * as part of their enclosing block instead.
+ *
+ * @returns {{cellEl: HTMLElement, row: number, col: number} | null}
+ *   row 0 is the header row; body rows count from 1.
+ */
+export function tableCellOf(blockEl, el) {
+  if (!blockEl || blockEl.tagName !== 'TABLE' || !el || !el.closest) return null;
+  const cellEl = el.closest('th, td');
+  if (!cellEl || cellEl.closest('table') !== blockEl) return null;
+  const tr = cellEl.parentElement;
+  const section = tr && tr.parentElement;
+  if (!section) return null;
+  const col = Array.prototype.indexOf.call(tr.children, cellEl);
+  let row;
+  if (section.tagName === 'THEAD') row = 0;
+  else if (section.tagName === 'TBODY')
+    row = Array.prototype.indexOf.call(section.children, tr) + 1;
+  else return null;
+  return { cellEl, row, col };
+}
+
 // At most one edit is open at a time, across all panes.
 let active = null;
 
@@ -85,6 +109,9 @@ let active = null;
  * @param {object} opts
  * @param {HTMLElement} opts.container preview container (focus returns here)
  * @param {HTMLElement} opts.blockEl the rendered block to swap out
+ * @param {HTMLElement} [opts.cellEl] edit inside this element instead of
+ *   swapping `blockEl` (a table cell: its content is set aside while the
+ *   editor sits in it, so the table keeps its layout)
  * @param {string} opts.text the block's source
  * @param {number} [opts.cursor] initial caret offset
  * @param {(host: HTMLElement, text: string, handlers: {commit: () => void},
@@ -94,17 +121,25 @@ let active = null;
  */
 export function startInlineEdit(opts) {
   commitInlineEdit();
-  const { container, blockEl } = opts;
+  const { container, blockEl, cellEl } = opts;
   const doc = blockEl.ownerDocument;
 
   const host = doc.createElement('div');
   host.className = INLINE_EDITOR_CLASS;
-  // Keep scroll sync working while the editor stands in for the block.
-  const line = blockEl.getAttribute('data-source-line');
-  if (line) host.setAttribute('data-source-line', line);
-  blockEl.replaceWith(host);
+  let saved = null;
+  if (cellEl) {
+    host.classList.add(`${INLINE_EDITOR_CLASS}--cell`);
+    saved = doc.createDocumentFragment();
+    while (cellEl.firstChild) saved.appendChild(cellEl.firstChild);
+    cellEl.appendChild(host);
+  } else {
+    // Keep scroll sync working while the editor stands in for the block.
+    const line = blockEl.getAttribute('data-source-line');
+    if (line) host.setAttribute('data-source-line', line);
+    blockEl.replaceWith(host);
+  }
 
-  const edit = { container, blockEl, host, opts, view: null };
+  const edit = { container, blockEl, cellEl, saved, host, opts, view: null };
   active = edit;
 
   edit.view = opts.mountEditor(
@@ -133,7 +168,12 @@ function finish(edit, kind, refocus) {
   active = null;
   const edited = edit.view ? edit.view.state.doc.toString() : edit.opts.text;
   if (edit.view) edit.view.destroy();
-  if (edit.host.isConnected) edit.host.replaceWith(edit.blockEl);
+  if (edit.cellEl) {
+    edit.host.remove();
+    edit.cellEl.appendChild(edit.saved);
+  } else if (edit.host.isConnected) {
+    edit.host.replaceWith(edit.blockEl);
+  }
   if (refocus && edit.container && edit.container.isConnected) {
     edit.container.focus({ preventScroll: true });
   }

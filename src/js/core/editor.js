@@ -801,8 +801,10 @@ const inlineTheme = EditorView.theme({
  * @param {string} content
  * @param {{commit: () => void}} handlers
  * @param {number} [cursor] initial caret offset
+ * @param {{singleLine?: boolean}} [opts] singleLine: Enter finishes the edit
+ *   instead of starting a new line (a table cell)
  */
-export function createInlineEditor(parent, content, handlers, cursor = 0) {
+export function createInlineEditor(parent, content, handlers, cursor = 0, opts = {}) {
   const keymodeCompartment = new Compartment();
   const done = () => {
     handlers.commit();
@@ -813,7 +815,12 @@ export function createInlineEditor(parent, content, handlers, cursor = 0) {
       doc: content,
       selection: { anchor: Math.min(Math.max(0, cursor), content.length) },
       extensions: [
-        Prec.highest(keymap.of([{ key: 'Mod-Enter', run: done }])),
+        Prec.highest(
+          keymap.of([
+            { key: 'Mod-Enter', run: done },
+            ...(opts.singleLine ? [{ key: 'Enter', run: done }] : []),
+          ]),
+        ),
         keymodeCompartment.of([]),
         EditorState.allowMultipleSelections.of(true),
         drawSelection(),

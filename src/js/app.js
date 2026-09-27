@@ -40,6 +40,7 @@ import { createStatusBar } from './core/statusbar.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
 import { taskToggleChange } from './core/task-list.js';
+import { tableCellText, editTableCell } from './core/table-cell-edit.js';
 import {
   initMenuBar,
   toggleMenuBar,
@@ -1294,7 +1295,7 @@ function handlePreviewTaskToggle(line, wasChecked, container) {
 // is written back as one change to the pane's editor when it finishes, so it
 // is a single undo step there, and everything downstream (dirty state, pane
 // mirroring, preview re-render) follows as for typing.
-function handlePreviewBlockEdit({ line, blockEl, word, container }) {
+function handlePreviewBlockEdit({ line, blockEl, word, container, cell }) {
   const pane = getPaneByPreviewContainer(container) || getActivePane();
   const view = pane && pane.editorView;
   if (!view) return;
@@ -1311,6 +1312,49 @@ function handlePreviewBlockEdit({ line, blockEl, word, container }) {
   const original = doc.sliceString(from, to);
   const filePath = pane.filePath;
 
+  // Write the block's new source back. The source may have moved on while the
+  // edit was open (typing in the editor, a reload, another tab in this pane).
+  // Writing at stale offsets would corrupt it, so only apply onto exactly what
+  // was edited; otherwise keep the user's text.
+  const apply = (newBlock, userText) => {
+    if (newBlock === original) return;
+    const intact =
+      pane.editorView === view &&
+      pane.filePath === filePath &&
+      view.state.sliceDoc(from, to) === original;
+    if (!intact) {
+      keepUnappliedEdit(userText);
+      return;
+    }
+    view.dispatch({ changes: { from, to, insert: newBlock }, userEvent: 'input.preview-edit' });
+  };
+
+  // A cell of a top-level table: edit just that cell's source, on one line.
+  const cellText = cell ? tableCellText(original, cell.row, cell.col) : null;
+  if (cell && cellText !== null) {
+    startInlineEdit({
+      container,
+      blockEl,
+      cellEl: cell.cellEl,
+      text: cellText,
+      cursor: guessCursor(cellText, word),
+      mountEditor: (host, text, handlers, cursor) => {
+        const inline = createInlineEditor(host, text, handlers, cursor, { singleLine: true });
+        applyKeymode(inline);
+        return inline;
+      },
+      onCommit: (edited) => {
+        if (edited === cellText) return;
+        const newBlock = editTableCell(original, cell.row, cell.col, edited);
+        if (newBlock !== null) apply(newBlock, edited);
+      },
+      onCancel: (edited) => {
+        if (edited !== cellText) keepUnappliedEdit(edited);
+      },
+    });
+    return;
+  }
+
   startInlineEdit({
     container,
     blockEl,
@@ -1321,21 +1365,7 @@ function handlePreviewBlockEdit({ line, blockEl, word, container }) {
       applyKeymode(inline);
       return inline;
     },
-    onCommit: (edited) => {
-      if (edited === original) return;
-      // The source may have moved on while the edit was open (typing in the
-      // editor, a reload, another tab in this pane). Writing at stale offsets
-      // would corrupt it, so only apply onto exactly what was edited.
-      const intact =
-        pane.editorView === view &&
-        pane.filePath === filePath &&
-        view.state.sliceDoc(from, to) === original;
-      if (!intact) {
-        keepUnappliedEdit(edited);
-        return;
-      }
-      view.dispatch({ changes: { from, to, insert: edited }, userEvent: 'input.preview-edit' });
-    },
+    onCommit: (edited) => apply(edited, edited),
     onCancel: (edited) => {
       if (edited !== original) keepUnappliedEdit(edited);
     },

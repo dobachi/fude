@@ -9,7 +9,12 @@ import { resolveLinkTarget } from './link-target.js';
 import { time, start as startTimer } from './perf-trace.js';
 import { renderBlockHtml, applyBlocks } from './preview-blocks.js';
 import { taskListPlugin, isTaskCheckbox } from './task-list.js';
-import { blockLineRange, topLevelBlockOf, isInsideInlineEditor } from './preview-edit.js';
+import {
+  blockLineRange,
+  topLevelBlockOf,
+  isInsideInlineEditor,
+  tableCellOf,
+} from './preview-edit.js';
 import {
   isQuartoFile,
   applyQuartoExtensions,
@@ -274,7 +279,8 @@ export function sourceLineFromElement(el) {
  *   onFileLink?: (target: {path: string, hash: string}, container: HTMLElement) => void,
  *   onTaskToggle?: (line: number, wasChecked: boolean, container: HTMLElement) => void,
  *   onBlockEdit?: (req: {line: number, blockEl: HTMLElement, word: string,
- *     container: HTMLElement}) => void,
+ *     container: HTMLElement,
+ *     cell: {cellEl: HTMLElement, row: number, col: number} | null}) => void,
  * }} [opts]
  */
 export function initPreview(container, opts = {}) {
@@ -299,7 +305,9 @@ export function initPreview(container, opts = {}) {
     const sel = window.getSelection && window.getSelection();
     const word = sel ? String(sel) : '';
     if (sel) sel.removeAllRanges();
-    opts.onBlockEdit({ line, blockEl, word, container });
+    // Inside a top-level table, the unit of editing is the cell.
+    const cell = tableCellOf(blockEl, e.target);
+    opts.onBlockEdit({ line, blockEl, word, container, cell });
   });
 
   // Intercept ALL link clicks inside the preview. Without this the Tauri
