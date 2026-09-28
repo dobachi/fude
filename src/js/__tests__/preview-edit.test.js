@@ -381,4 +381,65 @@ describe('createInlineEditor', () => {
     expect(commit).toHaveBeenCalledTimes(2);
     view.destroy();
   });
+
+  // Tab used to be unbound here, so the browser moved focus to the next
+  // control and the focusout finished the edit instead of indenting.
+  describe('Tab indents instead of leaving the editor', () => {
+    function press(view, init) {
+      const ev = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+      view.contentDOM.dispatchEvent(ev);
+      return ev;
+    }
+
+    it('Tab indents the list item under the caret', () => {
+      const commit = vi.fn();
+      const src = '- a\n- b';
+      const view = createInlineEditor(parent, src, { commit }, src.length);
+      const ev = press(view, { key: 'Tab' });
+      expect(view.state.doc.toString()).toBe('- a\n  - b');
+      expect(ev.defaultPrevented).toBe(true);
+      expect(commit).not.toHaveBeenCalled();
+      view.destroy();
+    });
+
+    it('Shift+Tab outdents it again', () => {
+      const commit = vi.fn();
+      const src = '- a\n  - b';
+      const view = createInlineEditor(parent, src, { commit }, src.length);
+      const ev = press(view, { key: 'Tab', shiftKey: true });
+      expect(view.state.doc.toString()).toBe('- a\n- b');
+      expect(ev.defaultPrevented).toBe(true);
+      expect(commit).not.toHaveBeenCalled();
+      view.destroy();
+    });
+
+    it('indents every line of a multi-line selection', () => {
+      const src = '- a\n- b\n- c';
+      const view = createInlineEditor(parent, src, { commit: () => {} }, 0);
+      view.dispatch({ selection: { anchor: src.indexOf('- b'), head: src.length } });
+      press(view, { key: 'Tab' });
+      expect(view.state.doc.toString()).toBe('- a\n  - b\n  - c');
+      view.destroy();
+    });
+
+    it('Shift+Tab on an unindented line changes nothing but still keeps focus', () => {
+      const commit = vi.fn();
+      const view = createInlineEditor(parent, '- a', { commit }, 3);
+      const ev = press(view, { key: 'Tab', shiftKey: true });
+      expect(view.state.doc.toString()).toBe('- a');
+      expect(ev.defaultPrevented).toBe(true);
+      expect(commit).not.toHaveBeenCalled();
+      view.destroy();
+    });
+
+    it('Tab in a table block still moves between cells', () => {
+      const src = '| a | b |\n|---|---|\n| c | d |';
+      const view = createInlineEditor(parent, src, { commit: () => {} }, 2);
+      const ev = press(view, { key: 'Tab' });
+      expect(view.state.doc.toString()).not.toMatch(/^\s/);
+      expect(view.state.selection.main.head).toBeGreaterThan(2);
+      expect(ev.defaultPrevented).toBe(true);
+      view.destroy();
+    });
+  });
 });

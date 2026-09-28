@@ -795,7 +795,7 @@ const inlineTheme = EditorView.theme({
  *
  * Mod-Enter and Escape finish the edit. In Vim mode Escape belongs to Vim
  * (the keymode sits at the highest precedence), so Mod-Enter or clicking away
- * finishes it there.
+ * finishes it there. Tab / Shift+Tab indent, as in the main editor.
  *
  * @param {HTMLElement} parent
  * @param {string} content
@@ -840,7 +840,14 @@ export function createInlineEditor(parent, content, handlers, cursor = 0, opts =
         history(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         markdown({ base: markdownLanguage, codeLanguages: languages }),
-        keymap.of([{ key: 'Escape', run: done }, ...defaultKeymap, ...historyKeymap]),
+        // indentWithTab as in the main editor: unbound, Tab is the browser's
+        // focus navigation, which leaves the editor and so finishes the edit.
+        keymap.of([
+          { key: 'Escape', run: done },
+          ...defaultKeymap,
+          ...historyKeymap,
+          indentWithTab,
+        ]),
         autoListExtension(),
         boldKeymap(),
         listKeymap(),
