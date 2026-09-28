@@ -1234,6 +1234,44 @@ body {
   outline: none;
 }
 
+/* "+" in the preview's left margin: write a new block at the boundary it
+   points at. It sits beside the preview (a child of the pane), placed by
+   viewport coordinates, and stays inside the preview's own padding — clear of
+   the editor/preview resizer's grab zone in the split view. */
+.preview-insert-button {
+  position: fixed;
+  z-index: 4;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--fg-accent);
+  border-radius: 50%;
+  background: var(--bg-primary);
+  color: var(--fg-accent);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.preview-insert-button:hover {
+  background: var(--fg-accent);
+  color: var(--bg-primary);
+}
+
+.preview-insert-button[hidden],
+.pane:not(.view-preview):not(.view-split) > .preview-insert-button {
+  display: none;
+}
+
+@media print {
+  .preview-insert-button {
+    display: none;
+  }
+}
+
 /* Task list items: the checkbox replaces the bullet, and clicking it edits the
    source ([ ] ⇄ [x]). */
 .preview-pane li.task-list-item {

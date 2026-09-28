@@ -21,6 +21,7 @@ import {
   isInsideInlineEditor,
   tableCellOf,
 } from './preview-edit.js';
+import { attachInsertButton } from './preview-insert.js';
 import {
   isQuartoFile,
   applyQuartoExtensions,
@@ -295,12 +296,17 @@ export function sourceLineFromElement(el) {
  *   onBlockEdit?: (req: {line: number, blockEl: HTMLElement, word: string,
  *     container: HTMLElement,
  *     cell: {cellEl: HTMLElement, row: number, col: number} | null}) => void,
+ *   onBlockInsert?: (req: {container: HTMLElement, prevEl: Element|null,
+ *     nextEl: Element|null}) => void,
  * }} [opts]
  */
 export function initPreview(container, opts = {}) {
   ensureMd();
   container.setAttribute('tabindex', '0');
   container.addEventListener('keydown', handlePreviewKeys);
+
+  // "+" in the left margin = write a new block here (see preview-insert.js).
+  if (opts.onBlockInsert) attachInsertButton(container, opts.onBlockInsert);
 
   // Double-click = edit here. The top-level block under the pointer is handed
   // to the app, which swaps it for an inline editor on its source (see
@@ -545,6 +551,11 @@ function renderPlantumlDocument(content, container, baseDir) {
     });
 }
 
+/** True if `path` is drawn as one diagram rather than rendered block by block. */
+function isWholeFileDiagram(path) {
+  return (plantumlEnabled && isPlantumlFile(path)) || (mermaidEnabled && isMermaidFile(path));
+}
+
 /**
  * Source line range (1-based, inclusive) of the preview block starting on
  * `line`, parsed the same way the preview renders `filePath`. Null when the
@@ -557,8 +568,7 @@ function renderPlantumlDocument(content, container, baseDir) {
  */
 export function previewBlockRange(content, line, filePath) {
   ensureMd();
-  if (plantumlEnabled && isPlantumlFile(filePath)) return null;
-  if (mermaidEnabled && isMermaidFile(filePath)) return null;
+  if (isWholeFileDiagram(filePath)) return null;
   return blockLineRange(isQuartoFile(filePath) ? qmdMd : md, content, line);
 }
 
@@ -582,6 +592,9 @@ export function previewBlockRange(content, line, filePath) {
  */
 export function renderPreview(content, basePath, container, filePath) {
   if (!container) return;
+  // Read by the preview's "+" button: no blocks, so nothing to write between.
+  if (isWholeFileDiagram(filePath)) container.dataset.wholeFile = 'true';
+  else delete container.dataset.wholeFile;
   if (plantumlEnabled && isPlantumlFile(filePath)) {
     return renderPlantumlDocument(content, container, basePath);
   }

@@ -14,6 +14,7 @@
 import { splitTopLevelBlocks } from './preview-blocks.js';
 
 export const INLINE_EDITOR_CLASS = 'preview-inline-editor';
+export const INSERT_HOLDER_CLASS = 'preview-insert-holder';
 
 /**
  * Source line range of the top-level block that starts on `line`.
@@ -127,10 +128,15 @@ let active = null;
  *
  * @param {object} opts
  * @param {HTMLElement} opts.container preview container (focus returns here)
- * @param {HTMLElement} opts.blockEl the rendered block to swap out
+ * @param {HTMLElement|null} opts.blockEl the rendered block to swap out; null
+ *   only with `insert`, in a preview that has no blocks
  * @param {HTMLElement} [opts.cellEl] edit inside this element instead of
  *   swapping `blockEl` (a table cell: its content is set aside while the
  *   editor sits in it, so the table keeps its layout)
+ * @param {'before'|'after'} [opts.insert] open the editor next to `blockEl`,
+ *   which stays on screen, for a block that does not exist yet. The two share
+ *   a holder that takes the block's place, so this is still one element for
+ *   one.
  * @param {string} opts.text the block's source
  * @param {number} [opts.cursor] initial caret offset
  * @param {(host: HTMLElement, text: string, handlers: {commit: () => void},
@@ -143,16 +149,30 @@ let active = null;
 export function startInlineEdit(opts) {
   commitInlineEdit();
   const { container, blockEl, cellEl } = opts;
-  const doc = blockEl.ownerDocument;
+  const doc = (blockEl || container).ownerDocument;
 
   const host = doc.createElement('div');
   host.className = INLINE_EDITOR_CLASS;
   let saved = null;
+  let holder = null;
   if (cellEl) {
     host.classList.add(`${INLINE_EDITOR_CLASS}--cell`);
     saved = doc.createDocumentFragment();
     while (cellEl.firstChild) saved.appendChild(cellEl.firstChild);
     cellEl.appendChild(host);
+  } else if (opts.insert) {
+    host.classList.add(`${INLINE_EDITOR_CLASS}--insert`);
+    if (blockEl) {
+      // The holder carries no source line of its own: the block inside it
+      // still does, and a second carrier would shift the numbering.
+      holder = doc.createElement('div');
+      holder.className = INSERT_HOLDER_CLASS;
+      blockEl.replaceWith(holder);
+      if (opts.insert === 'before') holder.append(host, blockEl);
+      else holder.append(blockEl, host);
+    } else {
+      container.appendChild(host);
+    }
   } else {
     // Keep scroll sync working while the editor stands in for the block.
     const line = blockEl.getAttribute('data-source-line');
@@ -160,7 +180,7 @@ export function startInlineEdit(opts) {
     blockEl.replaceWith(host);
   }
 
-  const edit = { container, blockEl, cellEl, saved, host, opts, view: null };
+  const edit = { container, blockEl, cellEl, saved, holder, host, opts, view: null };
   active = edit;
 
   edit.view = opts.mountEditor(
@@ -195,6 +215,10 @@ function finish(edit, kind, refocus, moveDir = 0) {
   if (edit.cellEl) {
     edit.host.remove();
     edit.cellEl.appendChild(edit.saved);
+  } else if (edit.holder) {
+    if (edit.holder.isConnected) edit.holder.replaceWith(edit.blockEl);
+  } else if (!edit.blockEl) {
+    edit.host.remove();
   } else if (edit.host.isConnected) {
     edit.host.replaceWith(edit.blockEl);
   }

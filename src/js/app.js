@@ -79,6 +79,7 @@ import {
   previewTableAt,
   tableCellElement,
 } from './core/preview-edit.js';
+import { insertBlockChange, resolveGap, gapAfterLine } from './core/preview-insert.js';
 import { createPreviewScheduler } from './core/preview-scheduler.js';
 import * as perf from './core/perf-trace.js';
 import {
@@ -738,6 +739,7 @@ async function init() {
       onFileLink: handlePreviewFileLink,
       onTaskToggle: handlePreviewTaskToggle,
       onBlockEdit: handlePreviewBlockEdit,
+      onBlockInsert: handlePreviewBlockInsert,
     });
 
   initPanes();
@@ -752,6 +754,7 @@ async function init() {
     onFileLink: handlePreviewFileLink,
     onTaskToggle: handlePreviewTaskToggle,
     onBlockEdit: handlePreviewBlockEdit,
+    onBlockInsert: handlePreviewBlockInsert,
     // Panes added/closed or focus moved: the buttons follow the active pane.
     onActivePaneChange: () => syncViewModeButtons(),
     onEditorCreated: () => {
@@ -1426,6 +1429,58 @@ function handlePreviewBlockEdit({ line, blockEl, word, container, cell, caretAtE
     onCommit: (edited) => apply(edited, edited),
     onCancel: (edited) => {
       if (edited !== original) keepUnappliedEdit(edited);
+    },
+  });
+}
+
+// "+" in the preview's left margin → write a new block at that boundary. An
+// empty inline editor opens there; what is typed goes into the source as a
+// block of its own, as one change (one undo step) to the pane's editor.
+function handlePreviewBlockInsert({ container, prevEl, nextEl }) {
+  const pane = getPaneByPreviewContainer(container) || getActivePane();
+  const view = pane && pane.editorView;
+  if (!view || container.dataset.wholeFile) return;
+
+  // An edit still open goes in first, and its re-render with it, so the
+  // boundary is looked up in the document and the preview as they then stand.
+  commitInlineEdit();
+  previewScheduler.flush(pane);
+
+  const gap = resolveGap(container, prevEl, nextEl);
+  if (!gap) return;
+  const doc = view.state.doc;
+  const text = doc.toString();
+  const filePath = pane.filePath;
+
+  const afterLine = gapAfterLine(gap, doc.lines, (line) => previewBlockRange(text, line, filePath));
+  if (afterLine === null) return;
+
+  startInlineEdit({
+    container,
+    blockEl: gap.el,
+    insert: gap.where,
+    text: '',
+    mountEditor: (host, initial, handlers, cursor) => {
+      const inline = createInlineEditor(host, initial, handlers, cursor);
+      applyKeymode(inline);
+      return inline;
+    },
+    onCommit: (edited) => {
+      const change = insertBlockChange(text, afterLine, edited);
+      if (!change) return;
+      // The line was counted in the document as it was when the editor
+      // opened. If it has changed since (typing in the editor, a reload, the
+      // same file edited in another pane), that line may be somewhere else.
+      const intact =
+        pane.editorView === view && pane.filePath === filePath && view.state.doc.eq(doc);
+      if (!intact) {
+        keepUnappliedEdit(edited);
+        return;
+      }
+      view.dispatch({ changes: change, userEvent: 'input.preview-insert' });
+    },
+    onCancel: (edited) => {
+      if (edited.trim()) keepUnappliedEdit(edited);
     },
   });
 }
