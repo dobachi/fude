@@ -43,6 +43,7 @@
       "../scripts/lib/selfsigned.js": "browser/lib/selfsigned.js",
       "../scripts/lib/body.js": "browser/lib/body.js",
       "../scripts/lib/assets.js": "browser/lib/assets.js",
+      "../scripts/lib/extensions.js": "browser/lib/extensions.js",
       "../scripts/fude-browser": "browser/fude-browser",
       "../scripts/fude-remote": "browser/fude-remote"
     },

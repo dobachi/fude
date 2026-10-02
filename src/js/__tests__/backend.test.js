@@ -422,6 +422,124 @@ describe('backend module (HTTP fallback mode)', () => {
   });
 });
 
+// Browser mode used to fail every install with "only available in the desktop
+// app"; fude-browser now downloads on the server and streams progress back.
+describe('installExtension (HTTP fallback mode)', () => {
+  let originalLocation;
+
+  /** A fetch Response whose body yields `chunks` (strings) as bytes. */
+  function streamResponse(chunks) {
+    const enc = new TextEncoder();
+    let i = 0;
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () =>
+            i < chunks.length ? { done: false, value: enc.encode(chunks[i++]) } : { done: true },
+        }),
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    delete window.__TAURI_INTERNALS__;
+    originalLocation = window.location;
+    delete window.location;
+    window.location = { protocol: 'http:', hostname: 'localhost', origin: 'http://localhost:3000' };
+  });
+
+  afterEach(() => {
+    window.location = originalLocation;
+    delete globalThis.fetch;
+  });
+
+  async function run() {
+    const mod = await import('../backend.js');
+    const calls = { progress: [], done: 0, errors: [] };
+    await mod.installExtension(
+      'mermaid',
+      (p, t) => calls.progress.push([p, t]),
+      () => calls.done++,
+      (e) => calls.errors.push(e.message),
+    );
+    return calls;
+  }
+
+  it('posts to install_extension and relays progress then done', async () => {
+    // An event split across chunks must still be parsed whole.
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        streamResponse([
+          'data: {"status":"progress","progress":5,"total":10}\n\ndata: {"status":"pro',
+          'gress","progress":10,"total":10}\n\n',
+          'data: {"status":"done","progress":10,"total":10}\n\n',
+        ]),
+      );
+    const calls = await run();
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/install_extension',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ id: 'mermaid' }) }),
+    );
+    expect(calls).toEqual({
+      progress: [
+        [5, 10],
+        [10, 10],
+      ],
+      done: 1,
+      errors: [],
+    });
+  });
+
+  it('relays a server-side error event', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        streamResponse(['data: {"status":"error","progress":0,"total":0,"error":"Checksum"}\n\n']),
+      );
+    const calls = await run();
+    expect(calls.done).toBe(0);
+    expect(calls.errors).toEqual(['Checksum']);
+  });
+
+  it('reports a stream that ends without a verdict', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        streamResponse(['data: {"status":"progress","progress":1,"total":9}\n\n']),
+      );
+    const calls = await run();
+    expect(calls.errors).toEqual(['Download interrupted']);
+  });
+
+  it('reports an HTTP failure instead of throwing', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 });
+    const calls = await run();
+    expect(calls.errors).toEqual(['Backend call failed: install_extension']);
+  });
+});
+
+describe('dispatchDownloadEvent', () => {
+  it('routes each status and says when the download ends', async () => {
+    const { dispatchDownloadEvent } = await import('../backend.js');
+    const onProgress = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const d = (p) => dispatchDownloadEvent(p, onProgress, onDone, onError);
+    expect(d({ status: 'progress', progress: 1, total: 2 })).toBe(false);
+    expect(onProgress).toHaveBeenCalledWith(1, 2);
+    expect(d({ status: 'unknown' })).toBe(false);
+    expect(d(null)).toBe(false);
+    expect(d({ status: 'done' })).toBe(true);
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(d({ status: 'error' })).toBe(true);
+    expect(onError.mock.calls[0][0].message).toBe('Download failed');
+  });
+});
+
 describe('retryAfterSeconds', () => {
   it('parses delta-seconds and rejects junk', async () => {
     const { retryAfterSeconds } = await import('../backend.js');

@@ -19,6 +19,7 @@ const netaccess = require('./lib/netaccess');
 const { readBody } = require('./lib/body');
 const assets = require('./lib/assets');
 const selfsigned = require('./lib/selfsigned');
+const extensions = require('./lib/extensions');
 
 const DIST_DIR = process.env.FUDE_DIST_DIR || path.join(__dirname, '..', 'dist');
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'fude');
@@ -31,6 +32,10 @@ const TOKEN_FILE = path.join(CONFIG_DIR, 'browser-token');
 const runtime = {
   openDir: process.env.FUDE_OPEN_DIR || '',
   root: '',
+  // Same place as the desktop app on Linux, so an engine installed by either
+  // is available to both.
+  extensionsDir: path.join(CONFIG_DIR, 'extensions'),
+  fetch: (...args) => fetch(...args),
 };
 
 // Ensure directories exist
@@ -500,6 +505,78 @@ function handleAiChatStream(req, res) {
   });
 }
 
+// ── Downloadable extensions (see lib/extensions.js) ──────────
+// Not path-confined by --root: they touch only the extensions directory, and
+// every id / file name is checked to stay inside it.
+
+api.fetch_extension_manifest = function () {
+  return extensions.fetchManifest(runtime.fetch);
+};
+
+api.extension_status = function ({ id }) {
+  return extensions.status(runtime.extensionsDir, id);
+};
+
+api.extension_file_path = function ({ id, rel }) {
+  return extensions.filePath(runtime.extensionsDir, id, rel);
+};
+
+api.read_extension_file = function ({ id, rel }) {
+  return extensions.readFile(runtime.extensionsDir, id, rel);
+};
+
+api.uninstall_extension = function ({ id }) {
+  return extensions.uninstall(runtime.extensionsDir, id);
+};
+
+/**
+ * Install an extension, streaming progress as server-sent events shaped like
+ * the desktop's `ext-download-*` events: `{status: "progress"|"done"|"error",
+ * progress, total, error?}`.
+ */
+function handleInstallExtension(req, res) {
+  readBody(req, {}, async (bodyErr, body) => {
+    if (bodyErr) {
+      if (!res.headersSent) sendJson(res, 413, { error: bodyErr.message });
+      return;
+    }
+    let args;
+    try {
+      args = body ? JSON.parse(body) : {};
+    } catch {
+      sendJson(res, 400, { error: 'Invalid JSON' });
+      return;
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    });
+    const send = (event) => {
+      if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+
+    // Closing the tab abandons the download; install() then cleans up.
+    const abortController = new AbortController();
+    res.on('close', () => abortController.abort());
+
+    try {
+      const { total } = await extensions.install({
+        root: runtime.extensionsDir,
+        id: args.id,
+        fetchImpl: runtime.fetch,
+        signal: abortController.signal,
+        onProgress: (progress, t) => send({ status: 'progress', progress, total: t }),
+      });
+      send({ status: 'done', progress: total, total });
+    } catch (err) {
+      send({ status: 'error', progress: 0, total: 0, error: err.message });
+    }
+    res.end();
+  });
+}
+
 // Non-streaming AI chat
 api.ai_chat = function () {
   return { error: 'Use ai_chat_stream for AI requests' };
@@ -630,6 +707,10 @@ function createFudeServer({
       handleAiChatStream(req, res);
       return;
     }
+    if (req.method === 'POST' && urlPath === '/api/install_extension') {
+      handleInstallExtension(req, res);
+      return;
+    }
     if (req.method === 'POST' && urlPath === '/api/read_image_file') {
       handleReadImageFile(req, res, root);
       return;
@@ -656,8 +737,14 @@ function createFudeServer({
             sendJson(res, 403, { error: pathError });
             return;
           }
-          const result = handler(args);
-          sendJson(res, 200, result);
+          // Most handlers are synchronous; a few (e.g. the extension
+          // catalogue) go to the network and return a promise.
+          Promise.resolve()
+            .then(() => handler(args))
+            .then(
+              (result) => sendJson(res, 200, result),
+              (err) => sendJson(res, 500, { error: err.message }),
+            );
         } catch (err) {
           sendJson(res, 500, { error: err.message });
         }

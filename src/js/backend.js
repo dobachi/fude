@@ -301,8 +301,31 @@ export async function uninstallExtension(id) {
 }
 
 /**
+ * Route one download event (`{status, progress, total, error}`, the same shape
+ * from the Tauri event and from browser mode's event stream) to the callbacks.
+ * @returns {boolean} true when the event ends the download
+ */
+export function dispatchDownloadEvent(payload, onProgress, onDone, onError) {
+  const { status, progress, total, error } = payload || {};
+  if (status === 'progress') {
+    onProgress(progress, total);
+    return false;
+  }
+  if (status === 'done') {
+    onDone();
+    return true;
+  }
+  if (status === 'error') {
+    onError(new Error(error || 'Download failed'));
+    return true;
+  }
+  return false;
+}
+
+/**
  * Download + install an extension, reporting byte progress.
- * Tauri only (relies on the native downloader).
+ * Desktop: native downloader + Tauri events. Browser mode: fude-browser
+ * downloads on the server and streams the same events back.
  * @param {string} id
  * @param {(progress: number, total: number) => void} onProgress
  * @param {() => void} onDone
@@ -310,7 +333,7 @@ export async function uninstallExtension(id) {
  */
 export async function installExtension(id, onProgress, onDone, onError) {
   if (!isTauriWebview()) {
-    onError(new Error('Extensions are only available in the desktop app'));
+    await installExtensionHttp(id, onProgress, onDone, onError);
     return;
   }
   try {
@@ -320,20 +343,42 @@ export async function installExtension(id, onProgress, onDone, onError) {
     const requestId = `ext_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
     const unlisten = await listen(`ext-download-${requestId}`, (event) => {
-      const { status, progress, total, error } = event.payload;
-      if (status === 'progress') onProgress(progress, total);
-      else if (status === 'done') {
-        unlisten();
-        onDone();
-      } else if (status === 'error') {
-        unlisten();
-        onError(new Error(error || 'Download failed'));
-      }
+      if (dispatchDownloadEvent(event.payload, onProgress, onDone, onError)) unlisten();
     });
 
     await internals.invoke('install_extension', { id, requestId });
   } catch (err) {
-    onError(err instanceof Error ? err : new Error(String(err)));
+    onError(toError(err));
+  }
+}
+
+async function installExtensionHttp(id, onProgress, onDone, onError) {
+  try {
+    const res = await httpApi('install_extension', { id });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let payload;
+        try {
+          payload = JSON.parse(line.slice(6));
+        } catch {
+          continue;
+        }
+        if (dispatchDownloadEvent(payload, onProgress, onDone, onError)) return;
+      }
+    }
+    // The stream ended without a verdict (server stopped mid-download).
+    onError(new Error('Download interrupted'));
+  } catch (err) {
+    onError(toError(err));
   }
 }
 
