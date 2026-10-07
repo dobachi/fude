@@ -1213,6 +1213,43 @@ fn parse_open_args(args: &[String]) -> (Option<String>, Option<String>, bool) {
     (path, remote, new_window)
 }
 
+/// Usage text printed by `fude --help`.
+const CLI_USAGE: &str = "\
+Usage: fude [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  Path to a file or directory to open
+
+Options:
+  -r, --remote <URL>  Connect to a remote Fude server URL (e.g., http://localhost:3000)
+  -n, --new-window    Open the file in a new window instead of reusing the existing one
+  -h, --help          Print help
+  -V, --version       Print version
+";
+
+/// Text to print for an informational flag (`--help` / `--version`), if one is
+/// present in a raw argv slice (argv[0] = executable). When this returns
+/// `Some`, the caller prints it and exits without starting the app: otherwise
+/// tauri-plugin-cli merely records the flag and the window opens anyway (or,
+/// via single-instance, an already-running window gets focused).
+/// The value following `--remote` / `-r` and anything after `--` are operands,
+/// never flags. `--help` wins over `--version` regardless of order.
+fn cli_info_text(args: &[String]) -> Option<String> {
+    let mut version = false;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--" => break,
+            "--remote" | "-r" => i += 1,
+            "--help" | "-h" => return Some(CLI_USAGE.to_string()),
+            "--version" | "-V" => version = true,
+            _ => {}
+        }
+        i += 1;
+    }
+    version.then(|| format!("fude {}\n", env!("CARGO_PKG_VERSION")))
+}
+
 // ─── Multi-window support ──────────────────────────────────
 
 /// A file path or remote URL queued for a window that is about to load. The
@@ -1653,6 +1690,14 @@ async fn install_extension_inner(
 }
 
 pub fn run() {
+    // Answer `--help` / `--version` before Tauri (and single-instance) start,
+    // so no window is opened or focused.
+    let raw_args: Vec<String> = std::env::args().collect();
+    if let Some(text) = cli_info_text(&raw_args) {
+        print!("{}", text);
+        return;
+    }
+
     let mut builder = tauri::Builder::default();
 
     #[cfg(desktop)]
@@ -2272,6 +2317,71 @@ mod tests {
         assert_eq!(restored.entries.len(), 2);
         assert!(restored.entries[0].is_dir);
         assert!(!restored.entries[1].is_dir);
+    }
+
+    // --- cli_info_text ---
+
+    #[test]
+    fn cli_info_text_returns_usage_for_help_flags() {
+        for flag in ["--help", "-h"] {
+            let text = cli_info_text(&args(&["fude", flag])).expect("help text");
+            assert!(text.starts_with("Usage: fude"));
+            assert!(text.contains("--remote"));
+            assert!(text.contains("--new-window"));
+        }
+    }
+
+    #[test]
+    fn cli_info_text_returns_version_for_version_flags() {
+        let expected = format!("fude {}\n", env!("CARGO_PKG_VERSION"));
+        for flag in ["--version", "-V"] {
+            assert_eq!(
+                cli_info_text(&args(&["fude", flag])),
+                Some(expected.clone())
+            );
+        }
+    }
+
+    #[test]
+    fn cli_info_text_none_for_normal_launches() {
+        assert_eq!(cli_info_text(&[]), None);
+        assert_eq!(cli_info_text(&args(&["fude"])), None);
+        assert_eq!(cli_info_text(&args(&["fude", "/a.md"])), None);
+        assert_eq!(
+            cli_info_text(&args(&["fude", "-n", "-r", "http://x.test"])),
+            None
+        );
+        assert_eq!(cli_info_text(&args(&["fude", "--debug"])), None);
+    }
+
+    #[test]
+    fn cli_info_text_finds_help_among_other_args() {
+        assert!(cli_info_text(&args(&["fude", "/a.md", "-n", "--help"])).is_some());
+    }
+
+    #[test]
+    fn cli_info_text_help_wins_over_version() {
+        let text = cli_info_text(&args(&["fude", "--version", "--help"])).unwrap();
+        assert!(text.starts_with("Usage: fude"));
+    }
+
+    #[test]
+    fn cli_info_text_ignores_executable_name() {
+        assert_eq!(cli_info_text(&args(&["--help"])), None);
+    }
+
+    #[test]
+    fn cli_info_text_does_not_treat_remote_value_as_flag() {
+        assert_eq!(cli_info_text(&args(&["fude", "--remote", "-h"])), None);
+        assert_eq!(cli_info_text(&args(&["fude", "-r", "--version"])), None);
+        // A dangling `--remote` at the end must not panic.
+        assert_eq!(cli_info_text(&args(&["fude", "--remote"])), None);
+    }
+
+    #[test]
+    fn cli_info_text_stops_at_double_dash() {
+        assert_eq!(cli_info_text(&args(&["fude", "--", "--help"])), None);
+        assert!(cli_info_text(&args(&["fude", "--help", "--"])).is_some());
     }
 
     // --- parse_open_args ---
