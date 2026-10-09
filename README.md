@@ -64,7 +64,7 @@ debパッケージでインストール後、3つの起動モードが利用で�
 
 ```bash
 fude             # ネイティブGUI (WSLg)
-fude-browser     # ブラウザモード (http://localhost:3000) - 日本語IME対応
+fude-browser     # ブラウザモード (http://localhost:3000) - 日本語IME対応（`fude browser` でも同じ）
 fude-remote      # Windows版を自動取得して起動
 ```
 

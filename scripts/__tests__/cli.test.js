@@ -61,6 +61,29 @@ describe('defaults', () => {
     expect(err(['--port'])).toMatch(/needs a value/);
   });
 
+  it('names the wrapper in usage and refusals by default', () => {
+    expect(parseArgs(['--help']).usage).toContain('  fude-browser [options]');
+    expect(err(['--listen', '0.0.0.0'])).toContain('  fude-browser --listen 0.0.0.0');
+  });
+
+  it('names the invoking command when FUDE_PROG is set', () => {
+    const env = { FUDE_PROG: 'fude browser' };
+    const usage = parseArgs(['--help'], env).usage;
+    expect(usage).toContain('  fude browser [options]');
+    expect(usage).not.toContain('fude-browser');
+
+    expect(err(['--listen', '0.0.0.0'], env)).toContain('  fude browser --listen 0.0.0.0');
+    expect(err(['--listen', '0.0.0.0', '--allow', 'lan'], env)).toContain(
+      '  fude browser --listen 0.0.0.0 --allow lan',
+    );
+    expect(err(['--bogus'], env)).toContain('  fude browser [options]');
+    expect(err(['stray'], env)).toContain('  fude browser [options]');
+  });
+
+  it('falls back to the wrapper name when FUDE_PROG is empty', () => {
+    expect(parseArgs(['--help'], { FUDE_PROG: '' }).usage).toContain('  fude-browser [options]');
+  });
+
   it('--help short-circuits', () => {
     const r = parseArgs(['--help']);
     expect(r.help).toBe(true);

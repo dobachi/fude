@@ -23,6 +23,9 @@
 
 `fude-browser --help` で全オプションが出ます。
 
+`fude-browser` は `fude browser` サブコマンドとしても起動できます（同じサーバ・同じオプション。
+`fude browser --help`）。`fude --help` にもこのサブコマンドへの案内が出ます。
+
 ### 専用のホスト名で開く（`--hostname`）
 
 `localhost` のままだと、ブラウザ拡張（Vimium の除外 URL など）の URL ルールで

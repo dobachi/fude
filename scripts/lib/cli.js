@@ -13,16 +13,19 @@ const netaccess = require('./netaccess');
 const MIN_KEY_LENGTH = 16;
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = '127.0.0.1';
+const DEFAULT_PROG = 'fude-browser';
 
-const USAGE = `Fude browser mode
+// `prog` is how the user invoked us: the `fude-browser` wrapper, or the desktop
+// binary's `fude browser` subcommand (which sets FUDE_PROG).
+const usage = (prog) => `Fude browser mode
 
-  fude-browser [options]
+  ${prog} [options]
 
 Local (default) — reachable only from this machine:
-  fude-browser
+  ${prog}
 
 Expose to a network range — all three are required together:
-  fude-browser --listen 0.0.0.0 --allow 192.168.1.0/24 --root ~/notes
+  ${prog} --listen 0.0.0.0 --allow 192.168.1.0/24 --root ~/notes
 
 Options:
   -l, --listen <addr>     Address to bind (default ${DEFAULT_HOST})
@@ -55,6 +58,8 @@ Environment: FUDE_HOST FUDE_PORT FUDE_ALLOW FUDE_ROOT FUDE_KEY
              (options override these; e.g. set FUDE_HOSTNAME=fude.localhost
              in your shell profile to make it the default)
 `;
+
+const USAGE = usage(DEFAULT_PROG);
 
 const FLAGS = new Set(['--tls', '--no-tls', '--i-know-what-im-doing', '-h', '--help']);
 
@@ -157,10 +162,13 @@ function startupUrls({ scheme, port, key, remote, urlHost = null, addresses = []
 
 /**
  * @param {string[]} argv  Arguments after `node serve.js`.
- * @param {object}   env   Environment (defaults come from here).
+ * @param {object}   env   Environment (defaults come from here). FUDE_PROG
+ *                         names the command shown in usage and error text.
  */
 function parseArgs(argv = [], env = {}) {
   const raw = {};
+  const prog = env.FUDE_PROG || DEFAULT_PROG;
+  const USAGE = usage(prog);
 
   for (let i = 0; i < argv.length; i++) {
     let arg = argv[i];
@@ -212,7 +220,7 @@ function parseArgs(argv = [], env = {}) {
       `--allow is required when listening on a non-loopback address (${host}).\n` +
         `This API can read and write your files, so the set of machines that may\n` +
         `reach it has to be stated explicitly. For example:\n\n` +
-        `  fude-browser --listen ${host} --allow 192.168.1.0/24 --root ~/notes\n\n` +
+        `  ${prog} --listen ${host} --allow 192.168.1.0/24 --root ~/notes\n\n` +
         `Presets: lan, tailscale, localhost`,
     );
   }
@@ -230,7 +238,7 @@ function parseArgs(argv = [], env = {}) {
     return fail(
       `--root is required when listening on a non-loopback address (${host}).\n` +
         `Without it, anyone holding the key can read and write anything you can.\n\n` +
-        `  fude-browser --listen ${host} --allow ${allowSpec} --root ~/notes\n\n` +
+        `  ${prog} --listen ${host} --allow ${allowSpec} --root ~/notes\n\n` +
         `To expose your whole home directory anyway:\n` +
         `  --root ~ --i-know-what-im-doing`,
     );

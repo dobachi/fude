@@ -60,7 +60,7 @@ After installing the deb package, three launch modes are available:
 
 ```bash
 fude             # Native GUI (WSLg)
-fude-browser     # Browser mode (http://localhost:3000) - full IME support
+fude-browser     # Browser mode (http://localhost:3000) - full IME support (same as `fude browser`)
 fude-remote      # Auto-downloads and launches Windows version
 ```
 

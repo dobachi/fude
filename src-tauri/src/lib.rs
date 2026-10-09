@@ -1216,6 +1216,7 @@ fn parse_open_args(args: &[String]) -> (Option<String>, Option<String>, bool) {
 /// Usage text printed by `fude --help`.
 const CLI_USAGE: &str = "\
 Usage: fude [OPTIONS] [PATH]
+       fude browser [BROWSER OPTIONS]
 
 Arguments:
   [PATH]  Path to a file or directory to open
@@ -1225,6 +1226,12 @@ Options:
   -n, --new-window    Open the file in a new window instead of reusing the existing one
   -h, --help          Print help
   -V, --version       Print version
+
+Commands:
+  browser  Serve Fude over HTTP and use it from a web browser (needs Node.js).
+           Options cover the listen address, which IP ranges may connect
+           (--allow), the access key and TLS: see `fude browser --help`.
+           To open a file that is itself named \"browser\", pass ./browser.
 ";
 
 /// Text to print for an informational flag (`--help` / `--version`), if one is
@@ -1248,6 +1255,103 @@ fn cli_info_text(args: &[String]) -> Option<String> {
         i += 1;
     }
     version.then(|| format!("fude {}\n", env!("CARGO_PKG_VERSION")))
+}
+
+// ─── `fude browser` subcommand ─────────────────────────────
+
+/// Name of the subcommand that runs browser mode (`scripts/serve.js`).
+const BROWSER_SUBCOMMAND: &str = "browser";
+
+/// The arguments to hand to browser mode when argv (argv[0] = executable) is a
+/// `fude browser ...` invocation; `None` for everything else. The subcommand is
+/// only recognised as the first argument, so `fude notes/browser` and
+/// `fude ./browser` still open a file.
+fn browser_subcommand_args(args: &[String]) -> Option<&[String]> {
+    match args.get(1) {
+        Some(a) if a == BROWSER_SUBCOMMAND => Some(&args[2..]),
+        _ => None,
+    }
+}
+
+/// Where browser mode's server script and its static files live.
+#[derive(Debug, Clone, PartialEq)]
+struct BrowserAssets {
+    serve: PathBuf,
+    dist: PathBuf,
+}
+
+/// Places browser mode may be installed, relative to the directory holding the
+/// executable, in the order they are tried. Bundled layouts keep `serve.js`
+/// and the static files together (see `bundle.resources` in tauri.conf.json);
+/// a development build runs from `src-tauri/target/<profile>/` and uses the
+/// repository's `scripts/` and `dist/`.
+fn browser_asset_candidates(exe_dir: &Path) -> Vec<BrowserAssets> {
+    let bundled = |dir: PathBuf| BrowserAssets {
+        serve: dir.join("serve.js"),
+        dist: dir,
+    };
+    let mut out = vec![
+        // Windows install / portable layout.
+        bundled(exe_dir.join("browser")),
+        // macOS: Fude.app/Contents/MacOS/fude -> Contents/Resources/browser.
+        bundled(exe_dir.join("../Resources/browser")),
+        // Linux deb / rpm / AppImage: usr/bin/fude -> usr/lib/Fude/browser.
+        bundled(exe_dir.join("../lib/Fude/browser")),
+        bundled(exe_dir.join("../lib/fude/browser")),
+    ];
+    let repo = exe_dir.join("../../..");
+    out.push(BrowserAssets {
+        serve: repo.join("scripts/serve.js"),
+        dist: repo.join("dist"),
+    });
+    out
+}
+
+/// First candidate whose server script and static files both exist.
+fn find_browser_assets(exe_dir: &Path) -> Option<BrowserAssets> {
+    browser_asset_candidates(exe_dir)
+        .into_iter()
+        .find(|c| c.serve.is_file() && c.dist.join("index.html").is_file())
+}
+
+/// Run browser mode with `args` and return the process exit code. On Unix the
+/// Node process replaces this one, so this only returns on failure.
+fn run_browser_subcommand(args: &[String]) -> i32 {
+    let exe = std::env::current_exe().and_then(|p| p.canonicalize());
+    let assets = exe
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .and_then(|dir| find_browser_assets(&dir));
+    let Some(assets) = assets else {
+        eprintln!(
+            "fude browser: browser mode files (serve.js) were not found next to this binary."
+        );
+        return 1;
+    };
+
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg(&assets.serve)
+        .args(args)
+        .env("FUDE_DIST_DIR", &assets.dist)
+        .env("FUDE_PROG", "fude browser");
+
+    #[cfg(unix)]
+    let err = {
+        use std::os::unix::process::CommandExt;
+        cmd.exec()
+    };
+    #[cfg(not(unix))]
+    let err = match cmd.status() {
+        Ok(status) => return status.code().unwrap_or(1),
+        Err(e) => e,
+    };
+
+    if err.kind() == std::io::ErrorKind::NotFound {
+        eprintln!("fude browser: Node.js is required but `node` was not found in PATH.");
+        return 127;
+    }
+    eprintln!("fude browser: failed to start node: {}", err);
+    1
 }
 
 // ─── Multi-window support ──────────────────────────────────
@@ -1690,9 +1794,14 @@ async fn install_extension_inner(
 }
 
 pub fn run() {
-    // Answer `--help` / `--version` before Tauri (and single-instance) start,
-    // so no window is opened or focused.
+    // Answer `--help` / `--version` and run `fude browser` before Tauri (and
+    // single-instance) start, so no window is opened or focused.
     let raw_args: Vec<String> = std::env::args().collect();
+    // `fude browser ...` is a different program (the HTTP server); its own
+    // `--help` must reach it, so this is checked first.
+    if let Some(rest) = browser_subcommand_args(&raw_args) {
+        std::process::exit(run_browser_subcommand(rest));
+    }
     if let Some(text) = cli_info_text(&raw_args) {
         print!("{}", text);
         return;
@@ -2382,6 +2491,140 @@ mod tests {
     fn cli_info_text_stops_at_double_dash() {
         assert_eq!(cli_info_text(&args(&["fude", "--", "--help"])), None);
         assert!(cli_info_text(&args(&["fude", "--help", "--"])).is_some());
+    }
+
+    // --- fude browser subcommand ---
+
+    #[test]
+    fn cli_usage_points_to_browser_mode_help() {
+        let text = cli_info_text(&args(&["fude", "--help"])).unwrap();
+        assert!(text.contains("fude browser --help"));
+        assert!(text.contains("--allow"));
+    }
+
+    #[test]
+    fn browser_subcommand_args_returns_the_rest() {
+        let a = args(&["fude", "browser", "--listen", "0.0.0.0", "--help"]);
+        assert_eq!(browser_subcommand_args(&a), Some(&a[2..]),);
+        let bare = args(&["fude", "browser"]);
+        assert_eq!(browser_subcommand_args(&bare), Some(&bare[2..]));
+        assert!(browser_subcommand_args(&bare).unwrap().is_empty());
+    }
+
+    #[test]
+    fn browser_subcommand_args_only_matches_first_argument() {
+        assert_eq!(browser_subcommand_args(&[]), None);
+        assert_eq!(browser_subcommand_args(&args(&["fude"])), None);
+        assert_eq!(browser_subcommand_args(&args(&["browser"])), None);
+        assert_eq!(
+            browser_subcommand_args(&args(&["fude", "/a.md", "browser"])),
+            None
+        );
+        assert_eq!(
+            browser_subcommand_args(&args(&["fude", "-n", "browser"])),
+            None
+        );
+        assert_eq!(
+            browser_subcommand_args(&args(&["fude", "--help", "browser"])),
+            None
+        );
+        // Files that merely look like the subcommand still open as files.
+        assert_eq!(browser_subcommand_args(&args(&["fude", "./browser"])), None);
+        assert_eq!(
+            browser_subcommand_args(&args(&["fude", "browser.md"])),
+            None
+        );
+        assert_eq!(browser_subcommand_args(&args(&["fude", "Browser"])), None);
+    }
+
+    fn touch(path: &Path) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "").unwrap();
+    }
+
+    #[test]
+    fn find_browser_assets_none_when_nothing_installed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe_dir = tmp.path().join("usr/bin");
+        fs::create_dir_all(&exe_dir).unwrap();
+        assert_eq!(find_browser_assets(&exe_dir), None);
+    }
+
+    #[test]
+    fn find_browser_assets_finds_linux_bundle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe_dir = tmp.path().join("usr/bin");
+        fs::create_dir_all(&exe_dir).unwrap();
+        let browser = tmp.path().join("usr/lib/Fude/browser");
+        touch(&browser.join("serve.js"));
+        touch(&browser.join("index.html"));
+
+        let found = find_browser_assets(&exe_dir).expect("assets");
+        assert_eq!(
+            found.serve.canonicalize().unwrap(),
+            browser.join("serve.js").canonicalize().unwrap()
+        );
+        assert_eq!(
+            found.dist.canonicalize().unwrap(),
+            browser.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn find_browser_assets_finds_dir_next_to_executable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let browser = tmp.path().join("browser");
+        touch(&browser.join("serve.js"));
+        touch(&browser.join("index.html"));
+
+        let found = find_browser_assets(tmp.path()).expect("assets");
+        assert_eq!(found.serve, browser.join("serve.js"));
+        assert_eq!(found.dist, browser);
+    }
+
+    #[test]
+    fn find_browser_assets_finds_dev_checkout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe_dir = tmp.path().join("src-tauri/target/debug");
+        fs::create_dir_all(&exe_dir).unwrap();
+        touch(&tmp.path().join("scripts/serve.js"));
+        touch(&tmp.path().join("dist/index.html"));
+
+        let found = find_browser_assets(&exe_dir).expect("assets");
+        assert_eq!(
+            found.serve.canonicalize().unwrap(),
+            tmp.path().join("scripts/serve.js").canonicalize().unwrap()
+        );
+        assert_eq!(
+            found.dist.canonicalize().unwrap(),
+            tmp.path().join("dist").canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn find_browser_assets_skips_incomplete_install() {
+        // serve.js without the static files (or the reverse) cannot serve anything.
+        let tmp = tempfile::tempdir().unwrap();
+        touch(&tmp.path().join("browser/serve.js"));
+        assert_eq!(find_browser_assets(tmp.path()), None);
+
+        let tmp = tempfile::tempdir().unwrap();
+        touch(&tmp.path().join("browser/index.html"));
+        assert_eq!(find_browser_assets(tmp.path()), None);
+    }
+
+    #[test]
+    fn find_browser_assets_prefers_bundle_over_later_candidates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe_dir = tmp.path().join("a/b/c");
+        fs::create_dir_all(&exe_dir).unwrap();
+        touch(&exe_dir.join("browser/serve.js"));
+        touch(&exe_dir.join("browser/index.html"));
+        touch(&tmp.path().join("scripts/serve.js"));
+        touch(&tmp.path().join("dist/index.html"));
+
+        let found = find_browser_assets(&exe_dir).expect("assets");
+        assert_eq!(found.dist, exe_dir.join("browser"));
     }
 
     // --- parse_open_args ---
