@@ -5,6 +5,7 @@ import {
   normalizeInputPath,
   fileDirForTree,
   isWithinDir,
+  parentDir,
   resolveRevealDir,
   canonicalPath,
   samePath,
@@ -247,5 +248,47 @@ describe('canonicalPath / samePath', () => {
   it('isWithinDir も別名違いを吸収する', () => {
     expect(isWithinDir(legacy, '\\\\wsl.localhost\\Ubuntu-22.04\\home\\me\\notes')).toBe(true);
     expect(isWithinDir(modern, '\\\\wsl$\\Ubuntu-22.04\\home\\me')).toBe(true);
+  });
+});
+
+describe('parentDir（ファイラを一つ上へ）', () => {
+  it('POSIX パスの親を返す', () => {
+    expect(parentDir('/home/me/notes')).toBe('/home/me');
+    expect(parentDir('/home/me')).toBe('/home');
+    expect(parentDir('/home')).toBe('/');
+  });
+
+  it('末尾の区切りは無視する', () => {
+    expect(parentDir('/home/me/notes/')).toBe('/home/me');
+    expect(parentDir('C:\\notes\\sub\\')).toBe('C:\\notes');
+    expect(parentDir('  /home/me  ')).toBe('/home');
+  });
+
+  it('Windows パスの親を返し、ドライブ直下では区切りを残す', () => {
+    expect(parentDir('C:\\notes\\sub')).toBe('C:\\notes');
+    expect(parentDir('C:\\notes')).toBe('C:\\');
+    expect(parentDir('C:/notes')).toBe('C:/');
+  });
+
+  it('ルートより上は無い', () => {
+    expect(parentDir('/')).toBe('');
+    expect(parentDir('C:\\')).toBe('');
+    expect(parentDir('C:')).toBe('');
+  });
+
+  it('空・相対名は上へ行けない', () => {
+    expect(parentDir('')).toBe('');
+    expect(parentDir(null)).toBe('');
+    expect(parentDir(undefined)).toBe('');
+    expect(parentDir('notes')).toBe('');
+  });
+
+  it('UNC は共有ルートで止まる（サーバ名だけのパスへは上がらない）', () => {
+    expect(parentDir('\\\\wsl.localhost\\Ubuntu\\home\\me')).toBe(
+      '\\\\wsl.localhost\\Ubuntu\\home',
+    );
+    expect(parentDir('\\\\wsl.localhost\\Ubuntu\\home')).toBe('\\\\wsl.localhost\\Ubuntu');
+    expect(parentDir('\\\\wsl.localhost\\Ubuntu')).toBe('');
+    expect(parentDir('\\\\wsl.localhost\\Ubuntu\\')).toBe('');
   });
 });

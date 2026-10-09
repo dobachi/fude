@@ -133,6 +133,7 @@ const {
 import {
   initSidebar,
   loadDirectory,
+  expandDir,
   toggleSidebar,
   highlightFile,
   getShowAllFiles,
@@ -167,7 +168,7 @@ import { openSettings } from './settings.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
 import { isOpenFileShortcut, isGoToPathShortcut, isPrintShortcut } from './core/open-shortcuts.js';
-import { normalizeInputPath, resolveRevealDir } from './core/pathnorm.js';
+import { normalizeInputPath, parentDir, resolveRevealDir } from './core/pathnorm.js';
 
 import { isLocalTauri } from './backend.js';
 import { showAuthBanner } from './core/auth-banner.js';
@@ -771,6 +772,8 @@ async function init() {
       onSettingsChange: handleSidebarSettingsChange,
       onContextMenu: handleFileContextMenu,
       onRootClick: (path) => copyText(path),
+      onRootUp: handleFilerGoUp,
+      onOpenFolder: handleOpenFolder,
     });
 
   // Init outline (document headings) below the file tree.
@@ -1837,6 +1840,39 @@ async function revealFileDir(filePath) {
   }
 }
 
+/**
+ * Sidebar "up" button / menu: re-root the file tree at the parent of the open
+ * folder. The folder we came from stays expanded so the view is not lost.
+ */
+async function handleFilerGoUp() {
+  if (!vaultPath) {
+    showToast('フォルダを開いてから実行してください', { type: 'error' });
+    return;
+  }
+  const parent = parentDir(vaultPath);
+  if (!parent) {
+    showToast('これより上のフォルダはありません');
+    return;
+  }
+  const from = vaultPath.length > 1 ? vaultPath.replace(/[/\\]+$/, '') : vaultPath;
+  try {
+    const tree = await backend.readDirTree(parent, getShowAllFiles());
+    expandDir(from);
+    setVaultPath(parent);
+    loadDirectory(tree);
+    const tab = getActiveTab();
+    if (tab && tab.path) highlightFile(tab.path);
+    watchVault(vaultPath);
+    scheduleSessionSave();
+  } catch (e) {
+    console.error('Failed to open parent directory:', e);
+    showToast(`上のフォルダを開けませんでした: ${e?.message || e}`, {
+      type: 'error',
+      duration: 8000,
+    });
+  }
+}
+
 /** Ctrl+Shift+U / menu: reveal the active tab's folder in the file tree. */
 function handleRevealActiveFileDir() {
   const tab = getActiveTab();
@@ -2352,6 +2388,7 @@ function buildMenuDefinition() {
         { label: 'ファイルを開く', shortcut: 'Ctrl+O', action: handleOpenFile },
         { label: 'フォルダを開く', shortcut: 'Ctrl+Shift+O', action: handleOpenFolder },
         { label: 'パスを開く', shortcut: 'Ctrl+Shift+P', action: handleGoToPath },
+        { label: 'ファイラを一つ上のフォルダへ', action: handleFilerGoUp },
         ...(isLocalTauri()
           ? [
               {

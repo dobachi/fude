@@ -676,6 +676,13 @@ body {
   color: var(--fg-primary);
 }
 
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: none;
+  color: var(--fg-secondary);
+}
+
 /* ===== Main Area ===== */
 #main {
   display: flex;

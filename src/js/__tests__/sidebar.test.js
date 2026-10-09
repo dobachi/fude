@@ -74,6 +74,114 @@ describe('sidebar module', () => {
       expect(onRootClick).toHaveBeenCalledWith('/home/me/vault');
     });
 
+    describe('up button (move the root one folder up)', () => {
+      const upHtml = rootHtml.replace(
+        '</button></div>',
+        '</button><button id="sidebar-up-btn" class="icon-btn" disabled></button></div>',
+      );
+
+      it('is disabled until a folder with a parent is open', () => {
+        document.body.innerHTML = upHtml;
+        mod.initSidebar(document.getElementById('file-tree'), vi.fn());
+        const up = document.getElementById('sidebar-up-btn');
+        expect(up.disabled).toBe(true);
+        expect(up.title).toBe('');
+
+        mod.setRootPath('/home/me/vault');
+        expect(up.disabled).toBe(false);
+        expect(up.title).toContain('/home/me');
+
+        mod.setRootPath('');
+        expect(up.disabled).toBe(true);
+      });
+
+      it('is disabled at a filesystem root', () => {
+        document.body.innerHTML = upHtml;
+        mod.initSidebar(document.getElementById('file-tree'), vi.fn());
+        const up = document.getElementById('sidebar-up-btn');
+        mod.setRootPath('/');
+        expect(up.disabled).toBe(true);
+        mod.setRootPath('C:\\');
+        expect(up.disabled).toBe(true);
+        mod.setRootPath('/home');
+        expect(up.disabled).toBe(false);
+      });
+
+      it('clicking calls onRootUp only when there is a parent', () => {
+        document.body.innerHTML = upHtml;
+        const onRootUp = vi.fn();
+        mod.initSidebar(document.getElementById('file-tree'), vi.fn(), { onRootUp });
+        const up = document.getElementById('sidebar-up-btn');
+
+        // A disabled button swallows real clicks; dispatch to hit the guard too.
+        up.disabled = false;
+        up.click();
+        expect(onRootUp).not.toHaveBeenCalled();
+
+        mod.setRootPath('/home/me/vault');
+        up.click();
+        expect(onRootUp).toHaveBeenCalledTimes(1);
+      });
+
+      it('does not throw on click without an onRootUp handler', () => {
+        document.body.innerHTML = upHtml;
+        mod.initSidebar(document.getElementById('file-tree'), vi.fn());
+        mod.setRootPath('/home/me/vault');
+        expect(() => document.getElementById('sidebar-up-btn').click()).not.toThrow();
+      });
+    });
+
+    it('the open-folder button calls onOpenFolder, with or without a folder open', () => {
+      document.body.innerHTML = rootHtml.replace(
+        '</button></div>',
+        '</button><button id="sidebar-open-btn" class="icon-btn"></button></div>',
+      );
+      const onOpenFolder = vi.fn();
+      mod.initSidebar(document.getElementById('file-tree'), vi.fn(), { onOpenFolder });
+      const btn = document.getElementById('sidebar-open-btn');
+
+      btn.click();
+      expect(onOpenFolder).toHaveBeenCalledTimes(1);
+
+      mod.setRootPath('/home/me/vault');
+      btn.click();
+      expect(onOpenFolder).toHaveBeenCalledTimes(2);
+    });
+
+    it('the open-folder button does not throw without a handler', () => {
+      document.body.innerHTML = rootHtml.replace(
+        '</button></div>',
+        '</button><button id="sidebar-open-btn" class="icon-btn"></button></div>',
+      );
+      mod.initSidebar(document.getElementById('file-tree'), vi.fn());
+      expect(() => document.getElementById('sidebar-open-btn').click()).not.toThrow();
+    });
+
+    it('expandDir keeps a directory open on the next render', () => {
+      const tree = [
+        {
+          name: 'vault',
+          path: '/home/me/vault',
+          is_dir: true,
+          children: [{ name: 'a.md', path: '/home/me/vault/a.md', is_dir: false }],
+        },
+        {
+          name: 'other',
+          path: '/home/me/other',
+          is_dir: true,
+          children: [{ name: 'b.md', path: '/home/me/other/b.md', is_dir: false }],
+        },
+      ];
+      mod.initSidebar(document.getElementById('file-tree'), vi.fn());
+      mod.expandDir('/home/me/vault');
+      mod.expandDir('');
+      mod.loadDirectory(tree);
+
+      const dirs = [...document.querySelectorAll('.tree-dir')];
+      const open = dirs.filter((d) => d.classList.contains('open')).map((d) => d.dataset.path);
+      expect(open).toEqual(['/home/me/vault']);
+    });
+
     it('does not throw when the header element is absent', () => {
       mod.initSidebar(document.getElementById('file-tree'), vi.fn());
       expect(() => mod.setRootPath('/x')).not.toThrow();

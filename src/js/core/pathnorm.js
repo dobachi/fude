@@ -114,6 +114,24 @@ function trimTrailingSep(path) {
 }
 
 /**
+ * Parent of a directory, for moving the file tree one level up. Trailing
+ * separators are ignored and roots keep their separator (`/home` -> `/`,
+ * `C:\\notes` -> `C:\\`). Returns '' when there is nowhere further up: an
+ * empty path, a filesystem root, a relative name, or a UNC share root
+ * (`\\\\server\\share` — the server alone is not a directory).
+ *
+ * @param {string} dir
+ * @returns {string}
+ */
+export function parentDir(dir) {
+  const d = trimTrailingSep(String(dir ?? '').trim());
+  const parent = fileDirForTree(d);
+  if (!parent || parent === d) return '';
+  if (/^[/\\]{2}/.test(d) && parent.split(/[/\\]+/).filter(Boolean).length < 2) return '';
+  return parent;
+}
+
+/**
  * Whether `child` is `parent` itself or lives somewhere below it. Trailing
  * separators are ignored; empty paths are never inside anything. Comparison is
  * case-sensitive (Fude's target platforms are Linux/WSL).

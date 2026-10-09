@@ -1,7 +1,7 @@
 // sidebar.js - Directory tree sidebar
 
 import { createListKeyHandler } from './list-nav.js';
-import { samePath } from './pathnorm.js';
+import { parentDir, samePath } from './pathnorm.js';
 
 let fileTreeContainer = null;
 let onFileSelect = null;
@@ -15,6 +15,8 @@ let showAllFiles = false;
 let onSettingsChange = null;
 let onContextMenu = null;
 let onRootClick = null;
+let onRootUp = null;
+let onOpenFolder = null;
 let rootPath = '';
 
 const ROOT_EMPTY_TEXT = 'フォルダ未選択';
@@ -40,6 +42,8 @@ export function initSidebar(container, fileSelectCallback, opts) {
     if (opts.onSettingsChange) onSettingsChange = opts.onSettingsChange;
     if (opts.onContextMenu) onContextMenu = opts.onContextMenu;
     if (opts.onRootClick) onRootClick = opts.onRootClick;
+    if (opts.onRootUp) onRootUp = opts.onRootUp;
+    if (opts.onOpenFolder) onOpenFolder = opts.onOpenFolder;
   }
 
   initRootLabel();
@@ -153,10 +157,29 @@ function initRootLabel() {
   el.addEventListener('click', () => {
     if (rootPath && onRootClick) onRootClick(rootPath);
   });
+  const open = document.getElementById('sidebar-open-btn');
+  if (open) {
+    open.addEventListener('click', () => {
+      if (onOpenFolder) onOpenFolder();
+    });
+  }
+  const up = document.getElementById('sidebar-up-btn');
+  if (up) {
+    up.addEventListener('click', () => {
+      if (parentDir(rootPath) && onRootUp) onRootUp();
+    });
+  }
   renderRoot();
 }
 
 function renderRoot() {
+  // The "up" button is only live while there is a folder above the root.
+  const up = document.getElementById('sidebar-up-btn');
+  if (up) {
+    const parent = parentDir(rootPath);
+    up.disabled = !parent;
+    up.title = parent ? `一つ上のフォルダへ: ${parent}` : '';
+  }
   const el = document.getElementById('sidebar-root');
   if (!el) return;
   if (rootPath) {
@@ -178,6 +201,14 @@ export function setRootPath(path) {
 
 export function getRootPath() {
   return rootPath;
+}
+
+/**
+ * Mark a directory as expanded for the next render, e.g. the previous root
+ * after moving the tree one level up, so the user keeps their place.
+ */
+export function expandDir(path) {
+  if (path) openDirs.add(path);
 }
 
 function saveSettings() {
