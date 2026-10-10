@@ -9,6 +9,7 @@ mod agent;
 mod args;
 mod discover;
 mod run;
+mod tui;
 mod watch;
 
 use std::path::PathBuf;
@@ -34,12 +35,10 @@ fn main() {
         eprintln!("fude-cli: nothing to open\n\n{}", args::USAGE);
         std::process::exit(2);
     }
-    if args.tui {
-        eprintln!("fude-cli: the terminal UI is not implemented yet");
-        std::process::exit(2);
-    }
-
     let paths = run::absolute_paths(&args.paths);
+    if args.tui {
+        std::process::exit(run_tui(&paths));
+    }
     let candidates = socket_candidates();
 
     // The parent of a detached agent only checks that a GUI answers, so a
@@ -47,11 +46,12 @@ fn main() {
     let conn = match run::connect(&candidates) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("fude-cli: {}", e);
-            if !args.gui {
-                eprintln!("fude-cli: (the terminal UI fallback is not implemented yet)");
+            if args.gui {
+                eprintln!("fude-cli: {}", e);
+                std::process::exit(2);
             }
-            std::process::exit(2);
+            // No GUI answers: fall back to the terminal UI (viewer for now).
+            std::process::exit(run_tui(&paths));
         }
     };
 
@@ -68,6 +68,20 @@ fn main() {
 
     // A detached agent logs what it serves; `--wait` stays quiet for $EDITOR.
     std::process::exit(run::serve(conn, paths, args.foreground));
+}
+
+/// The terminal UI: currently a read-only viewer of one file.
+fn run_tui(paths: &[String]) -> i32 {
+    let [path] = paths else {
+        eprintln!("fude-cli: the terminal UI shows one file at a time");
+        return 2;
+    };
+    let p = std::path::Path::new(path);
+    if p.is_dir() {
+        eprintln!("fude-cli: the terminal UI cannot open a directory yet");
+        return 2;
+    }
+    tui::run_viewer(p)
 }
 
 fn cache_dir() -> PathBuf {

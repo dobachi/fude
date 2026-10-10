@@ -325,6 +325,19 @@ GUI 版と同じ配置にする。
 
 JS 側は残す（GUI は引き続き JS で動く）。二重実装のコストはテストベクタの共有で抑える（§7）。
 
+### 5.4.1 実装（2026-10-10、ビューア v0）
+
+`crates/fude-cli/src/tui/`:
+
+| ファイル | 役割 |
+| --- | --- |
+| `render.rs` | comrak の AST → ratatui の行。幅で折り返し済み（全角は 2 桁）、各行にソース行番号を付ける。見出し（`#` を外して色＋太字）、段落、タイト/ルーズなリスト（`•` / `1.` / `☐ ☑`、ぶら下げ）、コードブロック（背景色、言語名を右寄せ）、引用（`▎`）、表（罫線、幅に収まるまで最長列を縮める、右寄せ/中央）、水平線、front matter、画像 `[image: alt]`、リンク（下線）、wikilink |
+| `mod.rs` | ビューア本体。`Viewer`（状態・キー→`Action`・描画）は `TestBackend` でテスト可能。`run_viewer` が端末を初期化し、100ms ごとに入力と `watch::Watcher` の変更通知を見てリロード |
+
+起動: `fude-cli --tui file.md`、または GUI に接続できなかったときのフォールバック。
+キー: `q` / Esc / Ctrl+C 終了、`j` `k` ↑↓ 1 行、Ctrl+D/U 半ページ、Space / PageDown / Ctrl+F・Ctrl+B ページ、
+`g` / `G` 先頭末尾、`r` 再読込、マウスホイール。
+
 ### 5.5 プレビューの描画
 
 comrak の AST を ratatui の `Text` に変換する。
@@ -408,7 +421,7 @@ CLAUDE.md の「テストの無い変更は未完成」に従う。
 | 0 ✅ | ローカル `fude --wait`（§3）。GUI 側のソケット listen とプロトコル確定 | ローカルの Claude Code / git から Fude を `$EDITOR` にできる |
 | 1 ✅ | `fude-core` 切り出し（§2.3）。既存テスト green を維持 | Tauri 非依存のライブラリ |
 | 2 ✅ | `fude-cli` エージェント（§4）。unix socket 逆転送、`--root` 相当の範囲制限 | ssh 先で `fude-cli file.md` が操作側 GUI に開く（切断時の退避・セッション復元は未着手） |
-| 3 | TUI ビューア: `fude-cli --tui --preview file.md`。描画 + 監視でライブ更新 | エージェントの出力を端末で眺められる |
+| 3 ✅ | TUI ビューア: `fude-cli --tui file.md`。描画 + 監視でライブ更新 | エージェントの出力を端末で眺められる |
 | 4 | TUI エディタ v1: Normal キーモード、分割表示、ツリー、タブ、セッション、暫定保存、検索 | 転送が無くても編集できる |
 | 5 | TUI v2: Vim / Emacs、リスト・チェックボックス・表、アウトライン | GUI と同じ操作感 |
 | 6 | TUI v3: ペイン分割、画像、git ガター（`features/diff-highlight.js` の TUI 版） | |

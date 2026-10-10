@@ -109,6 +109,10 @@ for that file and exits when the tab is closed.
 4. `ssh dev`, then `fude-cli notes.md` (add `--wait` to use it as `$EDITOR`)
 
 Only the directory of each file you pass (or the directory itself) is exposed.
+
+When no GUI answers (no forward, or Fude is not running on your machine) it falls back
+to an in-terminal viewer (`fude-cli --tui file.md` forces it): rendered Markdown that
+follows changes on disk. `q` quits, `j`/`k` scroll. Editing is planned.
 See [docs/TUI_DESIGN.md](docs/TUI_DESIGN.md) for the design.
 
 ### View modes
