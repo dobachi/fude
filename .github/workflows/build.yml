@@ -103,7 +103,7 @@ jobs:
         with:
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('Fude {0}', github.ref_name) || '' }}
-          releaseBody: 'Download the portable exe (Windows), AppImage (Linux), or dmg (macOS).'
+          releaseBody: 'Download the portable exe (Windows), AppImage (Linux), or dmg (macOS). fude-cli-* is the remote agent / terminal viewer for servers.'
           # Keep the release in draft state during the matrix build. The
           # release was pre-created (draft) by prepare-release, so every
           # matrix job sees "Found release" and just uploads. We flip the
@@ -117,6 +117,25 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload ${{ github.ref_name }} src-tauri/target/release/fude.exe --clobber
+
+      # fude-cli: the remote agent / terminal UI. A single binary with no GUI
+      # dependencies, so it is published on its own for copying to servers.
+      - name: Build fude-cli
+        run: cd src-tauri && cargo build --release -p fude-cli
+
+      - name: Upload fude-cli to release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          arch="$(uname -m)"
+          case "${{ matrix.target }}" in
+            windows) src=src-tauri/target/release/fude-cli.exe; name="fude-cli-windows-${arch}.exe" ;;
+            *)       src=src-tauri/target/release/fude-cli;     name="fude-cli-${{ matrix.target }}-${arch}" ;;
+          esac
+          cp "$src" "$name"
+          gh release upload ${{ github.ref_name }} "$name" --clobber
 
       - name: Upload artifacts
         if: "!startsWith(github.ref, 'refs/tags/')"
