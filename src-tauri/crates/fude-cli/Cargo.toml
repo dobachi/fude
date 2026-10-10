@@ -1,6 +1,6 @@
 [package]
 name = "fude-cli"
-version = "0.1.0"
+version = "0.8.5"
 description = "Fude without a window: the remote-GUI agent (and, later, the terminal UI)"
 edition = "2021"
 publish = false

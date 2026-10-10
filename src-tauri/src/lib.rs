@@ -1556,6 +1556,10 @@ pub fn run() {
     if let Some(args) = cli_subcommand_args(&raw_args) {
         std::process::exit(run_cli_subcommand(&args));
     }
+    if let Some(text) = cli_info_text(&raw_args) {
+        print!("{}", text);
+        return;
+    }
     // No screen here (an ssh session, a server): a window cannot open, and
     // starting GTK would only panic. `fude-cli` does what the user means —
     // open the file in the Fude their ssh session forwards to, or edit it
@@ -1580,10 +1584,6 @@ pub fn run() {
                 std::process::exit(2);
             }
         }
-    }
-    if let Some(text) = cli_info_text(&raw_args) {
-        print!("{}", text);
-        return;
     }
     // `fude --wait ...` is a client of the running GUI, never a GUI itself.
     if let Some(paths) = wait_client::wait_paths(&raw_args) {

@@ -207,13 +207,14 @@ release:
 	echo "==> Bumping version to v$$ver" && \
 	sed -i "s/\"version\": \".*\"/\"version\": \"$$ver\"/" src-tauri/tauri.conf.json && \
 	sed -i "s/^version = \".*\"/version = \"$$ver\"/" src-tauri/Cargo.toml && \
+	sed -i "s/^version = \".*\"/version = \"$$ver\"/" src-tauri/crates/fude-cli/Cargo.toml && \
 	sed -i "s/\"version\": \".*\"/\"version\": \"$$ver\"/" package.json && \
 	echo "==> Syncing package-lock.json" && \
 	npm install --package-lock-only --silent && \
 	echo "==> Syncing Cargo.lock" && \
 	(cd src-tauri && cargo check --quiet) && \
 	echo "==> Committing release (only version + lock files)" && \
-	git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock package.json package-lock.json && \
+	git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/crates/fude-cli/Cargo.toml src-tauri/Cargo.lock package.json package-lock.json && \
 	git commit -m "release: v$$ver" && \
 	git push && \
 	git tag "v$$ver" && \
