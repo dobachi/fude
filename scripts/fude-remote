@@ -127,10 +127,10 @@ download_fude_exe() {
   LATEST_TAG=$(echo "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/"tag_name": *"//' | sed 's/"$//')
 
   # Get download URL for portable exe (fude.exe, not setup.exe or nsis)
+  # Exactly the portable app (fude.exe): releases also carry fude-cli-*.exe
+  # and the setup/nsis installers.
   DOWNLOAD_URL=$(echo "$RELEASE_JSON" \
-    | grep -o '"browser_download_url": *"[^"]*\.exe"' \
-    | grep -v "setup" \
-    | grep -v "nsis" \
+    | grep -o '"browser_download_url": *"[^"]*/fude\.exe"' \
     | head -1 \
     | sed 's/"browser_download_url": *"//' \
     | sed 's/"$//')
