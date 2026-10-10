@@ -12,6 +12,37 @@
 
 考え方は一つだけ: **ファイルのある場所で `fude-cli` を打つと、手元の Fude にタブが開く。** 編集は手元の Fude で普通に行い、保存すると元の場所に書き戻される。
 
+## 全体図: どこで何を動かすか
+
+```
+ 手元の PC（画面がある）                              ssh 先 k16（画面がない）
+ ┌──────────────────────────────┐                   ┌──────────────────────────────┐
+ │ ① fude            ← 起動しておく │                   │                              │
+ │    Fude GUI                   │                   │  ③ fude-cli notes.md         │
+ │    ・ ~/.config/fude/gui.sock  │◀──── ssh の転送 ────│     ・127.0.0.1:47821 に接続  │
+ │    ・ 127.0.0.1:47821 (TCP)    │  (RemoteForward)   │     ・鍵 gui-token を提示     │
+ │    ・ 鍵 ~/.config/fude/gui-token│                   │     ・notes.md を読み書き代行 │
+ │                              │                   │        タブが閉じたら終了     │
+ │ ② fude-cli setup k16 ← 初回だけ │─── ssh/scp ──────▶│  （setup が鍵と fude-cli を置く）│
+ │                              │                   │                              │
+ │ タブ「k16:/home/you/notes.md」 │                   │  /home/you/notes.md          │
+ │   編集・保存 ──────────────────┼── 書き戻し ───────▶│                              │
+ └──────────────────────────────┘                   └──────────────────────────────┘
+
+ 実行するコマンドは 3 つ:
+   手元   ①  fude                   （いつも通り起動しておく）
+   手元   ②  fude-cli setup k16     （そのホストにつき 1 回。~/.ssh/config・鍵・fude-cli を整える）
+   k16    ③  ssh k16 → fude-cli notes.md   （毎回これだけ。--wait を付けると $EDITOR になる）
+```
+
+同じマシンの中だけなら ②③ は要らない: `fude --wait file.md` で ① に直接頼む（git / Claude Code 用）。
+画面が無く手元の Fude にも届かないときは、③ は端末内ビューア（`--tui`）に切り替わる。
+
+```
+ git commit ──▶ fude --wait COMMIT_EDITMSG ──▶ Fude にタブ ──▶ 閉じる ──▶ commit 続行
+                 （同じ PC、ssh 不要）
+```
+
 ## 1. 手元のマシンで（ssh 不要）
 
 ### `git commit` や Claude Code から Fude を開く
@@ -85,6 +116,15 @@ k16 の `fude-cli` はそのポートに繋ぎ、鍵（`gui-token`）を見せ�
 ## 3. ssh を使わない構成
 
 ssh は「k16 から手元の GUI に届く経路」を作るためだけに使っている。経路が別にあれば ssh は不要:
+
+```
+ ssh あり:   k16 の fude-cli ─▶ 127.0.0.1:47821 ═══ ssh の転送 ═══▶ 手元の gui.sock
+ ssh なし:   k16 の fude-cli ─▶ 100.64.0.2:47821（Tailscale 経由で手元に直接）─▶ 手元の Fude（FUDE_GUI_TCP=0.0.0.0:47821）
+```
+
+**Tailscale SSH でも問題ない**（k16 がまさに Tailscale SSH で、本書の手順はそこで検証した）。
+TCP の `RemoteForward` と `scp` はそのまま通る。Unix ソケットの転送だけは Tailscale SSH（root 動作）が
+ソケットを root 所有で作るため使えず、それが TCP を既定にした理由でもある。
 
 - **同じマシン**: `fude-cli notes.md` はローカルの `~/.config/fude/gui.sock` にも繋ぐ（ssh 不要）
 - **Tailscale / VPN / LAN で直接届く場合**: GUI 側を外から繋げる口で起動し、相手側は宛先を指定する
