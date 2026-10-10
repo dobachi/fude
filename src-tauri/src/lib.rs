@@ -633,6 +633,7 @@ Usage: fude [OPTIONS] [PATH]
        fude tui <FILE>
        fude check
        fude bridge
+       fude cli <FUDE-CLI ARGS>
        fude browser [BROWSER OPTIONS]
 
 Arguments:
@@ -663,7 +664,11 @@ Commands:
            (--allow), the access key and TLS: see `fude browser --help`.
            To open a file that is itself named \"browser\", pass ./browser.
 
+  cli      Run `fude-cli` with the given arguments.
+
   setup/tui/check/bridge run the bundled `fude-cli` (also usable on its own).
+  Without a display (an ssh session), `fude FILE` behaves like `fude-cli
+  FILE`: it opens in the Fude your session reaches, or else in the terminal.
   Guide: docs/REMOTE.md
 ";
 
@@ -711,9 +716,44 @@ fn cli_subcommand_args(args: &[String]) -> Option<Vec<String>> {
         Some("bridge") => std::iter::once("bridge".to_string())
             .chain(rest.iter().cloned())
             .collect(),
+        // `fude cli ARGS` is `fude-cli ARGS`, for those who type the space.
+        Some("cli") => rest.to_vec(),
         _ => return None,
     };
     Some(mapped)
+}
+
+/// Whether this process has no screen to open a window on. Only Linux can
+/// be in that state (an ssh session, a server): X11 and Wayland both
+/// announce themselves through the environment.
+fn is_headless(display: Option<&str>, wayland: Option<&str>) -> bool {
+    let unset = |v: Option<&str>| v.map(str::trim).unwrap_or("").is_empty();
+    cfg!(all(unix, not(target_os = "macos"))) && unset(display) && unset(wayland)
+}
+
+/// What to hand `fude-cli` when `fude ARGS` is run without a screen: the
+/// same paths and `--wait`, minus the window-only `--new-window`. `None`
+/// for `--remote`, which only a window can serve.
+fn headless_cli_args(args: &[String]) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    let mut operands_only = false;
+    for a in args.iter().skip(1) {
+        if operands_only {
+            out.push(a.clone());
+            continue;
+        }
+        match a.as_str() {
+            "--" => {
+                operands_only = true;
+                out.push(a.clone());
+            }
+            "--new-window" | "-n" => {}
+            "--remote" | "-r" => return None,
+            s if s.starts_with("--remote=") => return None,
+            _ => out.push(a.clone()),
+        }
+    }
+    Some(out)
 }
 
 /// Where the bundled `fude-cli` may be, relative to the directory holding the
@@ -1516,6 +1556,31 @@ pub fn run() {
     if let Some(args) = cli_subcommand_args(&raw_args) {
         std::process::exit(run_cli_subcommand(&args));
     }
+    // No screen here (an ssh session, a server): a window cannot open, and
+    // starting GTK would only panic. `fude-cli` does what the user means —
+    // open the file in the Fude their ssh session forwards to, or edit it
+    // in the terminal.
+    let headless = is_headless(
+        std::env::var("DISPLAY").ok().as_deref(),
+        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+    );
+    if headless {
+        match headless_cli_args(&raw_args) {
+            Some(args) if !args.is_empty() => std::process::exit(run_cli_subcommand(&args)),
+            Some(_) => {
+                eprintln!(
+                    "fude: no display here, so no window can open.\n\
+                     Give a file to open it in the Fude your ssh session reaches \
+                     (or in the terminal):\n  fude FILE        fude tui FILE        fude check"
+                );
+                std::process::exit(2);
+            }
+            None => {
+                eprintln!("fude: --remote needs a display");
+                std::process::exit(2);
+            }
+        }
+    }
     if let Some(text) = cli_info_text(&raw_args) {
         print!("{}", text);
         return;
@@ -1772,6 +1837,37 @@ mod tests {
         let text = cli_info_text(&args(&["fude", "--help"])).unwrap();
         assert!(text.contains("fude browser --help"));
         assert!(text.contains("--allow"));
+    }
+
+    #[test]
+    fn headless_means_neither_x11_nor_wayland_on_linux() {
+        let linux = cfg!(all(unix, not(target_os = "macos")));
+        assert_eq!(is_headless(None, None), linux);
+        assert_eq!(is_headless(Some(""), Some(" ")), linux);
+        assert!(!is_headless(Some(":0"), None));
+        assert!(!is_headless(None, Some("wayland-0")));
+    }
+
+    #[test]
+    fn headless_invocations_are_translated_for_fude_cli() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(headless_cli_args(&a(&["fude", "x.md"])), Some(a(&["x.md"])));
+        assert_eq!(
+            headless_cli_args(&a(&["fude", "-n", "--wait", "x.md", "y.md"])),
+            Some(a(&["--wait", "x.md", "y.md"]))
+        );
+        assert_eq!(
+            headless_cli_args(&a(&["fude", "--", "-n"])),
+            Some(a(&["--", "-n"]))
+        );
+        assert_eq!(headless_cli_args(&a(&["fude"])), Some(vec![]));
+        assert_eq!(headless_cli_args(&a(&["fude", "-r", "http://x"])), None);
+        assert_eq!(headless_cli_args(&a(&["fude", "--remote=http://x"])), None);
+        // `fude cli ARGS` passes ARGS through untouched.
+        assert_eq!(
+            cli_subcommand_args(&a(&["fude", "cli", "--wait", "x.md"])),
+            Some(a(&["--wait", "x.md"]))
+        );
     }
 
     #[test]

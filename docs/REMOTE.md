@@ -117,6 +117,10 @@ fude-cli --wait notes.md     # タブを閉じるまで待つ（k16 側の $EDIT
 fude-cli --check             # 手元の Fude にどの経路で届いているか確認
 ```
 
+コマンド名は `fude-cli`（ハイフン）。ssh 先にも Fude 本体（0.8.5 以降）を入れてある場合は、画面が無いことを検出して
+`fude notes.md` が `fude-cli notes.md` と同じ動きになる（`fude cli notes.md` と空白で打っても同じ）。
+古い Fude 本体が入っているホストで `fude FILE` と打つと、ウィンドウを開こうとして `Failed to initialize GTK` で落ちる。
+
 - 転送は ssh の接続に付いている。接続共有が入っていれば、どのセッションからでも届き、全部閉じても 10 分は残る
 - 公開されるのは `fude-cli` に渡したファイルの親ディレクトリ（ディレクトリを渡した場合はその配下）だけ
 - 手元の Fude が起動していないと `fude-cli notes.md` は端末内ビューアに切り替わる
@@ -221,4 +225,5 @@ PowerShell で `fude-cli.exe setup k16`（インストール先の `fude-cli.exe
 | `tcp://127.0.0.1:47821: Connection refused` | ssh の転送が張られていない。`~/.ssh/config` の `RemoteForward` 行と、`ssh` でログインし直したか |
 | `remote port forwarding failed for listen port 47821` | 接続共有が無い状態で同じホストへ ssh を複数本張ると出る（転送を持てるのは最初の 1 本だけ）。`fude setup k16` をやり直すと接続共有が入り、解消する。共有を入れる前から開いていたセッションは閉じて入り直す。他人や別のソフトが 47821 を使っている場合は `fude setup k16 --port 47822` で別ポートに |
 | Fude 側に「k16 との接続が切れました」 | ssh を閉じた／`fude-cli` を止めた。タブは残り、未保存分は暫定保存にある。繋ぎ直してもう一度開く |
+| ssh 先で `Failed to initialize gtk backend` | `fude`（GUI 本体）を画面の無いホストで起動した。`fude-cli FILE` を使う（Fude 0.8.5 以降の `fude FILE` は自動で `fude-cli` に切り替わる） |
 | `fude --wait` が戻らない | そのタブを閉じる（Ctrl+Shift+W）。Fude を終了しても戻る |
