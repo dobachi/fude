@@ -186,9 +186,10 @@ function forceCloseTab(id) {
 
   tabs.splice(index, 1);
 
-  // Notify after splice so listeners querying getAllTabs() don't see the closed tab
+  // Notify after splice so listeners querying getAllTabs() don't see the closed tab.
+  // `dirty` tells a `fude --wait` caller whether edits were discarded.
   if (tab.path && onTabPathChange) {
-    onTabPathChange({ tabId: tab.id, oldPath: tab.path, newPath: null });
+    onTabPathChange({ tabId: tab.id, oldPath: tab.path, newPath: null, dirty: tab.dirty });
   }
 
   if (activeTabId === id) {

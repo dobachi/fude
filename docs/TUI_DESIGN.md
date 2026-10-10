@@ -91,12 +91,29 @@ Tauri コマンドは薄いラッパーとして残す（`#[tauri::command] fn r
   `cli-args` イベントを emit するだけで、呼び出し元はすぐ終了する。`--wait` では終了せず、
   GUI からの `closed` を待ってから終了する
 - single-instance の argv 転送は一方向なので、戻りの通知には §4.3 と同じ**ソケット**を使う。
-  GUI は起動時に `~/.local/share/fude/gui.sock`（Windows は名前付きパイプ）で listen し、
-  `fude --wait` はそこへ `open{wait:true}` を送って `closed` を待つ
+  GUI は `~/.config/fude/gui.sock`（`config_dir()/gui.sock`、`FUDE_GUI_SOCK` で上書き可。
+  Windows は名前付きパイプ）で listen し、`fude --wait` はそこへ `open{wait:true}` を送って
+  `closed` を待つ
 - 「タブが閉じる」の定義: タブを閉じる操作（Ctrl+Shift+W）、ウィンドウを閉じる、
   または未保存のまま閉じて破棄を選んだ場合。いずれも `closed{saved: bool}` を返し、
   呼び出し元は保存されなかった場合に終了コード 1 を返す（`git commit` が中断扱いにできる）
 - `.md` 以外（`COMMIT_EDITMSG`、`crontab` の一時ファイル等）も開く。言語判定は `core/file-lang.js` が既にある
+
+実装（2026-10-10）:
+
+| ファイル | 役割 |
+| --- | --- |
+| `src-tauri/src/ipc.rs` | メッセージ型（`hello` / `open` / `opened` / `closed` / `error` / `bye`）、JSON Lines の encode/decode、ソケットの場所 |
+| `src-tauri/src/gui_server.rs` | GUI 側。`ConnState`（接続ごとのプロトコル状態、純粋）、`WaitRegistry`（パス → 待っている接続）、`interprocess` のリスナ |
+| `src-tauri/src/wait_client.rs` | `fude --wait`。接続できなければ GUI を起動して再試行（20 秒）、`WaitState` で `closed` を集計、終了コード |
+| `src/js/core/wait-tracker.js` | フロント側。待たれているタブを追跡し、閉じたときに `wait_tab_closed(path, saved)` を呼ぶ。「名前を付けて保存」のリネームにも追随 |
+
+- GUI は JS 側が `cli-args` のリスナを登録した後に `gui_ready` を呼び、そこで初めてソケットを開く。
+  起動直後に `open` が届いて取りこぼす競合を構造的に避ける
+- `--wait` で存在しないパスを指定した場合は、そのパスに紐づく空タブを開く（保存すると作られる）
+- GUI が終了して接続が切れた場合、開いていたパスは「保存済み」として扱い終了コード 0
+  （終了時に未保存の確認は GUI が済ませている）
+- 終了コード: 0 = 全タブが保存済み/無変更で閉じた、1 = 破棄して閉じた/開けなかったパスがある、2 = 接続・起動の失敗
 
 ここで決めたプロトコルを、そのままリモートに伸ばす。
 

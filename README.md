@@ -103,6 +103,16 @@ fude-browser --listen 0.0.0.0 --allow tailscale --root ~/notes
 ```bash
 fude /path/to/vault    # ディレクトリを指定して起動
 fude /path/to/file.md  # ファイルを指定して起動
+fude --wait file.md    # 起動中の Fude で開き、タブを閉じるまで待つ（$EDITOR 用）
+```
+
+`--wait` は `git commit` や Claude Code など、エディタの終了を待つプログラムから使うためのものです。
+起動中の Fude が無ければ起動してから開き、タブを閉じると戻ります。未保存の変更を捨てて閉じた場合は
+終了コード 1 を返すので、`git commit` はコミットを中止します。
+
+```bash
+git config --global core.editor "fude --wait"
+export EDITOR="fude --wait"
 ```
 
 ### ビューモード

@@ -34,7 +34,7 @@ import {
 } from './core/outline.js';
 import { isImagePath, mimeToExt, insertImageMarkdown } from './core/image-insert.js';
 import { attachPanZoom } from './core/svg-panzoom.js';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
 import { createStatusBar } from './core/statusbar.js';
 import { showMenu } from './core/menu.js';
@@ -113,6 +113,7 @@ import {
 import { sha256Hex } from './core/hash.js';
 import { shouldWarnConflict, showConflictDialog } from './core/save-conflict.js';
 import { tabActionForKey } from './core/tab-keys.js';
+import { createWaitTracker } from './core/wait-tracker.js';
 import { setUiFontSize, getUiFontSize } from './core/ui-font.js';
 import * as panesModule from './core/panes.js';
 const {
@@ -219,6 +220,15 @@ function paneViewMode(pane) {
 // persists the global session; additional windows (label "win-*") open empty
 // or with a file handed to them, and never overwrite session.json.
 let isMainWindow = true;
+
+// Tabs a `fude --wait` process is blocked on; the host releases that process
+// (exit 0 if the content was kept, 1 if discarded) when we report the close.
+const waitTracker = createWaitTracker((path, saved) => {
+  if (!isLocalTauri()) return;
+  invoke('wait_tab_closed', { path, saved }).catch((e) =>
+    console.warn('wait_tab_closed failed:', e),
+  );
+});
 
 let vaultPath = '';
 let config = {};
@@ -1041,8 +1051,18 @@ async function init() {
     const { listen } = await import('@tauri-apps/api/event');
     listen('cli-args', async (event) => {
       const path = event.payload?.path;
-      if (path) await openPath(path);
+      if (!path) return;
+      if (event.payload?.wait) waitTracker.add(path);
+      const ok = await openPath(path);
+      // `fude --wait new.md`: the file need not exist yet. Bind an empty tab
+      // to the path so saving creates it, instead of leaving the caller hung.
+      if (!ok && event.payload?.wait) openTab(path, '');
     });
+    // Only now can a `fude --wait` request be acted on, so only now does the
+    // host start accepting them (the listener above must exist first).
+    if (isMainWindow) {
+      invoke('gui_ready').catch((e) => console.warn('gui_ready failed:', e));
+    }
 
     // Handle files dropped from the file manager: images are inserted into the
     // active editor, everything else opens as a tab (previous behavior).
@@ -2071,7 +2091,9 @@ function handleTabChange(tab) {
 
 // ── File watching / reload ─────────────────────────────────
 
-function handleTabPathChange({ oldPath, newPath }) {
+function handleTabPathChange(change) {
+  const { oldPath, newPath } = change;
+  waitTracker.onPathChange(change);
   if (oldPath) {
     // Only unwatch if no other tab still references this path.
     const stillOpen = getAllTabs().some((t) => t.path === oldPath);

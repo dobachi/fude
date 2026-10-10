@@ -108,6 +108,31 @@ describe('tabs module', () => {
     expect(tabBar.querySelectorAll('.tab').length).toBe(1);
   });
 
+  // `fude --wait` は、閉じたときに編集が捨てられたかどうかで終了コードを決める。
+  it('閉じるときの path-change 通知に dirty を含める', () => {
+    const changes = [];
+    mod.setTabPathChangeCallback((c) => changes.push(c));
+    const clean = mod.openTab('/clean.md');
+    const dirty = mod.openTab('/dirty.md');
+    mod.markDirty(dirty.id);
+    changes.length = 0;
+
+    mod.closeTab(clean.id);
+    expect(changes).toEqual([
+      { tabId: clean.id, oldPath: '/clean.md', newPath: null, dirty: false },
+    ]);
+
+    // 未保存タブは確認ダイアログを経由する: 「閉じる」を押したのと同じ経路を踏む
+    mod.closeTab(dirty.id);
+    document.querySelector('.btn-confirm').click();
+    expect(changes[1]).toEqual({
+      tabId: dirty.id,
+      oldPath: '/dirty.md',
+      newPath: null,
+      dirty: true,
+    });
+  });
+
   it('switchTab changes the active tab', () => {
     const tab1 = mod.openTab('/a.md');
     const tab2 = mod.openTab('/b.md');

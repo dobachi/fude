@@ -1,6 +1,9 @@
 mod file_watcher;
+mod gui_server;
+mod ipc;
 mod key_storage;
 mod updater_env;
+mod wait_client;
 
 use futures_util::StreamExt;
 use key_storage::{create_storage, set_dir_permissions, set_file_permissions, KeyStorage};
@@ -11,7 +14,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::Emitter;
 use tauri::Manager;
 use tauri::{State, WebviewUrl, WebviewWindowBuilder};
@@ -1224,6 +1227,9 @@ Arguments:
 Options:
   -r, --remote <URL>  Connect to a remote Fude server URL (e.g., http://localhost:3000)
   -n, --new-window    Open the file in a new window instead of reusing the existing one
+  -w, --wait          Open PATH in the running Fude (starting one if needed) and
+                      return only when its tab is closed; exit 1 if edits were
+                      discarded. Lets Fude serve as $EDITOR / git core.editor.
   -h, --help          Print help
   -V, --version       Print version
 
@@ -1445,6 +1451,71 @@ fn take_open_request(
     pending: State<'_, PendingOpens>,
 ) -> Option<OpenRequest> {
     pending.0.lock().ok()?.remove(window.label())
+}
+
+// ─── `fude --wait` server ──────────────────────────────────
+
+/// Opens paths requested over the IPC socket in the main window. The
+/// frontend handles `cli-args` exactly as it does for single-instance
+/// launches; `wait: true` additionally asks it to report the tab's closure
+/// through `wait_tab_closed`.
+struct WindowSink(tauri::AppHandle);
+
+impl gui_server::OpenSink for WindowSink {
+    fn open(&self, path: &str, wait: bool) -> Result<(), String> {
+        let window = self
+            .0
+            .get_webview_window("main")
+            .ok_or_else(|| "no main window".to_string())?;
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        window
+            .emit(
+                "cli-args",
+                serde_json::json!({ "path": path, "wait": wait }),
+            )
+            .map_err(|e| e.to_string())
+    }
+}
+
+static GUI_SOCKET_STARTED: OnceLock<Result<String, String>> = OnceLock::new();
+
+/// Called by the main window once its `cli-args` listener is registered, so
+/// no `open` can arrive before anyone is there to act on it. Idempotent:
+/// later calls return the first outcome. Returns the socket path.
+#[tauri::command]
+fn gui_ready(
+    app: tauri::AppHandle,
+    registry: State<'_, Arc<gui_server::WaitRegistry>>,
+) -> Result<String, String> {
+    let registry = Arc::clone(&registry);
+    GUI_SOCKET_STARTED
+        .get_or_init(|| {
+            let dir = ensure_config_dir()?;
+            let socket = ipc::socket_path(&dir);
+            let name = wait_client::socket_name(&socket).map_err(|e| e.to_string())?;
+            gui_server::start(name, registry, Arc::new(WindowSink(app)))
+                .map_err(|e| format!("cannot listen on {}: {}", socket.display(), e))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600));
+            }
+            Ok(socket.to_string_lossy().to_string())
+        })
+        .clone()
+}
+
+/// The frontend reports that the tab for `path` closed. `saved` is false
+/// when unsaved edits were discarded. Returns how many waiters were told.
+#[tauri::command]
+fn wait_tab_closed(
+    path: String,
+    saved: bool,
+    registry: State<'_, Arc<gui_server::WaitRegistry>>,
+) -> usize {
+    registry.tab_closed(&path, saved)
 }
 
 // ─── Downloadable extensions ───────────────────────────────
@@ -1806,6 +1877,17 @@ pub fn run() {
         print!("{}", text);
         return;
     }
+    // `fude --wait ...` is a client of the running GUI, never a GUI itself.
+    if let Some(paths) = wait_client::wait_paths(&raw_args) {
+        let code = match config_dir() {
+            Ok(dir) => wait_client::run(paths, &ipc::socket_path(&dir)),
+            Err(e) => {
+                eprintln!("fude: {}", e);
+                2
+            }
+        };
+        std::process::exit(code);
+    }
 
     let mut builder = tauri::Builder::default();
 
@@ -1844,9 +1926,12 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .manage(PendingOpens::default())
+        .manage(Arc::new(gui_server::WaitRegistry::default()))
         .invoke_handler(tauri::generate_handler![
             new_window,
             take_open_request,
+            gui_ready,
+            wait_tab_closed,
             read_file,
             write_file,
             rename_path,

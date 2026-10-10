@@ -79,6 +79,16 @@ fude-remote      # Auto-downloads and launches Windows version
 ```bash
 fude /path/to/vault    # Open a directory
 fude /path/to/file.md  # Open a specific file
+fude --wait file.md    # Open in the running Fude and block until the tab is closed ($EDITOR)
+```
+
+`--wait` is for programs that wait for an editor to finish, such as `git commit` or
+Claude Code. It starts Fude if none is running, and returns when the tab is closed;
+discarding unsaved changes on close exits with status 1 so `git commit` aborts.
+
+```bash
+git config --global core.editor "fude --wait"
+export EDITOR="fude --wait"
 ```
 
 ### View modes
