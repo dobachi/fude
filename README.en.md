@@ -123,6 +123,19 @@ A Unix-socket reverse forward (`RemoteForward ~/.cache/fude/gui/%C.sock …`) is
 but some sshds create that socket owned by root, so TCP is the default. Change the port with
 `FUDE_GUI_ADDR=127.0.0.1:<port>`.
 
+#### Fude on Windows, or reaching it from WSL
+
+Besides the named pipe, the GUI listens on **TCP `127.0.0.1:47821`** (every connection there
+needs the token; `FUDE_GUI_TCP=off` disables it, `FUDE_GUI_TCP=127.0.0.1:<port>` moves it).
+The token lives in `%APPDATA%\fude\gui-token`.
+
+- From Windows ssh to a server: `RemoteForward 47821 127.0.0.1:47821` (ssh cannot forward to a pipe)
+- From WSL to the Windows Fude: WSL2's default NAT does not reach the Windows localhost, so use
+  `FUDE_GUI_ADDR=<Windows host IP>:47821 fude-cli notes.md` (with `networkingMode=mirrored` in
+  `.wslconfig`, `127.0.0.1` works). A GUI bound to 127.0.0.1 is not reachable from another
+  address, so start the Windows side with `FUDE_GUI_TCP=0.0.0.0:47821` for this (the token
+  still guards it)
+
 When no GUI answers (no forward, or Fude is not running on your machine) it falls back
 to an in-terminal viewer (`fude-cli --tui file.md` forces it): rendered Markdown that
 follows changes on disk. `q` quits, `j`/`k` scroll. Editing is planned.

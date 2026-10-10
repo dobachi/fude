@@ -259,6 +259,10 @@ pub struct ConnState {
     /// The secret a remote agent must present (`fude_core::token`). Local
     /// clients (no host) are trusted by the socket's own permissions.
     required_token: Option<String>,
+    /// Demand the token from every client, host or not: set for connections
+    /// that arrived over TCP, where the socket's file permissions protect
+    /// nothing.
+    token_always: bool,
     cwd: Option<String>,
     /// Set when the peer is a remote agent (its hello carried a host).
     host: Option<String>,
@@ -277,6 +281,15 @@ impl ConnState {
     pub fn with_token(token: Option<String>) -> ConnState {
         ConnState {
             required_token: token,
+            ..Default::default()
+        }
+    }
+
+    /// Like `with_token`, but local clients must present it as well.
+    pub fn with_token_always(token: Option<String>) -> ConnState {
+        ConnState {
+            required_token: token,
+            token_always: true,
             ..Default::default()
         }
     }
@@ -336,7 +349,7 @@ impl ConnState {
                     );
                 }
                 let host = host.filter(|h| !h.is_empty() && !h.contains('/'));
-                if host.is_some() {
+                if host.is_some() || self.token_always {
                     let ok = match &self.required_token {
                         Some(t) => fude_core::token::matches(t, token.as_deref()),
                         None => false,
@@ -485,6 +498,54 @@ pub fn clear_stale_socket(socket: &std::path::Path) -> Result<(), String> {
     }
 }
 
+/// Also listen on a loopback TCP address. This is what an ssh
+/// `RemoteForward 47821 127.0.0.1:47821` from a Windows client reaches
+/// (ssh cannot forward to a named pipe), and what a WSL `fude-cli` uses to
+/// reach the Windows GUI. Anyone on this machine can connect, so every
+/// client here must present the token.
+pub fn start_tcp(
+    addr: &str,
+    token: String,
+    registry: Arc<WaitRegistry>,
+    sessions: Arc<RemoteSessions>,
+    sink: Arc<dyn OpenSink>,
+) -> io::Result<std::net::SocketAddr> {
+    let token = Arc::new(token);
+    let listener = std::net::TcpListener::bind(addr)?;
+    let bound = listener.local_addr()?;
+    thread::Builder::new()
+        .name("fude-gui-tcp".into())
+        .spawn(move || {
+            for conn in listener.incoming() {
+                match conn {
+                    Ok(stream) => {
+                        let _ = stream.set_nodelay(true);
+                        let Ok(w) = stream.try_clone() else { continue };
+                        let registry = Arc::clone(&registry);
+                        let sessions = Arc::clone(&sessions);
+                        let sink = Arc::clone(&sink);
+                        let token = Arc::clone(&token);
+                        let _ = thread::Builder::new()
+                            .name("fude-gui-tcp-conn".into())
+                            .spawn(move || {
+                                serve(
+                                    Box::new(stream),
+                                    Box::new(w),
+                                    token,
+                                    true,
+                                    registry,
+                                    sessions,
+                                    sink,
+                                )
+                            });
+                    }
+                    Err(e) => eprintln!("fude: TCP accept failed: {}", e),
+                }
+            }
+        })?;
+    Ok(bound)
+}
+
 /// Start listening on `name`. Returns once the socket is bound; connections
 /// are served on background threads.
 pub fn start(
@@ -505,13 +566,24 @@ pub fn start(
             for conn in listener.incoming() {
                 match conn {
                     Ok(stream) => {
+                        let (recv, send) = stream.split();
                         let registry = Arc::clone(&registry);
                         let sessions = Arc::clone(&sessions);
                         let sink = Arc::clone(&sink);
                         let token = Arc::clone(&token);
                         let _ = thread::Builder::new()
                             .name("fude-gui-ipc-conn".into())
-                            .spawn(move || serve(stream, token, registry, sessions, sink));
+                            .spawn(move || {
+                                serve(
+                                    Box::new(recv),
+                                    Box::new(send),
+                                    token,
+                                    false,
+                                    registry,
+                                    sessions,
+                                    sink,
+                                )
+                            });
                     }
                     Err(e) => eprintln!("fude: IPC accept failed: {}", e),
                 }
@@ -521,13 +593,14 @@ pub fn start(
 }
 
 fn serve(
-    stream: interprocess::local_socket::Stream,
+    recv: Box<dyn std::io::Read + Send>,
+    mut send: Box<dyn Write + Send>,
     token: Arc<String>,
+    token_always: bool,
     registry: Arc<WaitRegistry>,
     sessions: Arc<RemoteSessions>,
     sink: Arc<dyn OpenSink>,
 ) {
-    let (recv, mut send) = stream.split();
     let (tx, rx) = mpsc::channel::<Event>();
 
     let reader_tx = tx.clone();
@@ -553,7 +626,11 @@ fn serve(
         });
 
     let conn_id = registry.new_conn_id();
-    let mut state = ConnState::with_token(Some(token.to_string()));
+    let mut state = if token_always {
+        ConnState::with_token_always(Some(token.to_string()))
+    } else {
+        ConnState::with_token(Some(token.to_string()))
+    };
     let mut session: Option<Arc<RemoteSession>> = None;
     let write_all = |send: &mut dyn Write, msgs: &[Message]| -> bool {
         for m in msgs {
@@ -840,6 +917,25 @@ mod tests {
             &sink,
         );
         assert!(matches!(replies[0], Message::Error { .. }));
+    }
+
+    #[test]
+    fn tcp_connections_demand_the_token_from_everyone() {
+        let sink = Recorder::default();
+        let mut st = ConnState::with_token_always(Some("secret".into()));
+        let (replies, _) = st.handle(hello("/w"), &sink);
+        assert!(matches!(replies[0], Message::Error { .. }));
+        let (replies, _) = st.handle(
+            Message::Hello {
+                protocol: PROTOCOL_VERSION,
+                cwd: None,
+                cli_version: None,
+                host: None,
+                token: Some("secret".into()),
+            },
+            &sink,
+        );
+        assert!(matches!(replies[0], Message::Welcome { .. }));
     }
 
     #[test]

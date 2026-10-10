@@ -446,4 +446,5 @@ CLAUDE.md の「テストの無い変更は未完成」に従う。
 | `fude-cli` の配布 | deb / dmg / exe に同梱 + GitHub Releases に単体の静的バイナリ（`make release` の対象に追加） |
 | 既存 `fude-browser` との関係 | 残す。「ブラウザを GUI にする」用途は別物。将来 `fude-cli` が serve.js の API を話せるようになれば統合候補 |
 | リモート側の暫定ファイル | 操作側に置く（§4.4）。リモート側には置かない |
+| Windows の GUI | 実装済み: 名前付きパイプに加えて `127.0.0.1:47821` の TCP でも待ち受け（TCP は全接続にトークン必須、`FUDE_GUI_TCP` で変更/無効化）。Windows の ssh は `RemoteForward 47821 127.0.0.1:47821`。**Windows 実機での動作確認は未**（CI ビルド待ち） |
 | 操作側 GUI の自動起動 | v1 は「GUI を起動しておく」が前提。後で Linux は systemd user socket（`fude-gui.socket`）、macOS は launchd のソケットアクティベーションを配布物に同梱する。Windows はログイン時起動で代替 |

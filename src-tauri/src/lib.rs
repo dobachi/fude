@@ -905,6 +905,10 @@ impl gui_server::OpenSink for WindowSink {
 
 static GUI_SOCKET_STARTED: OnceLock<Result<String, String>> = OnceLock::new();
 
+/// Loopback address the GUI also listens on (what `fude-cli` tries by
+/// default and what an ssh `RemoteForward 47821 127.0.0.1:47821` targets).
+const GUI_TCP_ADDR: &str = "127.0.0.1:47821";
+
 /// Called by the main window once its `cli-args` listener is registered, so
 /// no `open` can arrive before anyone is there to act on it. Idempotent:
 /// later calls return the first outcome. Returns the socket path.
@@ -924,8 +928,26 @@ fn gui_ready(
             let name = fude_core::ipc::socket_name(&socket).map_err(|e| e.to_string())?;
             // Remote agents must present this; see fude_core::token.
             let token = fude_core::token::load_or_create(&dir.join(fude_core::token::TOKEN_FILE))?;
-            gui_server::start(name, token, registry, sessions, Arc::new(WindowSink(app)))
-                .map_err(|e| format!("cannot listen on {}: {}", socket.display(), e))?;
+            let sink: Arc<dyn gui_server::OpenSink> = Arc::new(WindowSink(app));
+            gui_server::start(
+                name,
+                token.clone(),
+                Arc::clone(&registry),
+                Arc::clone(&sessions),
+                Arc::clone(&sink),
+            )
+            .map_err(|e| format!("cannot listen on {}: {}", socket.display(), e))?;
+            // Loopback TCP as well (token required from everyone there), so
+            // Windows ssh clients and WSL can reach this GUI. `FUDE_GUI_TCP`
+            // overrides the address; "off" disables it. Failure to bind
+            // (port taken) is not fatal: the socket still works.
+            let tcp = std::env::var("FUDE_GUI_TCP").unwrap_or_else(|_| GUI_TCP_ADDR.to_string());
+            if tcp != "off" {
+                match gui_server::start_tcp(&tcp, token, registry, sessions, sink) {
+                    Ok(addr) => eprintln!("fude: also listening on tcp://{}", addr),
+                    Err(e) => eprintln!("fude: not listening on tcp://{}: {}", tcp, e),
+                }
+            }
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
