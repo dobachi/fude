@@ -15,6 +15,7 @@ import {
   isRejected,
   reportLockout,
 } from './browser-token.js';
+import { isRemotePath } from './core/remote-path.js';
 
 // Detect whether we're running inside a Tauri webview.
 //
@@ -136,11 +137,17 @@ export async function updateEnv() {
   return doInvoke('update_env');
 }
 
+// Files under `remote://host/...` live on a machine whose `fude-cli` agent
+// is connected to this GUI; the host forwards these calls to it. Only what
+// the editor needs for an open tab is routed — tree, read, write, watch.
+
 export async function readFile(path) {
+  if (isRemotePath(path)) return doInvoke('remote_read_file', { path });
   return doInvoke('read_file', { path });
 }
 
 export async function writeFile(path, content) {
+  if (isRemotePath(path)) return doInvoke('remote_write_file', { path, content });
   return doInvoke('write_file', { path, content });
 }
 
@@ -200,7 +207,8 @@ export async function checkTempFiles(paths) {
 }
 
 export async function readDirTree(path, showAllFiles) {
-  return doInvoke('read_dir_tree', { path, showAllFiles: showAllFiles || false });
+  const cmd = isRemotePath(path) ? 'remote_read_dir_tree' : 'read_dir_tree';
+  return doInvoke(cmd, { path, showAllFiles: showAllFiles || false });
 }
 
 export async function saveSession(session) {
@@ -258,11 +266,19 @@ export async function browseDir(path) {
 }
 
 export async function watchFile(path) {
+  if (isRemotePath(path)) return doInvoke('remote_watch_file', { path });
   return doInvoke('watch_file', { path });
 }
 
 export async function unwatchFile(path) {
+  if (isRemotePath(path)) return doInvoke('remote_unwatch_file', { path });
   return doInvoke('unwatch_file', { path });
+}
+
+/** Hosts whose `fude-cli` agent is connected (desktop only). */
+export async function remoteHosts() {
+  if (!isTauriWebview()) return [];
+  return doInvoke('remote_hosts');
 }
 
 export async function watchDirectory(path) {

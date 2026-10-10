@@ -3,6 +3,7 @@
 //! `$EDITOR` for git, Claude Code and friends.
 
 use fude_core::ipc::{self, socket_name, Message, PROTOCOL_VERSION};
+use fude_core::wait::{exit_code, WaitState};
 use interprocess::local_socket::{prelude::*, Name, Stream};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
@@ -38,102 +39,6 @@ pub fn wait_paths(args: &[String]) -> Option<Vec<String>> {
         i += 1;
     }
     wait.then_some(paths)
-}
-
-/// Outcome of one waited path.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Outcome {
-    Closed { saved: bool },
-    Failed(String),
-}
-
-/// Process exit code: 0 only when every tab closed with its content saved
-/// (or unchanged). Discarded edits and paths the GUI could not open are
-/// failures, so a caller like `git commit` treats them as an abort.
-pub fn exit_code(outcomes: &[Outcome]) -> i32 {
-    if outcomes
-        .iter()
-        .all(|o| matches!(o, Outcome::Closed { saved: true }))
-    {
-        0
-    } else {
-        1
-    }
-}
-
-/// What the client does with each line from the GUI while waiting.
-/// Returns `true` once every path has an outcome.
-#[derive(Debug, Default)]
-pub struct WaitState {
-    outcomes: Vec<(String, Outcome)>,
-    /// Paths we have been told are open but not yet closed.
-    open: Vec<String>,
-    /// Count of paths we asked for; `Opened`/`Error` each account for one.
-    expected: usize,
-    done: bool,
-}
-
-impl WaitState {
-    pub fn new(expected: usize) -> Self {
-        WaitState {
-            expected,
-            ..Default::default()
-        }
-    }
-
-    pub fn outcomes(&self) -> Vec<Outcome> {
-        self.outcomes.iter().map(|(_, o)| o.clone()).collect()
-    }
-
-    pub fn done(&self) -> bool {
-        self.done
-    }
-
-    /// Feed one message. Returns a line to show the user, if any.
-    pub fn handle(&mut self, msg: Message) -> Option<String> {
-        match msg {
-            Message::Opened { path } => {
-                self.open.push(path);
-                None
-            }
-            Message::Closed { path, saved } => {
-                self.open.retain(|p| p != &path);
-                self.outcomes.push((path, Outcome::Closed { saved }));
-                self.check_done();
-                None
-            }
-            Message::Error { path, message } => {
-                let shown = match &path {
-                    Some(p) => format!("fude: {}: {}", p, message),
-                    None => format!("fude: {}", message),
-                };
-                self.outcomes
-                    .push((path.unwrap_or_default(), Outcome::Failed(message)));
-                self.check_done();
-                Some(shown)
-            }
-            Message::Bye => {
-                self.done = true;
-                None
-            }
-            Message::Hello { .. } | Message::Open { .. } => None,
-        }
-    }
-
-    /// The GUI hung up. Paths still open count as closed-and-saved: the GUI
-    /// quit, and quitting already prompts about unsaved changes.
-    pub fn disconnected(&mut self) {
-        for p in self.open.drain(..) {
-            self.outcomes.push((p, Outcome::Closed { saved: true }));
-        }
-        self.done = true;
-    }
-
-    fn check_done(&mut self) {
-        if self.outcomes.len() >= self.expected && self.open.is_empty() {
-            self.done = true;
-        }
-    }
 }
 
 /// Run the wait client to completion and return the process exit code.
@@ -190,10 +95,12 @@ fn talk(stream: Stream, paths: Vec<String>) -> io::Result<i32> {
         protocol: PROTOCOL_VERSION,
         cwd,
         cli_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        host: None,
     }));
     out.push_str(&ipc::encode(&Message::Open {
         paths: paths.clone(),
         wait: true,
+        roots: None,
     }));
     send.write_all(out.as_bytes())?;
     send.flush()?;
@@ -207,7 +114,7 @@ fn talk(stream: Stream, paths: Vec<String>) -> io::Result<i32> {
             Ok(0) => state.disconnected(),
             Ok(_) => match ipc::decode(&line) {
                 Ok(Some(msg)) => {
-                    if let Some(text) = state.handle(msg) {
+                    if let Some(text) = state.handle(&msg) {
                         eprintln!("{}", text);
                     }
                 }
@@ -291,72 +198,5 @@ mod tests {
         );
         // `--wait` after `--` is a file name, not the flag.
         assert_eq!(wait_paths(&args(&["fude", "--", "--wait"])), None);
-    }
-
-    #[test]
-    fn exit_code_is_zero_only_when_everything_was_saved() {
-        assert_eq!(exit_code(&[Outcome::Closed { saved: true }]), 0);
-        assert_eq!(
-            exit_code(&[
-                Outcome::Closed { saved: true },
-                Outcome::Closed { saved: false }
-            ]),
-            1
-        );
-        assert_eq!(exit_code(&[Outcome::Failed("x".into())]), 1);
-        assert_eq!(exit_code(&[]), 0);
-    }
-
-    #[test]
-    fn wait_state_completes_when_every_path_is_closed() {
-        let mut st = WaitState::new(2);
-        st.handle(Message::Opened { path: "/a".into() });
-        st.handle(Message::Opened { path: "/b".into() });
-        assert!(!st.done());
-        st.handle(Message::Closed {
-            path: "/a".into(),
-            saved: true,
-        });
-        assert!(!st.done());
-        st.handle(Message::Closed {
-            path: "/b".into(),
-            saved: false,
-        });
-        assert!(st.done());
-        assert_eq!(exit_code(&st.outcomes()), 1);
-    }
-
-    #[test]
-    fn wait_state_counts_errors_toward_completion() {
-        let mut st = WaitState::new(2);
-        let shown = st.handle(Message::Error {
-            path: Some("/bad".into()),
-            message: "cannot open".into(),
-        });
-        assert_eq!(shown.as_deref(), Some("fude: /bad: cannot open"));
-        st.handle(Message::Opened { path: "/ok".into() });
-        assert!(!st.done());
-        st.handle(Message::Closed {
-            path: "/ok".into(),
-            saved: true,
-        });
-        assert!(st.done());
-        assert_eq!(exit_code(&st.outcomes()), 1);
-    }
-
-    #[test]
-    fn wait_state_treats_a_hangup_as_saved() {
-        let mut st = WaitState::new(1);
-        st.handle(Message::Opened { path: "/a".into() });
-        st.disconnected();
-        assert!(st.done());
-        assert_eq!(st.outcomes(), vec![Outcome::Closed { saved: true }]);
-    }
-
-    #[test]
-    fn bye_from_the_gui_ends_the_wait() {
-        let mut st = WaitState::new(1);
-        st.handle(Message::Bye);
-        assert!(st.done());
     }
 }

@@ -1,0 +1,20 @@
+[package]
+name = "fude-cli"
+version = "0.1.0"
+description = "Fude without a window: the remote-GUI agent (and, later, the terminal UI)"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "fude-cli"
+path = "src/main.rs"
+
+[dependencies]
+fude-core = { path = "../fude-core" }
+serde_json = "1"
+interprocess = "2.4"
+notify = "8"
+dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"

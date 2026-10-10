@@ -91,6 +91,26 @@ git config --global core.editor "fude --wait"
 export EDITOR="fude --wait"
 ```
 
+### Editing remote files in your local Fude (fude-cli)
+
+On a server without a display, `fude-cli file.md` opens the file in the Fude running on
+**your** machine. The server-side `fude-cli` serves reads, writes and change notifications
+for that file and exits when the tab is closed.
+
+1. Have Fude running locally (it listens on `~/.config/fude/gui.sock`)
+2. Add a reverse forward to `~/.ssh/config` (`%C` keeps each connection's socket distinct)
+
+   ```
+   Host dev
+     RemoteForward ~/.cache/fude/gui/%C.sock ~/.config/fude/gui.sock
+   ```
+
+3. Put `fude-cli` on the server (`cargo build --release -p fude-cli` builds a single binary)
+4. `ssh dev`, then `fude-cli notes.md` (add `--wait` to use it as `$EDITOR`)
+
+Only the directory of each file you pass (or the directory itself) is exposed.
+See [docs/TUI_DESIGN.md](docs/TUI_DESIGN.md) for the design.
+
 ### View modes
 
 | Mode | Description | Shortcut |

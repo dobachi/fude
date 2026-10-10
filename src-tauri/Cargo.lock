@@ -1264,6 +1264,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fude-cli"
+version = "0.1.0"
+dependencies = [
+ "dirs 5.0.1",
+ "fude-core",
+ "interprocess",
+ "notify",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "fude-core"
 version = "0.1.0"
 dependencies = [

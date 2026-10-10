@@ -92,7 +92,7 @@ jobs:
         run: npx vitest run
 
       - name: Run Rust tests
-        run: cd src-tauri && cargo test --workspace --lib
+        run: cd src-tauri && cargo test --workspace --lib --bins
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

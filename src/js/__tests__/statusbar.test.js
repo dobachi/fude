@@ -92,6 +92,16 @@ describe('truncatePath', () => {
 });
 
 describe('statusPathText', () => {
+  it('リモートのファイルは host:/path で示し、リモートの vault 配下なら相対にする', () => {
+    expect(statusPathText('remote://box/home/u/notes/a.md', '')).toBe('box:/home/u/notes/a.md');
+    expect(statusPathText('remote://box/home/u/notes/a.md', '/home/u/notes')).toBe(
+      'box:/home/u/notes/a.md',
+    );
+    expect(statusPathText('remote://box/home/u/notes/a.md', 'remote://box/home/u/notes')).toBe(
+      './a.md',
+    );
+  });
+
   it('相対化してから省略する', () => {
     expect(statusPathText('/home/me/notes/projects/a.md', '/home/me/notes')).toBe(
       './projects/a.md',

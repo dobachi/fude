@@ -140,7 +140,7 @@ test-js:
 	npx vitest run
 
 test-rust:
-	cd src-tauri && cargo test --workspace --lib
+	cd src-tauri && cargo test --workspace --lib --bins
 
 # Lint
 lint: lint-js lint-rust

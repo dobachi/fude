@@ -115,6 +115,8 @@ Tauri コマンドは薄いラッパーとして残す（`#[tauri::command] fn r
 
 - GUI は JS 側が `cli-args` のリスナを登録した後に `gui_ready` を呼び、そこで初めてソケットを開く。
   起動直後に `open` が届いて取りこぼす競合を構造的に避ける
+- bind の前に既存のソケットファイルへ接続を試み、拒否されれば（前回の GUI が kill されて
+  unlink できなかった死骸）削除してから bind する。応答があれば別の Fude が生きているので触らない
 - `--wait` で存在しないパスを指定した場合は、そのパスに紐づく空タブを開く（保存すると作られる）
 - GUI が終了して接続が切れた場合、開いていたパスは「保存済み」として扱い終了コード 0
   （終了時に未保存の確認は GUI が済ませている）
@@ -212,6 +214,20 @@ GUI 側の実装:
 - `backend.js` は「このパスはどの経路か」を判断する。タブの `path` を
   `remote://<session-id>/<abs path>` 形式にしておけば、既存の `read_file(path)` 呼び出しを
   置き換えずに経路を切り替えられる
+
+### 4.3.1 実装（2026-10-10）
+
+| 場所 | 役割 |
+| --- | --- |
+| `crates/fude-core/src/ipc.rs` | `welcome`（hello への応答。ssh が転送先不在でも accept だけはするため、これが届いて初めて「GUI がいる」と判断する）、`read_file` / `write_file` / `read_dir_tree` / `watch` / `unwatch` / `result` / `file_changed`、`remote://<host><abs path>` の組み立てと分解 |
+| `crates/fude-cli/` | リモート側バイナリ。`args`（引数）、`discover`（`$FUDE_GUI_SOCK` → `~/.cache/fude/gui/*.sock` 新しい順 → ローカルの `gui.sock`。拒否されたソケットは unlink）、`agent`（起動時のパスから算出した root 配下だけに応答）、`watch`（notify。自分の書き込みは 2 秒抑制）、`run`（メインループ、`--wait` 無しは `--_foreground` 付きで自分を再起動して切り離し） |
+| `src-tauri/src/gui_server.rs` | `RemoteSessions`: host ごとの接続一覧。`open` で申告された roots の最長一致で振り分け（同じ host で複数の `fude-cli` が動いていてもよい）。`RemoteSession::request` が id 付き要求を送り `result` を待つ（30 秒） |
+| `src-tauri/src/lib.rs` | `remote_read_file` / `remote_write_file` / `remote_read_dir_tree` / `remote_watch_file` / `remote_unwatch_file` / `remote_hosts`。ツリーの各パスは `remote://host` を前置して返す。`file_changed` は既存の `file-changed` イベントとして流す |
+| `src/js/backend.js` | `remote://` のパスだけ `remote_*` に振り分け。暫定保存・セッションはローカルのまま |
+| `src/js/core/remote-path.js` | `remote://` の判定・分解・表示用整形 |
+
+同じマシンでも動く: `fude-cli` はローカルの `gui.sock` も候補に含むので、ssh を介さずに
+`fude-cli notes.md` を実行すると GUI 側では `remote://<hostname>/...` として開く（開発時の確認用）。
 
 ### 4.4 切断・再接続
 
@@ -389,9 +405,9 @@ CLAUDE.md の「テストの無い変更は未完成」に従う。
 
 | 段階 | 内容 | 成果 |
 | --- | --- | --- |
-| 0 | ローカル `fude --wait`（§3）。GUI 側のソケット listen とプロトコル確定 | ローカルの Claude Code / git から Fude を `$EDITOR` にできる |
-| 1 | `fude-core` 切り出し（§2.3）。既存テスト green を維持 | Tauri 非依存のライブラリ |
-| 2 | `fude-cli` エージェント（§4）。unix socket 逆転送、`--root` 相当の範囲制限、切断時の退避 | ssh 先で `fude file.md` が操作側 GUI に開く |
+| 0 ✅ | ローカル `fude --wait`（§3）。GUI 側のソケット listen とプロトコル確定 | ローカルの Claude Code / git から Fude を `$EDITOR` にできる |
+| 1 ✅ | `fude-core` 切り出し（§2.3）。既存テスト green を維持 | Tauri 非依存のライブラリ |
+| 2 ✅ | `fude-cli` エージェント（§4）。unix socket 逆転送、`--root` 相当の範囲制限 | ssh 先で `fude-cli file.md` が操作側 GUI に開く（切断時の退避・セッション復元は未着手） |
 | 3 | TUI ビューア: `fude-cli --tui --preview file.md`。描画 + 監視でライブ更新 | エージェントの出力を端末で眺められる |
 | 4 | TUI エディタ v1: Normal キーモード、分割表示、ツリー、タブ、セッション、暫定保存、検索 | 転送が無くても編集できる |
 | 5 | TUI v2: Vim / Emacs、リスト・チェックボックス・表、アウトライン | GUI と同じ操作感 |

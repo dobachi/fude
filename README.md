@@ -115,6 +115,25 @@ git config --global core.editor "fude --wait"
 export EDITOR="fude --wait"
 ```
 
+### リモートのファイルを手元の Fude で開く（fude-cli）
+
+GUI の無いサーバに ssh しているとき、サーバ側で `fude-cli file.md` と打つと**手元の Fude** にタブが開きます。
+サーバ側の `fude-cli` がそのファイルの読み書きと変更監視を担当し、タブを閉じると終了します。
+
+1. 手元で Fude を起動しておく（`~/.config/fude/gui.sock` で待ち受けます）
+2. `~/.ssh/config` に逆転送を 1 行足す（接続ごとに別名になるよう `%C` を使う）
+
+   ```
+   Host dev
+     RemoteForward ~/.cache/fude/gui/%C.sock ~/.config/fude/gui.sock
+   ```
+
+3. サーバに `fude-cli` を置く（`cargo build --release -p fude-cli` で単体の静的バイナリ）
+4. `ssh dev` して `fude-cli notes.md`（`--wait` を付けると `$EDITOR` として使えます）
+
+公開されるのは起動時に渡したファイルの親ディレクトリ（ディレクトリを渡した場合はその配下）だけです。
+詳細は [docs/TUI_DESIGN.md](docs/TUI_DESIGN.md)。
+
 ### ビューモード
 
 | モード | 説明 | ショートカット |

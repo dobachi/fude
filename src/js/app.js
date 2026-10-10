@@ -1058,6 +1058,15 @@ async function init() {
       // to the path so saving creates it, instead of leaving the caller hung.
       if (!ok && event.payload?.wait) openTab(path, '');
     });
+    // A remote fude-cli agent went away: its tabs stay open (edits are kept in
+    // the autosave temp file) but cannot be saved until it reconnects.
+    listen('remote-disconnected', (event) => {
+      const host = event.payload?.host;
+      if (host)
+        showToast(`${host} との接続が切れました（再接続するまで保存できません）`, {
+          type: 'error',
+        });
+    });
     // Only now can a `fude --wait` request be acted on, so only now does the
     // host start accepting them (the listener above must exist first).
     if (isMainWindow) {

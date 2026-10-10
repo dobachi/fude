@@ -887,6 +887,20 @@ impl gui_server::OpenSink for WindowSink {
             )
             .map_err(|e| e.to_string())
     }
+
+    fn file_changed(&self, path: &str) {
+        // Same event the native watcher emits, so the frontend reloads a
+        // remote tab exactly like a local one.
+        if let Some(window) = self.0.get_webview_window("main") {
+            let _ = window.emit("file-changed", serde_json::json!({ "path": path }));
+        }
+    }
+
+    fn disconnected(&self, host: &str) {
+        if let Some(window) = self.0.get_webview_window("main") {
+            let _ = window.emit("remote-disconnected", serde_json::json!({ "host": host }));
+        }
+    }
 }
 
 static GUI_SOCKET_STARTED: OnceLock<Result<String, String>> = OnceLock::new();
@@ -898,14 +912,17 @@ static GUI_SOCKET_STARTED: OnceLock<Result<String, String>> = OnceLock::new();
 fn gui_ready(
     app: tauri::AppHandle,
     registry: State<'_, Arc<gui_server::WaitRegistry>>,
+    sessions: State<'_, Arc<gui_server::RemoteSessions>>,
 ) -> Result<String, String> {
     let registry = Arc::clone(&registry);
+    let sessions = Arc::clone(&sessions);
     GUI_SOCKET_STARTED
         .get_or_init(|| {
             let dir = ensure_config_dir()?;
             let socket = fude_core::ipc::socket_path(&dir);
+            gui_server::clear_stale_socket(&socket)?;
             let name = fude_core::ipc::socket_name(&socket).map_err(|e| e.to_string())?;
-            gui_server::start(name, registry, Arc::new(WindowSink(app)))
+            gui_server::start(name, registry, sessions, Arc::new(WindowSink(app)))
                 .map_err(|e| format!("cannot listen on {}: {}", socket.display(), e))?;
             #[cfg(unix)]
             {
@@ -926,6 +943,93 @@ fn wait_tab_closed(
     registry: State<'_, Arc<gui_server::WaitRegistry>>,
 ) -> usize {
     registry.tab_closed(&path, saved)
+}
+
+// ─── Files served by a remote agent (`remote://host/...`) ──
+
+/// Prefix every path in a tree returned by an agent with its host, so the
+/// frontend can hand any of them straight back to the `remote_*` commands.
+fn prefix_tree(entries: &mut [FileEntry], host: &str) {
+    for e in entries.iter_mut() {
+        e.path = fude_core::ipc::remote_path(host, &e.path);
+        if let Some(children) = e.children.as_mut() {
+            prefix_tree(children, host);
+        }
+    }
+}
+
+#[tauri::command]
+fn remote_read_file(
+    path: String,
+    sessions: State<'_, Arc<gui_server::RemoteSessions>>,
+) -> Result<String, String> {
+    let (session, p) = sessions.lookup(&path)?;
+    let v = session.request(|id| fude_core::ipc::Message::ReadFile { id, path: p })?;
+    v.as_str()
+        .map(str::to_string)
+        .ok_or_else(|| "agent returned no text".to_string())
+}
+
+#[tauri::command]
+fn remote_write_file(
+    path: String,
+    content: String,
+    sessions: State<'_, Arc<gui_server::RemoteSessions>>,
+) -> Result<(), String> {
+    let (session, p) = sessions.lookup(&path)?;
+    session
+        .request(|id| fude_core::ipc::Message::WriteFile {
+            id,
+            path: p,
+            content,
+        })
+        .map(|_| ())
+}
+
+#[tauri::command]
+fn remote_read_dir_tree(
+    path: String,
+    show_all_files: Option<bool>,
+    sessions: State<'_, Arc<gui_server::RemoteSessions>>,
+) -> Result<Vec<FileEntry>, String> {
+    let (session, p) = sessions.lookup(&path)?;
+    let host = session.host.clone();
+    let v = session.request(|id| fude_core::ipc::Message::ReadDirTree {
+        id,
+        path: p,
+        show_all_files: show_all_files.unwrap_or(false),
+    })?;
+    let mut entries: Vec<FileEntry> = serde_json::from_value(v).map_err(|e| e.to_string())?;
+    prefix_tree(&mut entries, &host);
+    Ok(entries)
+}
+
+#[tauri::command]
+fn remote_watch_file(
+    path: String,
+    sessions: State<'_, Arc<gui_server::RemoteSessions>>,
+) -> Result<(), String> {
+    let (session, p) = sessions.lookup(&path)?;
+    session
+        .request(|id| fude_core::ipc::Message::Watch { id, path: p })
+        .map(|_| ())
+}
+
+#[tauri::command]
+fn remote_unwatch_file(
+    path: String,
+    sessions: State<'_, Arc<gui_server::RemoteSessions>>,
+) -> Result<(), String> {
+    let (session, p) = sessions.lookup(&path)?;
+    session
+        .request(|id| fude_core::ipc::Message::Unwatch { id, path: p })
+        .map(|_| ())
+}
+
+/// Hosts with a connected agent (for the status bar / diagnostics).
+#[tauri::command]
+fn remote_hosts(sessions: State<'_, Arc<gui_server::RemoteSessions>>) -> Vec<String> {
+    sessions.hosts()
 }
 
 // ─── Downloadable extensions ───────────────────────────────
@@ -1337,11 +1441,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(PendingOpens::default())
         .manage(Arc::new(gui_server::WaitRegistry::default()))
+        .manage(Arc::new(gui_server::RemoteSessions::default()))
         .invoke_handler(tauri::generate_handler![
             new_window,
             take_open_request,
             gui_ready,
             wait_tab_closed,
+            remote_read_file,
+            remote_write_file,
+            remote_read_dir_tree,
+            remote_watch_file,
+            remote_unwatch_file,
+            remote_hosts,
             read_file,
             write_file,
             rename_path,
@@ -1741,6 +1852,33 @@ mod tests {
     }
 
     // --- PendingOpens main-window queue (cold-start CLI path delivery) ---
+
+    #[test]
+    fn prefix_tree_rewrites_every_path_recursively() {
+        let mut tree = vec![FileEntry {
+            name: "d".into(),
+            path: "/r/d".into(),
+            is_dir: true,
+            children: Some(vec![FileEntry {
+                name: "a.md".into(),
+                path: "/r/d/a.md".into(),
+                is_dir: false,
+                children: None,
+                modified: None,
+                created: None,
+                size: None,
+            }]),
+            modified: None,
+            created: None,
+            size: None,
+        }];
+        prefix_tree(&mut tree, "box");
+        assert_eq!(tree[0].path, "remote://box/r/d");
+        assert_eq!(
+            tree[0].children.as_ref().unwrap()[0].path,
+            "remote://box/r/d/a.md"
+        );
+    }
 
     #[test]
     fn pending_opens_queue_for_main_round_trips() {

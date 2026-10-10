@@ -11,6 +11,7 @@
 // フルパスは title（ツールチップ）とクリックでのコピーで常に取り出せる。
 
 import { canonicalPath } from './pathnorm.js';
+import { displayRemotePath, isRemotePath } from './remote-path.js';
 
 /** 既定の最大表示文字数。これを超えると先頭のディレクトリから畳む。 */
 export const DEFAULT_MAX_LEN = 90;
@@ -95,6 +96,13 @@ export function truncatePath(path, maxLen = DEFAULT_MAX_LEN) {
 export function statusPathText(filePath, vaultPath, opts = {}) {
   if (!filePath) return '';
   const maxLen = opts.maxLen ?? DEFAULT_MAX_LEN;
+  // A file served by a remote fude-cli: show where it lives as `host:/path`
+  // (the vault, if any, is on that machine too, so relativize within it).
+  if (isRemotePath(filePath)) {
+    const rel = isRemotePath(vaultPath) ? toVaultRelative(filePath, vaultPath) : filePath;
+    const shown = rel === filePath ? displayRemotePath(filePath) : './' + rel;
+    return truncatePath(shown, maxLen);
+  }
   const rel = toVaultRelative(filePath, vaultPath);
   const shown = rel === filePath ? rel : '.' + separatorOf(filePath) + rel;
   return truncatePath(shown, maxLen);

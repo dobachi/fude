@@ -44,6 +44,31 @@ describe('backend module (Tauri mode)', () => {
     });
   });
 
+  // remote://host/... は接続中の fude-cli エージェントが持つファイル。読み書き・
+  // ツリー・監視だけが remote_* コマンドに振り分けられ、それ以外は従来どおり。
+  it('remote:// のパスは remote_* コマンドへ振り分ける', async () => {
+    const mod = await import('../backend.js');
+    const p = 'remote://box/home/u/a.md';
+    await mod.readFile(p);
+    expect(mockInvoke).toHaveBeenCalledWith('remote_read_file', { path: p });
+    await mod.writeFile(p, 'x');
+    expect(mockInvoke).toHaveBeenCalledWith('remote_write_file', { path: p, content: 'x' });
+    await mod.readDirTree('remote://box/home/u', true);
+    expect(mockInvoke).toHaveBeenCalledWith('remote_read_dir_tree', {
+      path: 'remote://box/home/u',
+      showAllFiles: true,
+    });
+    await mod.watchFile(p);
+    expect(mockInvoke).toHaveBeenCalledWith('remote_watch_file', { path: p });
+    await mod.unwatchFile(p);
+    expect(mockInvoke).toHaveBeenCalledWith('remote_unwatch_file', { path: p });
+    // 暫定保存はローカル側に残る（リモートが落ちても復元できるように）
+    await mod.writeTempFile(p, 'draft');
+    expect(mockInvoke).toHaveBeenCalledWith('write_temp_file', { path: p, content: 'draft' });
+    await mod.remoteHosts();
+    expect(mockInvoke).toHaveBeenCalledWith('remote_hosts');
+  });
+
   it('writeTempFile calls invoke with write_temp_file command', async () => {
     const mod = await import('../backend.js');
     await mod.writeTempFile('/test.md', 'draft');

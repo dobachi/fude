@@ -380,7 +380,7 @@ mod tests {
         {
             let s = lock_state();
             let st = s.as_ref().unwrap();
-            assert!(st.files.get(&canonical).is_none());
+            assert!(!st.files.contains_key(&canonical));
             assert!(st.dirs.is_empty(), "directory watch must be released");
         }
 
@@ -420,7 +420,7 @@ mod tests {
         {
             let s = lock_state();
             let st = s.as_ref().unwrap();
-            assert!(st.vaults.get(&canonical).is_none());
+            assert!(!st.vaults.contains_key(&canonical));
             assert!(st.vaults.is_empty(), "vault watch must be released");
         }
 

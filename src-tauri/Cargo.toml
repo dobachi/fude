@@ -6,7 +6,7 @@ authors = ["you"]
 edition = "2021"
 
 [workspace]
-members = ["crates/fude-core"]
+members = ["crates/fude-core", "crates/fude-cli"]
 
 [lib]
 name = "fude_lib"
