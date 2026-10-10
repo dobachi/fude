@@ -132,6 +132,7 @@ build-frontend:
 build:
 	npm run build:frontend
 	npx tauri build || echo "Note: Some bundle targets may have failed (e.g., AppImage on WSL). Check output above."
+	cd src-tauri && cargo build --release -p fude-cli
 
 # テスト
 test: test-js test-rust
@@ -169,7 +170,9 @@ check: format-check lint test build-frontend
 
 # インストール（dpkg + ブラウザモード）
 install: build
-	sudo dpkg -i src-tauri/target/release/bundle/deb/Fude_*_amd64.deb
+	# 過去のビルドの deb も残るので、いちばん新しいものだけを入れる
+	sudo dpkg -i "$$(ls -t src-tauri/target/release/bundle/deb/Fude_*_amd64.deb | head -1)"
+	sudo install -m 755 src-tauri/target/release/fude-cli /usr/bin/fude-cli
 	sudo mkdir -p /usr/lib/fude
 	sudo cp dist/* /usr/lib/fude/
 	sudo cp scripts/serve.js /usr/lib/fude/
@@ -180,6 +183,7 @@ install: build
 # アンインストール
 uninstall:
 	sudo dpkg -r fude
+	sudo rm -f /usr/bin/fude-cli
 	sudo rm -rf /usr/lib/fude
 	sudo rm -f /usr/bin/fude-browser
 
