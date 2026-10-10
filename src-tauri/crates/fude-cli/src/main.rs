@@ -2,8 +2,8 @@
 //!
 //! On a machine whose ssh session forwards a Fude GUI socket, `fude-cli
 //! notes.md` opens the file in that GUI and serves it until the tab closes
-//! (docs/TUI_DESIGN.md §4). The terminal UI (§5) will plug in here as the
-//! fallback when no GUI answers.
+//! (docs/TUI_DESIGN.md §4). The terminal UI (§5) is the fallback when no GUI
+//! answers, and `--tui` opens it directly.
 
 mod agent;
 mod args;
@@ -92,18 +92,9 @@ fn main() {
     std::process::exit(run::serve(conn, paths, args.foreground));
 }
 
-/// The terminal UI: currently a read-only viewer of one file.
+/// The terminal UI: files open as tabs, a directory as the file list.
 fn run_tui(paths: &[String]) -> i32 {
-    let [path] = paths else {
-        eprintln!("fude-cli: the terminal UI shows one file at a time");
-        return 2;
-    };
-    let p = std::path::Path::new(path);
-    if p.is_dir() {
-        eprintln!("fude-cli: the terminal UI cannot open a directory yet");
-        return 2;
-    }
-    tui::run_viewer(p)
+    tui::run(paths)
 }
 
 fn cache_dir() -> PathBuf {

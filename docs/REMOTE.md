@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | **Fude（GUI）** | 画面のあるマシン | いつものエディタ。起動すると「開いてほしい」という依頼を受ける口を開けて待つ |
 | **`fude --wait`** | GUI と同じマシン | 「このファイルを開いて、タブを閉じるまで待て」と GUI に頼むコマンド。`git commit` や Claude Code が `$EDITOR` として呼ぶ用 |
-| **`fude-cli`** | 画面のないマシン（ssh 先など）| 同じ依頼を**ネットワーク越し**に GUI へ送り、そのファイルの読み書きを代行する。GUI が見つからなければ端末内ビューアになる。Fude に同梱され、手元では `fude setup` / `fude tui` / `fude check` として呼べる |
+| **`fude-cli`** | 画面のないマシン（ssh 先など）| 同じ依頼を**ネットワーク越し**に GUI へ送り、そのファイルの読み書きを代行する。GUI が見つからなければ端末内エディタになる。Fude に同梱され、手元では `fude setup` / `fude tui` / `fude check` として呼べる |
 
 考え方は一つだけ: **ファイルのある場所で `fude-cli` を打つと、手元の Fude にタブが開く。** 編集は手元の Fude で普通に行い、保存すると元の場所に書き戻される。
 
@@ -36,7 +36,7 @@
 ```
 
 同じマシンの中だけなら ②③ は要らない: `fude --wait file.md` で ① に直接頼む（git / Claude Code 用）。
-画面が無く手元の Fude にも届かないときは、③ は端末内ビューア（`--tui`）に切り替わる。
+画面が無く手元の Fude にも届かないときは、③ は端末内エディタ（`--tui`）に切り替わる。
 
 ```
  git commit ──▶ fude --wait COMMIT_EDITMSG ──▶ Fude にタブ ──▶ 閉じる ──▶ commit 続行
@@ -56,23 +56,32 @@ git config --global core.editor "fude --wait"
 未保存の変更を捨てて閉じた場合は終了コード 1 になり、git はコミットを中止する。
 Fude が起動していなければ自動で起動する。
 
-### 端末内で Markdown を読む
+### 端末内で編集する（ターミナルモード）
 
 ```bash
-fude tui README.md           # 整形して表示。ファイルの変更に追従する（fude-cli --tui でも同じ）
+fude tui README.md           # ファイルをタブで開く（fude-cli --tui でも同じ。複数ファイル可）
+fude tui ~/notes             # ディレクトリならファイル一覧から選ぶ
 ```
+
+GUI と同じ配置（ファイル一覧 / エディタ / プレビュー / ステータスバー）を端末に描く。
+手元の Fude に届かないとき `fude-cli notes.md` は自動でこれになる。
 
 | キー | 動作 |
 | --- | --- |
-| `q` / Esc / Ctrl+C | 終了 |
-| `j` `k` ↑ ↓ | 1 行スクロール |
-| Ctrl+D / Ctrl+U | 半ページ |
-| Space / PageDown、PageUp | 1 ページ |
-| `g` / `G` | 先頭 / 末尾 |
-| `r` | 再読込 |
-| マウスホイール | スクロール |
+| 文字入力、矢印、Backspace など | そのまま編集（既定の EDIT モード。設定が Vim モードなら i / Esc / u / `/` などの Vim 操作） |
+| Ctrl+S | 保存 |
+| Enter | リストの行では次の項目のマーカーを続ける（空の項目で Enter するとリストを抜ける） |
+| Ctrl+Z / Ctrl+Y | 元に戻す / やり直す（EDIT モード） |
+| Ctrl+F | 検索（Enter で次へ、Esc で戻る） |
+| Alt+J / Alt+K / Alt+L | エディタのみ / 分割 / プレビューのみ（GUI の Ctrl+Shift+J/K/L） |
+| Alt+E | ファイル一覧を開いて移動（j/k、Enter で開く、Tab か Esc でエディタへ戻る） |
+| Alt+T / Alt+W / Alt+] / Alt+[ | 新規タブ / タブを閉じる / 次 / 前のタブ |
+| Alt+R | ディスクから読み直す（外部で変わったときはステータスバーに出る。未編集なら自動で追従） |
+| F1 | キー一覧 |
+| Alt+Q / Ctrl+Q | 終了（未保存があれば確認） |
 
-いまのところ閲覧のみ（編集機能は今後）。
+編集中の内容は GUI と同じ暫定保存（`~/.config/fude/tmp/`）に 2 秒おきに逃がすので、落ちても次に開いたときに復元を聞かれる。
+GUI の Ctrl+Shift+X は端末では区別できないため Alt+X に置き換えている（kitty / WezTerm などでも同じ）。
 
 ## 2. ssh 先のファイルを手元の Fude で編集する
 
@@ -169,7 +178,7 @@ Windows の Fude は名前付きパイプに加えて `127.0.0.1:47821` の TCP 
 
 | 症状 | 見るところ |
 | --- | --- |
-| `fude-cli` が端末内ビューアになってしまう | 手元で Fude が起動しているか。`fude-cli --check` で経路を確認 |
+| `fude-cli` が端末内エディタになってしまう | 手元で Fude が起動しているか。`fude-cli --check` で経路を確認 |
 | `remote agents must present the GUI token` | 鍵が違う。`fude setup <host>` をやり直すか `~/.config/fude/gui-token` を手元のものと揃える |
 | `tcp://127.0.0.1:47821: Connection refused` | ssh の転送が張られていない。`~/.ssh/config` の `RemoteForward` 行と、`ssh` でログインし直したか |
 | `remote port forwarding failed for listen port 47821` | k16 側で別のものが 47821 を使っている。`fude setup k16 --port 47822` で別ポートに |

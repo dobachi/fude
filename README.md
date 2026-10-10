@@ -29,7 +29,7 @@
 - **自動アップデート** - Tauri Updaterによるアプリ更新
 - **WSLブラウザモード** - 日本語IME対応のブラウザベースUI (`http://localhost:3000`)
 - **WSLリモートモード** - Windows版Fudeを自動取得して起動
-- **`$EDITOR` 連携・リモート編集・ターミナルモード** - `fude --wait` で git/Claude Code から呼べる。ssh 先で `fude-cli file.md` と打つと手元の Fude に開く。`fude-cli --tui` で端末内プレビュー（[docs/REMOTE.md](docs/REMOTE.md)）
+- **`$EDITOR` 連携・リモート編集・ターミナルモード** - `fude --wait` で git/Claude Code から呼べる。ssh 先で `fude-cli file.md` と打つと手元の Fude に開く。`fude tui` で端末内編集（[docs/REMOTE.md](docs/REMOTE.md)）
 - **フレームワーク不使用** - Vanilla JSで実装、高速かつ軽量
 
 ## インストール
@@ -163,8 +163,8 @@ GUI は名前付きパイプに加えて **`127.0.0.1:47821` の TCP** でも待
   Windows 側で `FUDE_GUI_TCP=0.0.0.0:47821` を設定して起動してください（鍵が無いと拒否されます）
 
 GUI に繋がらないとき（転送が無い・手元の Fude が起動していない）は端末内のビューアに
-フォールバックします（`fude tui file.md` で明示も可）。Markdown を整形して表示し、
-ファイルの変更に追従します。`q` で終了、`j`/`k` でスクロール。編集機能は今後追加予定です。
+フォールバックします（`fude tui file.md` で明示も可）。GUI と同じ配置（ファイル一覧・エディタ・
+プレビュー）で編集でき、保存・暫定保存・外部変更の追従も同じです。Alt+Q で終了、F1 でキー一覧。
 詳細は [docs/TUI_DESIGN.md](docs/TUI_DESIGN.md)。
 
 ### ビューモード

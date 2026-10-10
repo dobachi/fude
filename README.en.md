@@ -142,8 +142,8 @@ The token lives in `%APPDATA%\fude\gui-token`.
   still guards it)
 
 When no GUI answers (no forward, or Fude is not running on your machine) it falls back
-to an in-terminal viewer (`fude tui file.md` forces it): rendered Markdown that
-follows changes on disk. `q` quits, `j`/`k` scroll. Editing is planned.
+to an in-terminal editor (`fude tui file.md` forces it) with the GUI's layout — file list,
+editor, live preview — plus save, autosave and reload on external change. Alt+Q quits, F1 lists keys.
 See [docs/TUI_DESIGN.md](docs/TUI_DESIGN.md) for the design.
 
 ### View modes

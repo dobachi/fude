@@ -342,6 +342,14 @@ JS 側は残す（GUI は引き続き JS で動く）。二重実装のコスト
 キー: `q` / Esc / Ctrl+C 終了、`j` `k` ↑↓ 1 行、Ctrl+D/U 半ページ、Space / PageDown / Ctrl+F・Ctrl+B ページ、
 `g` / `G` 先頭末尾、`r` 再読込、マウスホイール。
 
+### 5.4.2 実装（2026-10-10、エディタ v1）
+
+`crates/fude-cli/src/tui/`: `app.rs`（`App`: タブ・表示モード・フォーカス・プロンプト・描画・キー配送。
+`TestBackend` で描画とキー操作をテスト）、`doc.rs`（`Doc`: edtui の `EditorState` ＋ ディスク上のテキスト、
+dirty 判定、暫定保存のデバウンス、外部変更時の自動リロード/フラグ）、`sidebar.rs`（`scan_dir_tree` を
+展開状態つきで平坦化）、`list_continue.rs`（Enter でのリスト継続、`list-nav.js` 相当）。
+キーは §6 のとおり `Ctrl+Shift+X → Alt+X`。プレビューはカーソル行を `line_for_source` で追う。
+
 ### 5.5 プレビューの描画
 
 comrak の AST を ratatui の `Text` に変換する。
@@ -426,8 +434,8 @@ CLAUDE.md の「テストの無い変更は未完成」に従う。
 | 1 ✅ | `fude-core` 切り出し（§2.3）。既存テスト green を維持 | Tauri 非依存のライブラリ |
 | 2 ✅ | `fude-cli` エージェント（§4）。unix socket 逆転送、`--root` 相当の範囲制限 | ssh 先で `fude-cli file.md` が操作側 GUI に開く（切断時の退避・セッション復元は未着手） |
 | 3 ✅ | TUI ビューア: `fude-cli --tui file.md`。描画 + 監視でライブ更新 | エージェントの出力を端末で眺められる |
-| 4 | TUI エディタ v1: Normal キーモード、分割表示、ツリー、タブ、セッション、暫定保存、検索 | 転送が無くても編集できる |
-| 5 | TUI v2: Vim / Emacs、リスト・チェックボックス・表、アウトライン | GUI と同じ操作感 |
+| 4 ✅ | TUI エディタ v1（2026-10-10）: edtui ベース。EDIT（Normal キーモード）/ Vim、分割表示、ファイル一覧、タブ、暫定保存と復元、外部変更追従、検索、リスト継続 | 転送が無くても編集できる |
+| 5 | TUI v2: Emacs、チェックボックス切替・表の整形、アウトライン、コマンドパレット、セッション復元 | GUI と同じ操作感 |
 | 6 | TUI v3: ペイン分割、画像、git ガター（`features/diff-highlight.js` の TUI 版） | |
 
 0 → 2 がリモート GUI、3 → 6 が TUI。0 と 1 は両方の土台なので先に済ませる。
@@ -438,7 +446,7 @@ CLAUDE.md の「テストの無い変更は未完成」に従う。
 
 | 論点 | 現時点の案 |
 | --- | --- |
-| Vim エミュレーションを自作するか `edtui` を使うか | v1 を Normal で出してから判断 |
+| Vim エミュレーション | **`edtui` を採用**（ratatui-core 0.1 / crossterm 0.29 で ratatui 0.30 と共存）。Normal キーモードは edtui の Insert モード固定（Esc を握りつぶす）で実現 |
 | `fude-cli` の配布 | **済**: GitHub Releases に `fude-cli-<os>-<arch>`（CI）。deb には未同梱（`make install` は `/usr/bin/fude-cli` を置く）。`fude-cli setup` は CPU が違う相手に Releases から取る |
 | 既存 `fude-browser` との関係 | 残す。「ブラウザを GUI にする」用途は別物。将来 `fude-cli` が serve.js の API を話せるようになれば統合候補 |
 | リモート側の暫定ファイル | 操作側に置く（§4.4）。リモート側には置かない |
