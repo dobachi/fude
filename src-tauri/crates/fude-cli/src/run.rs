@@ -251,6 +251,8 @@ mod tests {
         assert!(!host_name().is_empty());
     }
 
+    // `/abs/y.md` is only absolute on Unix.
+    #[cfg(unix)]
     #[test]
     fn absolute_paths_resolve_relative_operands() {
         let cwd = std::env::current_dir().unwrap();

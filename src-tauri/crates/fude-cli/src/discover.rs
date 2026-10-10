@@ -318,6 +318,8 @@ mod tests {
         assert_eq!(e.to_string(), "bad token");
     }
 
+    // Uses a filesystem socket path, which Windows named pipes cannot be.
+    #[cfg(unix)]
     #[test]
     fn a_silent_peer_is_given_up_on_after_the_timeout() {
         use interprocess::local_socket::{GenericFilePath, ListenerOptions};
