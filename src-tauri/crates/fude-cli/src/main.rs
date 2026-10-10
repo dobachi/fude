@@ -7,6 +7,7 @@
 
 mod agent;
 mod args;
+mod bridge;
 mod discover;
 mod run;
 mod setup;
@@ -34,6 +35,20 @@ fn main() {
     }
     if let Some(host) = &args.setup {
         std::process::exit(setup::run(host, args.port));
+    }
+    if args.bridge {
+        std::process::exit(bridge::run_bridge(args.exe.as_deref()));
+    }
+    if args.pipe {
+        // The GUI on this (Windows) machine: its own pipe, then loopback TCP.
+        let local = fude_core::config_dir()
+            .map(|d| fude_core::ipc::socket_path(&d))
+            .unwrap_or_else(|_| PathBuf::from("gui.sock"));
+        let cands = [
+            discover::Candidate::Socket(local),
+            discover::Candidate::Tcp(discover::DEFAULT_TCP_ADDR.to_string()),
+        ];
+        std::process::exit(bridge::run_pipe(&cands));
     }
     if args.check {
         match run::connect(&socket_candidates()) {

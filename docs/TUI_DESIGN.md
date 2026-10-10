@@ -233,6 +233,18 @@ GUI 側の実装:
 `mkdir -p` → 鍵と `fude-cli` を配置（`uname -sm` が手元と同じなら自分自身を scp、違えば Releases の
 `fude-cli-<os>-<arch>` を curl）→ `ssh host fude-cli --check` で疎通確認。`--check` は接続して GUI の版と経路を表示するだけ。
 
+### 4.3.3 `fude bridge`: WSL → Windows の Fude（2026-10-10）
+
+WSL2（NAT）からは Windows の localhost に届かず、0.0.0.0 待ち受けはファイアウォールと動的 IP が絡む。
+ネットワークを使わずに済ませるため、WSL interop で Windows プロセスの標準入出力に繋ぐ:
+`fude-cli bridge`（WSL）が `gui.sock` を握り、接続ごとに `fude-cli.exe pipe` を起動して中継する。
+`pipe` は GUI の名前付きパイプ（無ければ TCP）へ素通しする。ブリッジは最初の 1 行だけ読み、host の無い hello
+（`fude --wait`。GUI がパスを自分で読もうとする）は断る。鍵は WSL のものを `%APPDATA%\fude\gui-token` に同期する
+（リモートは WSL の鍵で設定済みのため）。`crates/fude-cli/src/bridge.rs`。
+
+あわせて GUI の TCP 待ち受けは **Windows のみ既定で有効**にした（`gui_tcp_addr`）。Unix ではソケットで足り、
+WSL の Fude と Windows の Fude が localhost の同じポートを取り合う問題が構造的に無くなる。
+
 ### 4.4 切断・再接続
 
 | 事象 | GUI 側の振る舞い |

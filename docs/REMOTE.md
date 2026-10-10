@@ -139,7 +139,7 @@ TCP の `RemoteForward` と `scp` はそのまま通る。Unix ソケットの�
 - **Tailscale / VPN / LAN で直接届く場合**: GUI 側を外から繋げる口で起動し、相手側は宛先を指定する
 
   ```bash
-  # GUI 側（起動前に環境変数）: 全インタフェースで待ち受け。鍵が無い接続は拒否される
+  # GUI 側（起動前に環境変数）: TCP は既定では開いていない。全インタフェースで待ち受け。鍵が無い接続は拒否される
   FUDE_GUI_TCP=0.0.0.0:47821 fude
   # 相手側: 鍵（~/.config/fude/gui-token）を置いた上で
   FUDE_GUI_ADDR=100.64.0.5:47821 fude-cli notes.md
@@ -148,24 +148,51 @@ TCP の `RemoteForward` と `scp` はそのまま通る。Unix ソケットの�
   通信は暗号化されないので、Tailscale/WireGuard のように経路が守られている場合に限る。
   インターネット越しは ssh を使うこと。
 
-## 4. Windows 版 Fude で受ける
+## 4. Windows 版 Fude で受ける（WSL を使っている場合）
 
-Windows の Fude は名前付きパイプに加えて `127.0.0.1:47821` の TCP でも待ち受ける（0.8.0 以降）。
-鍵は `%APPDATA%\fude\gui-token`。
+WSL で作業しつつ、表示は Windows の Fude にしたい場合。**WSL で 1 コマンド**、PowerShell からの ssh も
+ファイアウォールの設定も要らない:
 
-- **Windows の ssh からサーバへ**: Windows の `~/.ssh/config` に `RemoteForward 47821 127.0.0.1:47821`
-  （パイプには転送できないので TCP を使う）。サーバ側は §2 と同じ
-- **WSL から Windows の Fude へ**: WSL2 の既定（NAT）では Windows の localhost に届かないので、
-  Windows 側を `FUDE_GUI_TCP=0.0.0.0:47821` で起動し（`setx FUDE_GUI_TCP 0.0.0.0:47821` 後に再起動）、
-  WSL 側は `FUDE_GUI_ADDR="$(ip route | awk '/default/{print $3}'):47821"` を設定して `fude-cli notes.md`。
-  鍵は WSL の `~/.config/fude/gui-token` と `%APPDATA%\fude\gui-token` を同じ内容にしておく。
-  `.wslconfig` で `networkingMode=mirrored` なら `127.0.0.1` のままで届く
+```bash
+fude bridge            # WSL で実行（fude-cli bridge でも同じ）。起動したままにする
+```
+
+```
+ Windows                                   WSL                                  ssh 先 k16
+ ┌───────────────────┐               ┌──────────────────────────┐           ┌─────────────────┐
+ │ Fude（Windows 版） │◀─ 名前付き ─── │ fude-cli.exe pipe         │           │                 │
+ │   を起動しておく    │    パイプ      │   ▲ 標準入出力（WSL interop）│           │                 │
+ │                   │               │ fude bridge               │◀─ ssh 転送 ─│ fude-cli a.md   │
+ │ タブ:             │               │   ~/.config/fude/gui.sock │           │                 │
+ │  home-wsl:/…/n.md │               │   ▲                       │           │                 │
+ │  k16:/…/a.md      │               │ fude-cli n.md             │           │                 │
+ └───────────────────┘               └──────────────────────────┘           └─────────────────┘
+```
+
+- `fude bridge` は WSL の Fude が待ち受けるはずの `~/.config/fude/gui.sock` を代わりに握り、来た接続を
+  Windows 側の `fude-cli.exe pipe` に標準入出力で渡す。そこから Windows の Fude の名前付きパイプへ繋がる
+- だから WSL で打つ `fude-cli notes.md` も、WSL から `ssh k16` した先の `fude-cli` も（転送先が同じソケットなので）
+  そのまま Windows の Fude に開く。`fude setup k16` をやり直す必要もない
+- 初回は鍵を `%APPDATA%\fude\gui-token` に書くので、そのとき Windows の Fude が起動中なら一度だけ再起動する
+- `fude-cli.exe` は Fude のインストール先か `~/.cache/fude/` から探し、無ければ GitHub Releases から取得する
+  （`--exe PATH` / `FUDE_CLI_EXE` で指定可）
+- WSL の Fude と `fude bridge` は同じソケットを使うので**どちらか一方**。「WSL から開いたものをどちらの
+  ウィンドウに出すか」の切り替えになる（両方起動しようとすると後から起動したほうが断る）
+- WSL のローカルな `fude --wait` は使えない（Windows の Fude は WSL のパスを直接読めない）。`fude-cli --wait` を使う。
+  `$EDITOR` には `fude-cli --wait` を設定しておけば、WSL の Fude でも Windows の Fude でも動く
+
+### Windows だけで完結させる場合（PowerShell から ssh する）
+
+Windows の Fude は名前付きパイプに加えて `127.0.0.1:47821` の TCP でも待ち受ける（ssh はパイプへ転送できないため）。
+PowerShell で `fude-cli.exe setup k16`（インストール先の `fude-cli.exe`）を実行すると、Windows の
+`~/.ssh/config` に `RemoteForward 47821 127.0.0.1:47821` を足し、鍵と `fude-cli` を k16 に置く。
 
 ## 5. 環境変数
 
 | 変数 | どちら側 | 意味 |
 | --- | --- | --- |
-| `FUDE_GUI_TCP` | GUI | TCP の待ち受けアドレス（既定 `127.0.0.1:47821`、`off` で無効） |
+| `FUDE_GUI_TCP` | GUI | TCP の待ち受けアドレス。Windows は既定で `127.0.0.1:47821`、Linux / macOS / WSL は既定で**待ち受けない**（ソケットで足りる。指定すると有効、`off` で無効） |
+| `FUDE_CLI_EXE` | fude bridge | Windows 側の `fude-cli.exe` の場所 |
 | `FUDE_GUI_SOCK` | GUI / fude-cli | Unix ソケットの場所（既定 `~/.config/fude/gui.sock`） |
 | `FUDE_GUI_ADDR` | fude-cli | 繋ぎに行く TCP アドレス（指定すると他の候補は探さない） |
 | `FUDE_GUI_TOKEN` | fude-cli | 鍵（指定が無ければ `~/.config/fude/gui-token`） |

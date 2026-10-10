@@ -122,8 +122,28 @@ pub fn connect_any(cands: &[Candidate], hello: &Message) -> Result<Connected, Ve
     Err(reasons)
 }
 
+type Halves = (Box<dyn BufRead + Send>, Box<dyn Write + Send>);
+
+/// Connect to the first candidate that accepts, without any handshake (for
+/// `fude-cli pipe`, which relays somebody else's conversation).
+pub fn connect_raw(cands: &[Candidate]) -> Result<Halves, Vec<String>> {
+    let mut reasons = Vec::new();
+    for cand in cands {
+        match open(cand) {
+            Ok(rw) => return Ok(rw),
+            Err(e) => reasons.push(format!("{}: {}", cand, e)),
+        }
+    }
+    Err(reasons)
+}
+
 fn try_one(cand: &Candidate, hello: &Message) -> io::Result<Connected> {
-    let (reader, writer): (Box<dyn BufRead + Send>, Box<dyn Write + Send>) = match cand {
+    let (reader, writer) = open(cand)?;
+    handshake(reader, writer, cand.clone(), hello)
+}
+
+fn open(cand: &Candidate) -> io::Result<Halves> {
+    let halves: Halves = match cand {
         Candidate::Socket(sock) => {
             let name = socket_name(sock)?;
             let (recv, send) = Stream::connect(name)?.split();
@@ -140,7 +160,7 @@ fn try_one(cand: &Candidate, hello: &Message) -> io::Result<Connected> {
             (Box::new(BufReader::new(stream)), Box::new(w))
         }
     };
-    handshake(reader, writer, cand.clone(), hello)
+    Ok(halves)
 }
 
 /// Send `hello` and wait for `welcome`. The handshake read blocks, and a

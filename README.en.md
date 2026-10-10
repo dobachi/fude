@@ -128,23 +128,12 @@ directory of each file you pass (or the directory itself) is exposed. Change the
 (`RemoteForward ~/.cache/fude/gui/%C.sock …`) is also searched, but some sshds create that
 socket owned by root, so TCP is the default.
 
-#### Fude on Windows, or reaching it from WSL
+#### Receiving in Fude on Windows (from WSL)
 
-Besides the named pipe, the GUI listens on **TCP `127.0.0.1:47821`** (every connection there
-needs the token; `FUDE_GUI_TCP=off` disables it, `FUDE_GUI_TCP=127.0.0.1:<port>` moves it).
-The token lives in `%APPDATA%\fude\gui-token`.
-
-- From Windows ssh to a server: `RemoteForward 47821 127.0.0.1:47821` (ssh cannot forward to a pipe)
-- From WSL to the Windows Fude: WSL2's default NAT does not reach the Windows localhost, so use
-  `FUDE_GUI_ADDR=<Windows host IP>:47821 fude-cli notes.md` (with `networkingMode=mirrored` in
-  `.wslconfig`, `127.0.0.1` works). A GUI bound to 127.0.0.1 is not reachable from another
-  address, so start the Windows side with `FUDE_GUI_TCP=0.0.0.0:47821` for this (the token
-  still guards it)
-
-When no GUI answers (no forward, or Fude is not running on your machine) it falls back
-to an in-terminal editor (`fude tui file.md` forces it) with the GUI's layout — file list,
-editor, live preview — plus save, autosave and reload on external change. Alt+Q quits, F1 lists keys.
-See [docs/TUI_DESIGN.md](docs/TUI_DESIGN.md) for the design.
+Run `fude bridge` in WSL and everything opened from WSL — `fude-cli notes.md` there and `fude-cli` in ssh sessions
+started from there — opens in the **Windows** Fude, with no ssh from PowerShell and no firewall rule (it and a WSL Fude
+are alternatives). See [docs/REMOTE.md](docs/REMOTE.md) §4. The GUI's TCP listener (`127.0.0.1:47821`) is on by default
+only on Windows; on Linux/WSL it opens only when `FUDE_GUI_TCP=<addr>` is set, so the two never compete for the port.
 
 ### View modes
 

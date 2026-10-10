@@ -150,22 +150,12 @@ fude-cli --check           # どの経路で手元の Fude に届いているか
 Unix ソケットの逆転送（`RemoteForward ~/.cache/fude/gui/%C.sock …`）も探しますが、sshd がソケットを
 root 所有で作る環境では使えないため、TCP を既定にしています。
 
-#### Windows の Fude / WSL から Windows の Fude へ
+#### Windows の Fude で受ける（WSL から）
 
-GUI は名前付きパイプに加えて **`127.0.0.1:47821` の TCP** でも待ち受けます（ここに来た接続は全て鍵が必要。
-`FUDE_GUI_TCP=off` で無効化、`FUDE_GUI_TCP=127.0.0.1:<port>` で変更）。鍵は `%APPDATA%\fude\gui-token` です。
-
-- Windows の ssh からサーバへ: `RemoteForward 47821 127.0.0.1:47821`（パイプには転送できないので TCP 側を使う）
-- WSL から Windows 版 Fude へ: WSL2 の既定 NAT では Windows の localhost に届かないため、
-  `FUDE_GUI_ADDR=<Windows ホストの IP>:47821 fude-cli notes.md` のように指定します
-  （`.wslconfig` の `networkingMode=mirrored` なら `127.0.0.1` のままで届きます）。
-  ただし 127.0.0.1 で待ち受けている GUI には別 IP からは繋がらないので、この用途では
-  Windows 側で `FUDE_GUI_TCP=0.0.0.0:47821` を設定して起動してください（鍵が無いと拒否されます）
-
-GUI に繋がらないとき（転送が無い・手元の Fude が起動していない）は端末内のビューアに
-フォールバックします（`fude tui file.md` で明示も可）。GUI と同じ配置（ファイル一覧・エディタ・
-プレビュー）で編集でき、保存・暫定保存・外部変更の追従も同じです。Alt+Q で終了、F1 でキー一覧。
-詳細は [docs/TUI_DESIGN.md](docs/TUI_DESIGN.md)。
+WSL で `fude bridge` を起動しておくと、WSL で打つ `fude-cli notes.md` も、WSL から ssh した先の `fude-cli` も
+**Windows の Fude** に開きます（PowerShell からの ssh もファイアウォール設定も不要）。WSL の Fude とはどちらか一方です。
+図と詳細は [docs/REMOTE.md](docs/REMOTE.md) §4。GUI の TCP 待ち受け（`127.0.0.1:47821`）は Windows のみ既定で有効、
+Linux / WSL では `FUDE_GUI_TCP=<addr>` を指定したときだけ開くので、WSL の Fude と Windows の Fude が同じポートを取り合うことはありません。
 
 ### ビューモード
 

@@ -135,6 +135,22 @@ pub fn local_uname_sm() -> String {
     format!("{} {}", os, arch)
 }
 
+/// What the remote's loopback port is forwarded to on this machine: the
+/// GUI's socket where ssh can reach one, its loopback TCP port on Windows
+/// (ssh cannot forward to a named pipe).
+pub fn forward_target(config_dir: &Path) -> String {
+    if cfg!(windows) {
+        std::env::var("FUDE_GUI_TCP")
+            .ok()
+            .filter(|a| !a.trim().is_empty() && a != "off")
+            .unwrap_or_else(|| format!("127.0.0.1:{}", DEFAULT_PORT))
+    } else {
+        fude_core::ipc::socket_path(config_dir)
+            .to_string_lossy()
+            .to_string()
+    }
+}
+
 struct Step<'a>(&'a str);
 impl Step<'_> {
     fn ok(&self, detail: &str) {
@@ -198,13 +214,13 @@ fn run_inner(host: &str, port: u16) -> Result<(), String> {
     Step("token").ok(&token_path.display().to_string());
 
     // 2. ssh config
-    let local_socket = fude_core::ipc::socket_path(&config_dir);
+    let target = forward_target(&config_dir);
     let ssh_dir = dirs::home_dir()
         .ok_or("cannot find the home directory")?
         .join(".ssh");
     let cfg_path = ssh_dir.join("config");
     let existing = std::fs::read_to_string(&cfg_path).unwrap_or_default();
-    let (updated, change) = with_forward(&existing, host, port, &local_socket.to_string_lossy());
+    let (updated, change) = with_forward(&existing, host, port, &target);
     match change {
         ConfigChange::Unchanged => Step("ssh config").ok("forward already present"),
         _ => {
@@ -333,6 +349,13 @@ mod tests {
         assert_eq!(c, ConfigChange::AddedToBlock);
         assert!(out.contains("Host k16\n  RemoteForward 47821"));
         assert!(out.starts_with("#サブアカウント\n"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_forward_targets_the_gui_socket_on_unix() {
+        std::env::remove_var(fude_core::ipc::SOCKET_ENV);
+        assert_eq!(forward_target(Path::new("/c")), "/c/gui.sock");
     }
 
     #[test]

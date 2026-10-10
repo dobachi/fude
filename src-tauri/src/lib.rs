@@ -632,6 +632,7 @@ Usage: fude [OPTIONS] [PATH]
        fude setup <SSH-HOST> [--port N]
        fude tui <FILE>
        fude check
+       fude bridge
        fude browser [BROWSER OPTIONS]
 
 Arguments:
@@ -652,6 +653,7 @@ Commands:
            token and fude-cli over, and checks the connection (docs/REMOTE.md).
   tui      Show a Markdown file in the terminal (`q` quits, `j`/`k` scroll).
   check    Report whether a running Fude answers, and through which route.
+  bridge   (WSL) Send everything opened from WSL to the Fude on Windows.
   browser  Serve Fude over HTTP and use it from a web browser (needs Node.js).
            Options cover the listen address, which IP ranges may connect
            (--allow), the access key and TLS: see `fude browser --help`.
@@ -699,6 +701,9 @@ fn cli_subcommand_args(args: &[String]) -> Option<Vec<String>> {
             .chain(rest.iter().cloned())
             .collect(),
         Some("check") => std::iter::once("--check".to_string())
+            .chain(rest.iter().cloned())
+            .collect(),
+        Some("bridge") => std::iter::once("bridge".to_string())
             .chain(rest.iter().cloned())
             .collect(),
         _ => return None,
@@ -988,6 +993,16 @@ static GUI_SOCKET_STARTED: OnceLock<Result<String, String>> = OnceLock::new();
 /// default and what an ssh `RemoteForward 47821 127.0.0.1:47821` targets).
 const GUI_TCP_ADDR: &str = "127.0.0.1:47821";
 
+/// The TCP address to listen on, if any: `FUDE_GUI_TCP` when set ("off" or
+/// empty disables), else the default on Windows and nothing elsewhere.
+fn gui_tcp_addr(env: Option<&str>, windows: bool) -> Option<String> {
+    match env.map(str::trim) {
+        Some("off") | Some("") => None,
+        Some(addr) => Some(addr.to_string()),
+        None => windows.then(|| GUI_TCP_ADDR.to_string()),
+    }
+}
+
 /// Called by the main window once its `cli-args` listener is registered, so
 /// no `open` can arrive before anyone is there to act on it. Idempotent:
 /// later calls return the first outcome. Returns the socket path.
@@ -1016,12 +1031,15 @@ fn gui_ready(
                 Arc::clone(&sink),
             )
             .map_err(|e| format!("cannot listen on {}: {}", socket.display(), e))?;
-            // Loopback TCP as well (token required from everyone there), so
-            // Windows ssh clients and WSL can reach this GUI. `FUDE_GUI_TCP`
-            // overrides the address; "off" disables it. Failure to bind
-            // (port taken) is not fatal: the socket still works.
-            let tcp = std::env::var("FUDE_GUI_TCP").unwrap_or_else(|_| GUI_TCP_ADDR.to_string());
-            if tcp != "off" {
+            // Loopback TCP as well (token required from everyone there).
+            // On Windows it is on by default: ssh cannot forward to a named
+            // pipe, so this is what a RemoteForward targets. Elsewhere the
+            // socket serves that purpose and TCP is opt-in (`FUDE_GUI_TCP=
+            // addr`), which also keeps a WSL Fude and a Windows Fude from
+            // competing for one localhost port. "off" disables it. Failure
+            // to bind is not fatal: the socket still works.
+            let tcp = gui_tcp_addr(std::env::var("FUDE_GUI_TCP").ok().as_deref(), cfg!(windows));
+            if let Some(tcp) = tcp {
                 match gui_server::start_tcp(&tcp, token, registry, sessions, sink) {
                     Ok(addr) => eprintln!("fude: also listening on tcp://{}", addr),
                     Err(e) => eprintln!("fude: not listening on tcp://{}: {}", tcp, e),
@@ -1061,7 +1079,7 @@ fn prefix_tree(entries: &mut [FileEntry], host: &str) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remote_read_file(
     path: String,
     sessions: State<'_, Arc<gui_server::RemoteSessions>>,
@@ -1073,7 +1091,7 @@ fn remote_read_file(
         .ok_or_else(|| "agent returned no text".to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remote_write_file(
     path: String,
     content: String,
@@ -1089,7 +1107,7 @@ fn remote_write_file(
         .map(|_| ())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remote_read_dir_tree(
     path: String,
     show_all_files: Option<bool>,
@@ -1107,7 +1125,7 @@ fn remote_read_dir_tree(
     Ok(entries)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remote_watch_file(
     path: String,
     sessions: State<'_, Arc<gui_server::RemoteSessions>>,
@@ -1118,7 +1136,7 @@ fn remote_watch_file(
         .map(|_| ())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remote_unwatch_file(
     path: String,
     sessions: State<'_, Arc<gui_server::RemoteSessions>>,
@@ -1749,6 +1767,18 @@ mod tests {
         let text = cli_info_text(&args(&["fude", "--help"])).unwrap();
         assert!(text.contains("fude browser --help"));
         assert!(text.contains("--allow"));
+    }
+
+    #[test]
+    fn tcp_listening_is_default_only_on_windows() {
+        assert_eq!(gui_tcp_addr(None, true).as_deref(), Some(GUI_TCP_ADDR));
+        assert_eq!(gui_tcp_addr(None, false), None);
+        assert_eq!(gui_tcp_addr(Some("off"), true), None);
+        assert_eq!(gui_tcp_addr(Some(" "), true), None);
+        assert_eq!(
+            gui_tcp_addr(Some("0.0.0.0:5000"), false).as_deref(),
+            Some("0.0.0.0:5000")
+        );
     }
 
     #[test]

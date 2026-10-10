@@ -18,11 +18,18 @@ pub struct Args {
     /// `setup <ssh-host>`: configure a remote machine (see setup.rs).
     pub setup: Option<String>,
     pub port: u16,
+    /// `bridge`: relay this machine's GUI socket to the Fude on Windows.
+    pub bridge: bool,
+    /// `pipe`: the Windows half of `bridge` (internal).
+    pub pipe: bool,
+    /// `--exe PATH`: the Windows fude-cli.exe `bridge` should run.
+    pub exe: Option<String>,
 }
 
 pub const USAGE: &str = "\
 Usage: fude-cli [OPTIONS] [--] <PATH>...
        fude-cli setup <SSH-HOST> [--port N]
+       fude-cli bridge [--exe PATH]
        fude-cli --check
 
 Open files in the Fude GUI that your ssh session forwards to (see
@@ -41,6 +48,10 @@ Commands:
   setup HOST     Prepare ssh host HOST: add the RemoteForward to ~/.ssh/config,
                  copy the GUI token and fude-cli there, verify the connection.
                  --port N uses a loopback port other than 47821.
+  bridge         (WSL) Make the Fude running on Windows receive everything
+                 opened from WSL — `fude-cli FILE` here and in ssh sessions
+                 started from here — by relaying ~/.config/fude/gui.sock to
+                 it. Needs no ssh from PowerShell and no firewall rule.
 
 The GUI is found through $FUDE_GUI_SOCK, then ~/.cache/fude/gui/*.sock
 (ssh RemoteForward targets), then the local ~/.config/fude/gui.sock.
@@ -56,7 +67,23 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
     let mut operands_only = false;
     let mut want_port = false;
     let mut want_setup_host = argv.get(1).map(|s| s == "setup").unwrap_or(false);
-    for arg in argv.iter().skip(if want_setup_host { 2 } else { 1 }) {
+    let mut want_exe = false;
+    match argv.get(1).map(String::as_str) {
+        Some("bridge") => a.bridge = true,
+        Some("pipe") => a.pipe = true,
+        _ => {}
+    }
+    let skip = if want_setup_host || a.bridge || a.pipe {
+        2
+    } else {
+        1
+    };
+    for arg in argv.iter().skip(skip) {
+        if want_exe {
+            a.exe = Some(arg.clone());
+            want_exe = false;
+            continue;
+        }
         if want_port {
             a.port = arg.parse().map_err(|_| format!("bad port '{}'", arg))?;
             want_port = false;
@@ -74,6 +101,7 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
         match arg.as_str() {
             "--check" => a.check = true,
             "--port" => want_port = true,
+            "--exe" => want_exe = true,
             "--" => operands_only = true,
             "-w" | "--wait" => a.wait = true,
             "--gui" => a.gui = true,
@@ -92,6 +120,9 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
     }
     if want_port {
         return Err("--port needs a value".into());
+    }
+    if want_exe {
+        return Err("--exe needs a value".into());
     }
     if argv.get(1).map(|s| s == "setup").unwrap_or(false) && a.setup.is_none() && !a.help {
         return Err("setup needs an ssh host".into());
@@ -142,6 +173,19 @@ mod tests {
         let a = parse(&argv(&["fude-cli", "-w", "setup"])).unwrap();
         assert_eq!(a.paths, vec!["setup"]);
         assert!(parse(&argv(&["fude-cli", "--check"])).unwrap().check);
+    }
+
+    #[test]
+    fn bridge_and_pipe_are_first_argument_subcommands() {
+        let a = parse(&argv(&["fude-cli", "bridge", "--exe", "/x/fude-cli.exe"])).unwrap();
+        assert!(a.bridge && !a.pipe);
+        assert_eq!(a.exe.as_deref(), Some("/x/fude-cli.exe"));
+        assert!(parse(&argv(&["fude-cli", "pipe"])).unwrap().pipe);
+        assert!(parse(&argv(&["fude-cli", "bridge", "--exe"])).is_err());
+        // Not first: an ordinary file name.
+        let a = parse(&argv(&["fude-cli", "-w", "bridge"])).unwrap();
+        assert!(!a.bridge);
+        assert_eq!(a.paths, vec!["bridge"]);
     }
 
     #[test]
