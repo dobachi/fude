@@ -740,18 +740,20 @@ impl App {
                     .as_ref()
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|| "Untitled".into());
+                // Mode and position first: a long path must not push them
+                // off a narrow terminal.
                 format!(
-                    " {}{}  Ln {}, Col {}  {}  {}",
-                    path,
-                    if d.dirty() { " *" } else { "" },
+                    " {}  Ln {}, Col {}  {}  {}{}",
+                    mode,
                     d.state.cursor.row + 1,
                     d.state.cursor.col + 1,
-                    mode,
                     match self.view {
                         ViewMode::Editor => "editor",
                         ViewMode::Split => "split",
                         ViewMode::Preview => "preview",
-                    }
+                    },
+                    path,
+                    if d.dirty() { " *" } else { "" },
                 )
             }
             None => " Fude".to_string(),

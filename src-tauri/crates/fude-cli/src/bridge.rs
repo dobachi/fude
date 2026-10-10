@@ -115,7 +115,26 @@ mod unix {
     const RELEASE_EXE: &str =
         "https://github.com/dobachi/fude/releases/latest/download/fude-cli-windows-x86_64.exe";
 
+    /// WSL runs a Windows exe only if the file is executable; a download
+    /// (curl, a browser, an unpacked artifact) lands without that bit.
+    pub fn ensure_executable(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mode = meta.permissions().mode();
+            if mode & 0o111 == 0 {
+                let _ =
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode | 0o755));
+            }
+        }
+    }
+
     fn find_or_fetch_exe(explicit: Option<&str>) -> Result<PathBuf, String> {
+        let exe = locate_exe(explicit)?;
+        ensure_executable(&exe);
+        Ok(exe)
+    }
+
+    fn locate_exe(explicit: Option<&str>) -> Result<PathBuf, String> {
         if let Some(p) = explicit {
             let p = PathBuf::from(p);
             return if p.is_file() {
@@ -377,6 +396,9 @@ mod unix {
             server.join().unwrap();
         }
 
+        // The bridge only ever runs in WSL; macOS treats a closed listener's
+        // socket file differently, which is of no interest here.
+        #[cfg(target_os = "linux")]
         #[test]
         fn bind_replaces_a_dead_socket_and_refuses_a_live_one() {
             let tmp = TempDir::new().unwrap();
@@ -399,6 +421,19 @@ mod unix {
             assert!(!sync_token(&wsl, &win).unwrap());
             std::fs::write(win.join("gui-token"), "other\n").unwrap();
             assert!(sync_token(&wsl, &win).unwrap());
+        }
+
+        #[test]
+        fn a_downloaded_exe_is_made_executable() {
+            use std::os::unix::fs::PermissionsExt;
+            let tmp = TempDir::new().unwrap();
+            let exe = tmp.path().join("fude-cli.exe");
+            std::fs::write(&exe, "MZ").unwrap();
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o644)).unwrap();
+            ensure_executable(&exe);
+            let mode = std::fs::metadata(&exe).unwrap().permissions().mode();
+            assert_eq!(mode & 0o111, 0o111);
+            ensure_executable(&tmp.path().join("missing.exe")); // no panic
         }
 
         #[test]
