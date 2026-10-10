@@ -236,6 +236,14 @@ GUI 側の実装:
 同じマシンでも動く: `fude-cli` はローカルの `gui.sock` も候補に含むので、ssh を介さずに
 `fude-cli notes.md` を実行すると GUI 側では `remote://<hostname>/...` として開く（開発時の確認用）。
 
+### 4.3.2 `fude-cli setup <host>`（2026-10-10）
+
+リモート 1 台ぶんの準備を 1 コマンドにまとめた（`crates/fude-cli/src/setup.rs`）:
+鍵の生成（無ければ）→ `~/.ssh/config` の `Host` ブロックへ `RemoteForward` を追記（`with_forward` は純粋関数、
+非 ASCII のコメントや `Host a b` の複数パターンに対応、既にそのポートの転送があれば触らない）→ リモートに
+`mkdir -p` → 鍵と `fude-cli` を配置（`uname -sm` が手元と同じなら自分自身を scp、違えば Releases の
+`fude-cli-<os>-<arch>` を curl）→ `ssh host fude-cli --check` で疎通確認。`--check` は接続して GUI の版と経路を表示するだけ。
+
 ### 4.4 切断・再接続
 
 | 事象 | GUI 側の振る舞い |

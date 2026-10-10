@@ -120,30 +120,32 @@ export EDITOR="fude --wait"
 GUI の無いサーバに ssh しているとき、サーバ側で `fude-cli file.md` と打つと**手元の Fude** にタブが開きます。
 サーバ側の `fude-cli` がそのファイルの読み書きと変更監視を担当し、タブを閉じると終了します。
 
-1. 手元で Fude を起動しておく（`~/.config/fude/gui.sock` で待ち受け、初回起動時に
-   `~/.config/fude/gui-token` を作ります）
-2. `~/.ssh/config` に逆転送を 1 行足す。サーバのループバック 47821 番ポートを手元のソケットへ転送します
+**設定は手元で 1 コマンド**（Fude を起動した状態で）：
 
-   ```
-   Host dev
-     RemoteForward 47821 /home/<you>/.config/fude/gui.sock
-   ```
+```bash
+fude-cli setup dev        # dev は ~/.ssh/config のホスト名
+```
 
-3. サーバに `fude-cli` と鍵を置く
+これで次が済みます：`~/.ssh/config` の `Host dev` に `RemoteForward 47821 ~/.config/fude/gui.sock` を追記
+（無ければブロックを追加、元の設定は `config.fude-bak` に退避）、サーバに `~/.config/fude/gui-token`
+（手元の Fude が作った鍵）と `~/.local/bin/fude-cli`（同じ OS/CPU なら手元のバイナリをコピー、違えば
+GitHub Releases から取得）を配置、最後に ssh 越しの接続確認。
 
-   ```bash
-   scp ~/.config/fude/gui-token dev:~/.config/fude/gui-token   # （先に ssh dev 'mkdir -p ~/.config/fude'）
-   scp src-tauri/target/release/fude-cli dev:~/.local/bin/       # cargo build --release -p fude-cli で作る単体バイナリ
-   ```
+あとはサーバで：
 
-   47821 番はサーバ上の他のユーザからも繋げるので、鍵が合わない接続は GUI が拒否します。
-   `FUDE_GUI_TOKEN` 環境変数でも渡せます。
+```bash
+ssh dev
+fude-cli notes.md          # 手元の Fude に dev:/home/you/notes.md として開く。プロンプトはすぐ戻る
+fude-cli --wait notes.md   # タブを閉じるまで待つ（$EDITOR 用）
+fude-cli --check           # どの経路で手元の Fude に届いているか確認
+```
 
-4. `ssh dev` して `fude-cli notes.md`（`--wait` を付けると `$EDITOR` として使えます）
-
-公開されるのは起動時に渡したファイルの親ディレクトリ（ディレクトリを渡した場合はその配下）だけです。
+仕組み: サーバのループバック 47821 番ポートが ssh で手元の `~/.config/fude/gui.sock` へ転送されます。
+このポートはサーバ上の他のユーザからも繋げるため、鍵が合わない接続は GUI が拒否します（`FUDE_GUI_TOKEN`
+環境変数でも渡せます）。公開されるのは起動時に渡したファイルの親ディレクトリ（ディレクトリを渡した場合は
+その配下）だけです。ポートは `fude-cli setup dev --port N` / `FUDE_GUI_ADDR=127.0.0.1:N` で変更できます。
 Unix ソケットの逆転送（`RemoteForward ~/.cache/fude/gui/%C.sock …`）も探しますが、sshd がソケットを
-root 所有で作る環境では使えないため、TCP を既定にしています。ポートは `FUDE_GUI_ADDR=127.0.0.1:<port>` で変更できます。
+root 所有で作る環境では使えないため、TCP を既定にしています。
 
 #### Windows の Fude / WSL から Windows の Fude へ
 

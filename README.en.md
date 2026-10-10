@@ -97,31 +97,34 @@ On a server without a display, `fude-cli file.md` opens the file in the Fude run
 **your** machine. The server-side `fude-cli` serves reads, writes and change notifications
 for that file and exits when the tab is closed.
 
-1. Have Fude running locally (it listens on `~/.config/fude/gui.sock` and creates
-   `~/.config/fude/gui-token` on first start)
-2. Add a reverse forward to `~/.ssh/config`: the server's loopback port 47821 reaches your socket
+**One command sets a host up** (with Fude running locally):
 
-   ```
-   Host dev
-     RemoteForward 47821 /home/<you>/.config/fude/gui.sock
-   ```
+```bash
+fude-cli setup dev        # dev is a host name from ~/.ssh/config
+```
 
-3. Put `fude-cli` and the token on the server
+It adds `RemoteForward 47821 ~/.config/fude/gui.sock` to `Host dev` in `~/.ssh/config`
+(appending a block if there is none; the previous file is kept as `config.fude-bak`),
+puts `~/.config/fude/gui-token` (the token your Fude created) and `~/.local/bin/fude-cli`
+on the server (a copy of the local binary when OS/CPU match, else the GitHub Releases build),
+and finally checks the connection through ssh.
 
-   ```bash
-   scp ~/.config/fude/gui-token dev:~/.config/fude/gui-token   # after: ssh dev 'mkdir -p ~/.config/fude'
-   scp src-tauri/target/release/fude-cli dev:~/.local/bin/       # single binary from cargo build --release -p fude-cli
-   ```
+Then, on the server:
 
-   Other users on the server can reach port 47821 too, so the GUI refuses any connection
-   without the matching token (`FUDE_GUI_TOKEN` works as well).
+```bash
+ssh dev
+fude-cli notes.md          # opens dev:/home/you/notes.md in your Fude; the prompt returns at once
+fude-cli --wait notes.md   # blocks until the tab is closed ($EDITOR)
+fude-cli --check           # shows how your Fude is reached
+```
 
-4. `ssh dev`, then `fude-cli notes.md` (add `--wait` to use it as `$EDITOR`)
-
-Only the directory of each file you pass (or the directory itself) is exposed.
-A Unix-socket reverse forward (`RemoteForward ~/.cache/fude/gui/%C.sock …`) is also searched,
-but some sshds create that socket owned by root, so TCP is the default. Change the port with
-`FUDE_GUI_ADDR=127.0.0.1:<port>`.
+How it works: the server's loopback port 47821 is forwarded by ssh to your local
+`~/.config/fude/gui.sock`. Other users on the server can reach that port too, so the GUI
+refuses any connection without the matching token (`FUDE_GUI_TOKEN` works as well). Only the
+directory of each file you pass (or the directory itself) is exposed. Change the port with
+`fude-cli setup dev --port N` / `FUDE_GUI_ADDR=127.0.0.1:N`. A Unix-socket reverse forward
+(`RemoteForward ~/.cache/fude/gui/%C.sock …`) is also searched, but some sshds create that
+socket owned by root, so TCP is the default.
 
 #### Fude on Windows, or reaching it from WSL
 

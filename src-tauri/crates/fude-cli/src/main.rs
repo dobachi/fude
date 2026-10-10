@@ -9,6 +9,7 @@ mod agent;
 mod args;
 mod discover;
 mod run;
+mod setup;
 mod tui;
 mod watch;
 
@@ -30,6 +31,25 @@ fn main() {
     if args.version {
         println!("fude-cli {}", env!("CARGO_PKG_VERSION"));
         return;
+    }
+    if let Some(host) = &args.setup {
+        std::process::exit(setup::run(host, args.port));
+    }
+    if args.check {
+        match run::connect(&socket_candidates()) {
+            Ok(c) => {
+                println!(
+                    "Fude {} answers via {}",
+                    c.gui_version.as_deref().unwrap_or("?"),
+                    c.via
+                );
+                return;
+            }
+            Err(e) => {
+                eprintln!("fude-cli: {}", e);
+                std::process::exit(2);
+            }
+        }
     }
     if args.paths.is_empty() {
         eprintln!("fude-cli: nothing to open\n\n{}", args::USAGE);

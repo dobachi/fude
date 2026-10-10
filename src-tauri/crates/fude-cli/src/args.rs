@@ -13,10 +13,17 @@ pub struct Args {
     pub foreground: bool,
     pub help: bool,
     pub version: bool,
+    /// `--check`: connect to the GUI, report its version, open nothing.
+    pub check: bool,
+    /// `setup <ssh-host>`: configure a remote machine (see setup.rs).
+    pub setup: Option<String>,
+    pub port: u16,
 }
 
 pub const USAGE: &str = "\
 Usage: fude-cli [OPTIONS] [--] <PATH>...
+       fude-cli setup <SSH-HOST> [--port N]
+       fude-cli --check
 
 Open files in the Fude GUI that your ssh session forwards to (see
 docs/TUI_DESIGN.md §4.2), serving them to it until their tabs are closed.
@@ -26,8 +33,14 @@ Options:
                  edits were discarded. Lets fude-cli serve as $EDITOR.
       --gui      Only use a forwarded GUI; fail if none answers
       --tui      Use the terminal UI (not implemented yet)
+      --check    Report which GUI answers (and how), without opening anything
   -h, --help     Print help
   -V, --version  Print version
+
+Commands:
+  setup HOST     Prepare ssh host HOST: add the RemoteForward to ~/.ssh/config,
+                 copy the GUI token and fude-cli there, verify the connection.
+                 --port N uses a loopback port other than 47821.
 
 The GUI is found through $FUDE_GUI_SOCK, then ~/.cache/fude/gui/*.sock
 (ssh RemoteForward targets), then the local ~/.config/fude/gui.sock.
@@ -36,14 +49,31 @@ The GUI is found through $FUDE_GUI_SOCK, then ~/.cache/fude/gui/*.sock
 /// Parse argv (argv[0] = executable). Unknown flags are an error so a typo
 /// never silently becomes a file name.
 pub fn parse(argv: &[String]) -> Result<Args, String> {
-    let mut a = Args::default();
+    let mut a = Args {
+        port: crate::setup::DEFAULT_PORT,
+        ..Default::default()
+    };
     let mut operands_only = false;
-    for arg in argv.iter().skip(1) {
+    let mut want_port = false;
+    let mut want_setup_host = argv.get(1).map(|s| s == "setup").unwrap_or(false);
+    for arg in argv.iter().skip(if want_setup_host { 2 } else { 1 }) {
+        if want_port {
+            a.port = arg.parse().map_err(|_| format!("bad port '{}'", arg))?;
+            want_port = false;
+            continue;
+        }
+        if want_setup_host && !arg.starts_with('-') {
+            a.setup = Some(arg.clone());
+            want_setup_host = false;
+            continue;
+        }
         if operands_only {
             a.paths.push(arg.clone());
             continue;
         }
         match arg.as_str() {
+            "--check" => a.check = true,
+            "--port" => want_port = true,
             "--" => operands_only = true,
             "-w" | "--wait" => a.wait = true,
             "--gui" => a.gui = true,
@@ -59,6 +89,12 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
     }
     if a.gui && a.tui {
         return Err("--gui and --tui are mutually exclusive".into());
+    }
+    if want_port {
+        return Err("--port needs a value".into());
+    }
+    if argv.get(1).map(|s| s == "setup").unwrap_or(false) && a.setup.is_none() && !a.help {
+        return Err("setup needs an ssh host".into());
     }
     Ok(a)
 }
@@ -90,6 +126,22 @@ mod tests {
     fn rejects_unknown_and_conflicting_options() {
         assert!(parse(&argv(&["fude-cli", "--wat"])).is_err());
         assert!(parse(&argv(&["fude-cli", "--gui", "--tui"])).is_err());
+    }
+
+    #[test]
+    fn setup_takes_a_host_and_an_optional_port() {
+        let a = parse(&argv(&["fude-cli", "setup", "k16"])).unwrap();
+        assert_eq!(a.setup.as_deref(), Some("k16"));
+        assert_eq!(a.port, 47821);
+        let a = parse(&argv(&["fude-cli", "setup", "k16", "--port", "5000"])).unwrap();
+        assert_eq!(a.port, 5000);
+        assert!(parse(&argv(&["fude-cli", "setup"])).is_err());
+        assert!(parse(&argv(&["fude-cli", "setup", "k16", "--port"])).is_err());
+        assert!(parse(&argv(&["fude-cli", "setup", "k16", "--port", "x"])).is_err());
+        // A file literally named "setup" is still a path when not first.
+        let a = parse(&argv(&["fude-cli", "-w", "setup"])).unwrap();
+        assert_eq!(a.paths, vec!["setup"]);
+        assert!(parse(&argv(&["fude-cli", "--check"])).unwrap().check);
     }
 
     #[test]
