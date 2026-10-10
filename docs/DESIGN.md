@@ -99,6 +99,22 @@ projects/markdown-editor/
 
 ---
 
+### ワークスペース構成（2026-10 以降）
+
+`src-tauri/` は Cargo ワークスペースになり、Tauri 非依存のロジックは別クレートに分かれている:
+
+```
+src-tauri/
+├── src/                      # fude（Tauri アプリ）: コマンドは fude-core の薄いラッパー
+│   ├── gui_server.rs         #   `fude --wait` / fude-cli からの接続を受ける IPC サーバ
+│   └── wait_client.rs        #   `fude --wait` のクライアント側
+└── crates/
+    ├── fude-core/            # ファイル・設定・セッション・暫定保存・IPC プロトコル・鍵
+    └── fude-cli/             # リモートエージェント + 端末内ビューア + `setup`
+```
+
+テストは `cargo test --workspace --lib --bins`。詳細は [TUI_DESIGN.md](TUI_DESIGN.md)、使い方は [REMOTE.md](REMOTE.md)。
+
 ## 3. Rust バックエンド
 
 ### データ構造

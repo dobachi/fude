@@ -29,6 +29,7 @@
 - **自動アップデート** - Tauri Updaterによるアプリ更新
 - **WSLブラウザモード** - 日本語IME対応のブラウザベースUI (`http://localhost:3000`)
 - **WSLリモートモード** - Windows版Fudeを自動取得して起動
+- **`$EDITOR` 連携・リモート編集・ターミナルモード** - `fude --wait` で git/Claude Code から呼べる。ssh 先で `fude-cli file.md` と打つと手元の Fude に開く。`fude-cli --tui` で端末内プレビュー（[docs/REMOTE.md](docs/REMOTE.md)）
 - **フレームワーク不使用** - Vanilla JSで実装、高速かつ軽量
 
 ## インストール
@@ -116,6 +117,8 @@ export EDITOR="fude --wait"
 ```
 
 ### リモートのファイルを手元の Fude で開く（fude-cli）
+
+> 全体の使い方（`$EDITOR` 連携・ssh 先・ssh 無し・Windows・トラブル対応）は [docs/REMOTE.md](docs/REMOTE.md)。
 
 GUI の無いサーバに ssh しているとき、サーバ側で `fude-cli file.md` と打つと**手元の Fude** にタブが開きます。
 サーバ側の `fude-cli` がそのファイルの読み書きと変更監視を担当し、タブを閉じると終了します。

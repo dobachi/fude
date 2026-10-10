@@ -109,6 +109,16 @@ const sections = [
     ],
   },
   {
+    title: 'コマンドライン（docs/REMOTE.md）',
+    items: [
+      ['fude FILE / DIR', 'ファイル・フォルダを開く'],
+      ['fude --wait FILE', 'タブを閉じるまで待つ（git / Claude Code の $EDITOR 用）'],
+      ['fude-cli setup HOST', 'ssh 先 HOST を準備（転送・鍵・fude-cli の配置）'],
+      ['fude-cli FILE（ssh 先で）', '手元の Fude にタブを開く。--wait で閉じるまで待つ'],
+      ['fude-cli --tui FILE', '端末内でプレビュー（q で終了）'],
+    ],
+  },
+  {
     title: 'ブラウザモード用',
     items: [
       ['Alt+N / Alt+T', '新規タブ'],

@@ -1,7 +1,7 @@
 # Fude ターミナルモード / リモート GUI 設計
 
 > 最終更新: 2026-10-10
-> ステータス: 草案（実装前）
+> ステータス: Step 0〜3 実装済み（使い方は [REMOTE.md](REMOTE.md)）。Step 4（TUI エディタ）以降は未着手
 
 ---
 
@@ -159,44 +159,32 @@ Fude GUI (Tauri)                                 $ fude --wait notes.md   ← gi
 ### 4.2 接続の張り方
 
 ユーザ操作をゼロにするため、ssh の `RemoteForward` を使う。`~/.ssh/config` に 1 行足すだけで、
-普段の `ssh` が逆転送を張る。
+普段の `ssh` が逆転送を張る。**既定は TCP**（リモートのループバック 47821 番 → 手元の `gui.sock`）:
 
 ```
 Host dev
-  RemoteForward ~/.cache/fude/gui/%C.sock ~/.local/share/fude/gui.sock
+  RemoteForward 47821 /home/you/.config/fude/gui.sock
 ```
 
-- `%C` は接続ごとに異なるハッシュ。同じパスだと 2 本目の ssh の bind が失敗し、
-  1 本目が切れた後に誰も再 bind しないため、**接続ごとに別名**にする
-- リモートの `fude-cli` は `~/.cache/fude/gui/*.sock` を走査し、接続できたものを使う。
-  `ECONNREFUSED` のものは stale とみなして unlink し、1 つも無ければ TUI へ
-- 環境変数 `FUDE_GUI_SOCK` があればそれを優先（走査しない）
-- 操作側で GUI が起動していないと、ssh は転送先に繋げず接続を即閉じる。`fude-cli` は
-  `hello` の応答が無いことで「GUI 無し」と判断し TUI へ。操作側で GUI を自動起動したければ、
-  Linux は systemd のソケットアクティベーション（`fude-gui.socket`）、macOS は launchd で
-  ソケットを先に握らせておく（§9）
-- tmux の中や後から開いたシェルからも、ソケットはファイルシステム上にあるので見つかる
-- 実機確認（k16、Ubuntu の sshd）: (1) セッション終了時にソケットファイルが**消えず**次の bind が失敗する
-  → クライアント側 `StreamLocalBindUnlink yes` で回避可。(2) それ以上に、sshd が転送ソケットを
-  **root 所有 0600** で作るためユーザから接続できない（Permission denied）。これは回避できないので、
-  **既定を TCP 逆転送（`RemoteForward 47821 <local gui.sock>`）＋トークン**に変更した。
-  `fude-cli` は `$FUDE_GUI_SOCK` → `$FUDE_GUI_ADDR` → `~/.cache/fude/gui/*.sock` → `127.0.0.1:47821` →
-  ローカル `gui.sock` の順に探す。トークンは GUI が `~/.config/fude/gui-token` に作り、リモートの
-  同名ファイルか `$FUDE_GUI_TOKEN` から `hello.token` で送る。host 付きの hello はトークン一致が必須
-  （ローカルの `fude --wait` はソケットのパーミッションで守られているので不要）
-
-#### TCP フォールバック
-
-Windows の OpenSSH クライアントでは unix socket の転送が安定しないため、TCP も残す。
-
-```
-Host dev
-  RemoteForward 47821 localhost:47821
-```
-
-TCP の場合は browser mode と同じ**トークン必須**（`src/js/browser-token.js` /
-`~/.config/fude/browser-token` の仕組みを流用）。`fude-cli` は `FUDE_GUI_ADDR=127.0.0.1:47821` と
-`FUDE_GUI_TOKEN` を見る。unix socket はユーザ権限（0600）で守られるのでトークン不要。
+- この行と、リモートへの鍵・バイナリ配置は `fude-cli setup dev` が行う（§4.3.2）
+- ループバックのポートはリモートの他ユーザからも繋げるので、GUI が生成する鍵
+  `~/.config/fude/gui-token` を `hello.token` で提示させ、host 付きの hello は一致必須にする。
+  ローカルの `fude --wait` はソケットのパーミッションで守られているので不要
+- `fude-cli` は `$FUDE_GUI_SOCK` → `$FUDE_GUI_ADDR` → `~/.cache/fude/gui/*.sock` → `127.0.0.1:47821` →
+  ローカル `gui.sock` の順に探し、`hello` に `welcome` が返った最初のものを使う。ssh は転送先が
+  不在でも accept だけはして即閉じるので、「接続できた」ではなく「welcome が来た」を基準にする。
+  拒否された Unix ソケットファイルは死骸として unlink する
+- 操作側で GUI が起動していないと `welcome` が来ないので TUI へ。操作側で GUI を自動起動したければ、
+  Linux は systemd のソケットアクティベーション（`fude-gui.socket`）、macOS は launchd（§9）
+- tmux の中や後から開いたシェルからも、ループバックのポートは見えるので届く
+- 実機確認（k16、Ubuntu の sshd）で Unix ソケット転送を捨てた理由: (1) セッション終了時にソケットファイルが
+  **消えず**次の bind が失敗する（クライアント側 `StreamLocalBindUnlink yes` で回避可）。(2) それ以上に、
+  sshd が転送ソケットを **root 所有 0600** で作るためユーザから接続できない（Permission denied）。
+  Unix ソケット転送（`RemoteForward ~/.cache/fude/gui/%C.sock …`）は候補として残してあるが、既定にはしない
+- GUI 自身も `127.0.0.1:47821` の TCP で待ち受ける（`FUDE_GUI_TCP`、`off` で無効）。TCP で来た接続は
+  host の有無によらず鍵必須。Windows の ssh は名前付きパイプへ転送できないので
+  `RemoteForward 47821 127.0.0.1:47821` でこの口を使う。Tailscale 等で直接届くなら
+  `FUDE_GUI_TCP=0.0.0.0:47821` + `FUDE_GUI_ADDR` で ssh 無しでも使える（平文なので守られた経路に限る）
 
 ### 4.3 プロトコル
 
@@ -450,9 +438,9 @@ CLAUDE.md の「テストの無い変更は未完成」に従う。
 | 論点 | 現時点の案 |
 | --- | --- |
 | Vim エミュレーションを自作するか `edtui` を使うか | v1 を Normal で出してから判断 |
-| Windows の操作側 GUI でのソケット | 名前付きパイプ。TCP + トークンで代替可 |
-| `fude-cli` の配布 | deb / dmg / exe に同梱 + GitHub Releases に単体の静的バイナリ（`make release` の対象に追加） |
+| `fude-cli` の配布 | **済**: GitHub Releases に `fude-cli-<os>-<arch>`（CI）。deb には未同梱（`make install` は `/usr/bin/fude-cli` を置く）。`fude-cli setup` は CPU が違う相手に Releases から取る |
 | 既存 `fude-browser` との関係 | 残す。「ブラウザを GUI にする」用途は別物。将来 `fude-cli` が serve.js の API を話せるようになれば統合候補 |
 | リモート側の暫定ファイル | 操作側に置く（§4.4）。リモート側には置かない |
-| Windows の GUI | 実装済み: 名前付きパイプに加えて `127.0.0.1:47821` の TCP でも待ち受け（TCP は全接続にトークン必須、`FUDE_GUI_TCP` で変更/無効化）。Windows の ssh は `RemoteForward 47821 127.0.0.1:47821`。**Windows 実機での動作確認は未**（CI ビルド待ち） |
+| Windows の GUI | **実装済み・実機未確認**: 名前付きパイプに加えて `127.0.0.1:47821` の TCP でも待ち受け。Windows の ssh は `RemoteForward 47821 127.0.0.1:47821`。v0.8.0 の exe で確認する |
 | 操作側 GUI の自動起動 | v1 は「GUI を起動しておく」が前提。後で Linux は systemd user socket（`fude-gui.socket`）、macOS は launchd のソケットアクティベーションを配布物に同梱する。Windows はログイン時起動で代替 |
+| 切断時の退避・リモートタブのセッション復元 | 未着手（§4.4 / §4.5）。現状はトーストを出すのみ。未保存分は操作側の暫定保存に残る |

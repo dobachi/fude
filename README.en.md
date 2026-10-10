@@ -93,6 +93,8 @@ export EDITOR="fude --wait"
 
 ### Editing remote files in your local Fude (fude-cli)
 
+> The full guide (`$EDITOR` use, ssh hosts, no-ssh setups, Windows, troubleshooting) is [docs/REMOTE.md](docs/REMOTE.md) (Japanese).
+
 On a server without a display, `fude-cli file.md` opens the file in the Fude running on
 **your** machine. The server-side `fude-cli` serves reads, writes and change notifications
 for that file and exits when the tab is closed.
