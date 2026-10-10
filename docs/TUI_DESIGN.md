@@ -176,7 +176,9 @@ Host dev
   Linux は systemd のソケットアクティベーション（`fude-gui.socket`）、macOS は launchd で
   ソケットを先に握らせておく（§9）
 - tmux の中や後から開いたシェルからも、ソケットはファイルシステム上にあるので見つかる
-- sshd 側に `StreamLocalBindUnlink yes` があると stale の掃除が楽になるが、無くても動くようにする
+- 実機確認（k16）: sshd はセッション終了時にソケットファイルを**消さない**ので、次の接続の bind が失敗する。
+  クライアント側 `~/.ssh/config` の `StreamLocalBindUnlink yes` で解決（sshd 側の設定は不要だった）。
+  転送先ディレクトリ `~/.cache/fude/gui` は事前に作る（無いと bind が失敗する）
 
 #### TCP フォールバック
 

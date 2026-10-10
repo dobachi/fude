@@ -103,7 +103,12 @@ for that file and exits when the tab is closed.
    ```
    Host dev
      RemoteForward ~/.cache/fude/gui/%C.sock ~/.config/fude/gui.sock
+     StreamLocalBindUnlink yes
    ```
+
+   Without `StreamLocalBindUnlink yes` the socket file left by the previous session blocks
+   the next connection's forward (`remote port forwarding failed`). The server also needs
+   the `~/.cache/fude/gui` directory to exist (`mkdir -p`).
 
 3. Put `fude-cli` on the server (`cargo build --release -p fude-cli` builds a single binary)
 4. `ssh dev`, then `fude-cli notes.md` (add `--wait` to use it as `$EDITOR`)

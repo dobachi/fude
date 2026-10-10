@@ -126,7 +126,12 @@ GUI の無いサーバに ssh しているとき、サーバ側で `fude-cli fil
    ```
    Host dev
      RemoteForward ~/.cache/fude/gui/%C.sock ~/.config/fude/gui.sock
+     StreamLocalBindUnlink yes
    ```
+
+   `StreamLocalBindUnlink yes` が無いと、前回のセッションが残したソケットファイルのせいで
+   次の接続で転送が張れません（`remote port forwarding failed` の警告）。サーバ側に
+   `~/.cache/fude/gui` ディレクトリを作っておく必要もあります（`mkdir -p`）。
 
 3. サーバに `fude-cli` を置く（`cargo build --release -p fude-cli` で単体の静的バイナリ）
 4. `ssh dev` して `fude-cli notes.md`（`--wait` を付けると `$EDITOR` として使えます）

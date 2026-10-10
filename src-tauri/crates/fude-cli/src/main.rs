@@ -46,11 +46,13 @@ fn main() {
     let conn = match run::connect(&candidates) {
         Ok(c) => c,
         Err(e) => {
-            if args.gui {
+            // No GUI answers: fall back to the terminal UI (viewer for now),
+            // unless that is pointless because there is no terminal either.
+            use std::io::IsTerminal;
+            if args.gui || !std::io::stdout().is_terminal() {
                 eprintln!("fude-cli: {}", e);
                 std::process::exit(2);
             }
-            // No GUI answers: fall back to the terminal UI (viewer for now).
             std::process::exit(run_tui(&paths));
         }
     };
