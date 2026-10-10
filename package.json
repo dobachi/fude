@@ -13,7 +13,7 @@
     "test:watch": "vitest",
     "lint": "eslint src/js/",
     "lint:fix": "eslint src/js/ --fix",
-    "lint:rust": "cd src-tauri && cargo clippy -- -D warnings",
+    "lint:rust": "cd src-tauri && cargo clippy --workspace -- -D warnings",
     "format": "prettier --write 'src/**/*.{js,css,html}'",
     "format:check": "prettier --check 'src/**/*.{js,css,html}'",
     "format:rust": "cd src-tauri && cargo fmt",

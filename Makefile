@@ -140,7 +140,7 @@ test-js:
 	npx vitest run
 
 test-rust:
-	cd src-tauri && cargo test --lib
+	cd src-tauri && cargo test --workspace --lib
 
 # Lint
 lint: lint-js lint-rust
@@ -149,7 +149,7 @@ lint-js:
 	npx eslint src/js/
 
 lint-rust:
-	cd src-tauri && cargo clippy -- -D warnings
+	cd src-tauri && cargo clippy --workspace -- -D warnings
 
 # フォーマット
 format: format-js format-rust

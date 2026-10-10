@@ -77,6 +77,11 @@ fude-core（新規, ライブラリ）    ← 両者が共有するロジック
 Tauri コマンドは薄いラッパーとして残す（`#[tauri::command] fn read_file(...) { fude_core::read_file(...) }`）。
 `key_storage.rs`（keyring）、拡張機能のインストール、AI、画像関連は GUI 専用のまま。
 
+実装（2026-10-10）: `src-tauri/Cargo.toml` をワークスペースにし、`src-tauri/crates/fude-core/` に
+`paths` / `config` / `session` / `files` / `temp` / `browse` / `cli` / `ipc` の各モジュールとして切り出した。
+`cargo test --workspace --lib` で両クレートのテストが走る（Makefile / CI / docker も更新済み）。
+`file_watcher.rs` は AppHandle に emit する構造のため未移動（Step 2 でコールバック化してから移す）。
+
 さらに、いま JS 側にある Markdown の純粋ロジックのうち TUI が必要とするものを Rust に移植する
 （§5.4、§7 のテスト方針とセット）。
 

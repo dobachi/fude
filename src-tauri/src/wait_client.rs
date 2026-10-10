@@ -2,7 +2,7 @@
 //! if needed) and block until their tabs are closed, so Fude can serve as
 //! `$EDITOR` for git, Claude Code and friends.
 
-use crate::ipc::{self, Message, PROTOCOL_VERSION};
+use fude_core::ipc::{self, socket_name, Message, PROTOCOL_VERSION};
 use interprocess::local_socket::{prelude::*, Name, Stream};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
@@ -220,26 +220,6 @@ fn talk(stream: Stream, paths: Vec<String>) -> io::Result<i32> {
     }
     let _ = send.write_all(ipc::encode(&Message::Bye).as_bytes());
     Ok(exit_code(&state.outcomes()))
-}
-
-/// The local-socket name for `socket`: a filesystem path where those are
-/// supported, else (Windows) a named pipe derived from the file name.
-pub fn socket_name(socket: &Path) -> io::Result<Name<'static>> {
-    #[cfg(unix)]
-    {
-        use interprocess::local_socket::GenericFilePath;
-        socket.to_path_buf().to_fs_name::<GenericFilePath>()
-    }
-    #[cfg(not(unix))]
-    {
-        use interprocess::local_socket::GenericNamespaced;
-        let base = socket
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "fude-gui.sock".to_string());
-        let user = std::env::var("USERNAME").unwrap_or_default();
-        format!("fude-{}-{}", user, base).to_ns_name::<GenericNamespaced>()
-    }
 }
 
 fn connect_with_retry(name: &Name<'static>, timeout: Duration) -> Option<Stream> {

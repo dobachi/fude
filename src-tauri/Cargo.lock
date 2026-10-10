@@ -1241,6 +1241,7 @@ name = "fude"
 version = "0.7.9"
 dependencies = [
  "dirs 5.0.1",
+ "fude-core",
  "futures-util",
  "hex",
  "interprocess",
@@ -1260,6 +1261,17 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "fude-core"
+version = "0.1.0"
+dependencies = [
+ "dirs 5.0.1",
+ "interprocess",
+ "serde",
+ "serde_json",
+ "tempfile",
  "trash",
 ]
 

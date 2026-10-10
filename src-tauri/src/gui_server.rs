@@ -6,7 +6,7 @@
 //! [`WaitRegistry`]. The protocol logic itself lives in [`ConnState`], which
 //! is plain data so it can be tested without sockets or Tauri.
 
-use crate::ipc::{self, Message, PROTOCOL_VERSION};
+use fude_core::ipc::{self, Message, PROTOCOL_VERSION};
 use interprocess::local_socket::{prelude::*, ListenerOptions, Name};
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, BufReader, Write};
@@ -169,7 +169,7 @@ impl ConnState {
                 let mut replies = Vec::new();
                 let mut register = Vec::new();
                 for p in paths {
-                    let resolved = crate::resolve_cli_path(&p, base.clone());
+                    let resolved = fude_core::resolve_cli_path(&p, base.clone());
                     match sink.open(&resolved, wait) {
                         Ok(()) => {
                             replies.push(Message::Opened {

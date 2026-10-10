@@ -112,32 +112,7 @@ impl KeyStorage for ConfigFallbackStorage {
     }
 }
 
-// ─── File Permissions ─────────────────────────────────────
-
-#[cfg(unix)]
-pub fn set_file_permissions(path: &std::path::Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    let perms = fs::Permissions::from_mode(0o600);
-    fs::set_permissions(path, perms).map_err(|e| format!("Failed to set file permissions: {}", e))
-}
-
-#[cfg(not(unix))]
-pub fn set_file_permissions(_path: &std::path::Path) -> Result<(), String> {
-    Ok(())
-}
-
-#[cfg(unix)]
-pub fn set_dir_permissions(path: &std::path::Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    let perms = fs::Permissions::from_mode(0o700);
-    fs::set_permissions(path, perms)
-        .map_err(|e| format!("Failed to set directory permissions: {}", e))
-}
-
-#[cfg(not(unix))]
-pub fn set_dir_permissions(_path: &std::path::Path) -> Result<(), String> {
-    Ok(())
-}
+use fude_core::paths::set_file_permissions;
 
 // ─── Factory ──────────────────────────────────────────────
 
@@ -177,6 +152,7 @@ pub fn create_storage(config_path: PathBuf) -> Box<dyn KeyStorage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fude_core::paths::set_dir_permissions;
     use tempfile::TempDir;
 
     #[test]

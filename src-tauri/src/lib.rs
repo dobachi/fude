@@ -1,17 +1,18 @@
 mod file_watcher;
 mod gui_server;
-mod ipc;
 mod key_storage;
 mod updater_env;
 mod wait_client;
 
+use fude_core::{
+    config_dir, ensure_config_dir, resolve_cli_path, set_dir_permissions, set_file_permissions,
+    BrowseResult, Config, ConfigResponse, FileEntry, Session, TempFileInfo,
+};
 use futures_util::StreamExt;
-use key_storage::{create_storage, set_dir_permissions, set_file_permissions, KeyStorage};
+use key_storage::{create_storage, KeyStorage};
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -23,118 +24,6 @@ use tauri_plugin_cli::CliExt;
 static KEY_STORAGE: OnceLock<Box<dyn KeyStorage>> = OnceLock::new();
 
 // ─── Structs ───────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileEntry {
-    pub name: String,
-    pub path: String,
-    pub is_dir: bool,
-    pub children: Option<Vec<FileEntry>>,
-    pub modified: Option<u64>,
-    pub created: Option<u64>,
-    pub size: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TabInfo {
-    pub path: String,
-    pub cursor_line: usize,
-    pub cursor_col: usize,
-    pub scroll_top: f64,
-    /// Per-tab view mode ("split" | "editor" | "preview"). Defaults to "split"
-    /// so sessions written by older versions deserialize cleanly.
-    #[serde(default = "default_view_mode")]
-    pub view_mode: String,
-}
-
-fn default_view_mode() -> String {
-    "split".to_string()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PaneInfo {
-    pub tab_id: Option<String>,
-    pub size_percent: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PaneLayout {
-    pub direction: String,
-    pub panes: Vec<PaneInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Session {
-    pub open_tabs: Vec<TabInfo>,
-    pub active_tab: usize,
-    pub vault_path: Option<String>,
-    pub view_mode: String,
-    pub sidebar_visible: bool,
-    pub pane_layout: Option<PaneLayout>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Features {
-    pub ai_copilot: bool,
-    pub diff_highlight: bool,
-    pub code_highlight: bool,
-    pub source_code_mode: bool,
-    pub plantuml_preview: bool,
-    pub mermaid_preview: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Config {
-    pub theme: String,
-    pub features: Features,
-    pub font_size: u32,
-    /// App (chrome) font size, independent of the editor `font_size`.
-    pub ui_font_size: u32,
-    /// Deprecated: use `key_mode`. Kept for backward compatibility.
-    pub vim_mode: bool,
-    /// "normal" | "vim" | "emacs"
-    pub key_mode: Option<String>,
-    pub openrouter_api_key: Option<String>,
-    /// Global default model used by any AI feature that doesn't have a
-    /// per-task override below. Falls back to a hardcoded default in JS
-    /// when unset.
-    pub ai_model: Option<String>,
-    /// Per-task overrides. When None, the feature uses `ai_model`.
-    #[serde(default)]
-    pub ai_model_chat: Option<String>,
-    #[serde(default)]
-    pub ai_model_composer: Option<String>,
-    #[serde(default)]
-    pub ai_model_inline: Option<String>,
-    pub sidebar_sort: Option<String>,
-    pub sidebar_show_all_files: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConfigResponse {
-    pub theme: String,
-    pub features: Features,
-    pub font_size: u32,
-    pub ui_font_size: u32,
-    pub key_mode: String,
-    pub has_api_key: bool,
-    pub api_key_storage: String,
-    pub ai_model: Option<String>,
-    pub ai_model_chat: Option<String>,
-    pub ai_model_composer: Option<String>,
-    pub ai_model_inline: Option<String>,
-    pub sidebar_sort: String,
-    pub sidebar_show_all_files: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TempFileInfo {
-    pub original_path: String,
-    pub temp_path: String,
-    pub modified: String,
-}
 
 // ─── Helpers ───────────────────────────────────────────────
 
@@ -190,95 +79,6 @@ fn locate_api_key() -> (bool, &'static str) {
     (false, primary.storage_type())
 }
 
-fn config_dir() -> Result<PathBuf, String> {
-    let base =
-        dirs::config_dir().ok_or_else(|| "Could not determine config directory".to_string())?;
-    Ok(base.join("fude"))
-}
-
-fn ensure_config_dir() -> Result<PathBuf, String> {
-    let dir = config_dir()?;
-    if !dir.exists() {
-        fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create config directory: {}", e))?;
-    }
-    Ok(dir)
-}
-
-fn temp_dir() -> Result<PathBuf, String> {
-    let dir = config_dir()?.join("tmp");
-    if !dir.exists() {
-        fs::create_dir_all(&dir).map_err(|e| format!("Failed to create temp directory: {}", e))?;
-    }
-    Ok(dir)
-}
-
-fn temp_file_path(original_path: &str) -> Result<PathBuf, String> {
-    let dir = temp_dir()?;
-    let mut hasher = DefaultHasher::new();
-    original_path.hash(&mut hasher);
-    let hash = hasher.finish();
-    let file_name = Path::new(original_path)
-        .file_name()
-        .ok_or_else(|| "Invalid file path".to_string())?
-        .to_string_lossy();
-    let temp_name = format!("{:x}_{}", hash, file_name);
-    Ok(dir.join(temp_name))
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            theme: "dark".to_string(),
-            features: Features {
-                ai_copilot: false,
-                diff_highlight: true,
-                code_highlight: false,
-                source_code_mode: false,
-                plantuml_preview: false,
-                mermaid_preview: false,
-            },
-            font_size: 14,
-            ui_font_size: 14,
-            vim_mode: false,
-            key_mode: None,
-            openrouter_api_key: None,
-            ai_model: None,
-            ai_model_chat: None,
-            ai_model_composer: None,
-            ai_model_inline: None,
-            sidebar_sort: None,
-            sidebar_show_all_files: None,
-        }
-    }
-}
-
-impl Default for Features {
-    fn default() -> Self {
-        Features {
-            ai_copilot: false,
-            diff_highlight: true,
-            code_highlight: false,
-            source_code_mode: false,
-            plantuml_preview: false,
-            mermaid_preview: false,
-        }
-    }
-}
-
-impl Default for Session {
-    fn default() -> Self {
-        Session {
-            open_tabs: Vec::new(),
-            active_tab: 0,
-            vault_path: None,
-            view_mode: "split".to_string(),
-            sidebar_visible: true,
-            pane_layout: None,
-        }
-    }
-}
-
 fn migrate_api_key() {
     let config_path = match config_dir() {
         Ok(d) => d.join("config.json"),
@@ -332,238 +132,43 @@ fn migrate_api_key() {
     }
 }
 
-fn get_file_metadata(path: &Path) -> (Option<u64>, Option<u64>, Option<u64>) {
-    let meta = match fs::metadata(path) {
-        Ok(m) => m,
-        Err(_) => return (None, None, None),
-    };
-    let modified = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs());
-    let created = meta
-        .created()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs());
-    let size = Some(meta.len());
-    (modified, created, size)
-}
-
-#[cfg(test)]
-fn scan_dir_tree(dir: &Path) -> Result<Vec<FileEntry>, String> {
-    scan_dir_tree_filtered(dir, false)
-}
-
-/// File extensions shown in the sidebar by default (without "show all files"):
-/// Markdown variants, PlantUML sources, and images (Fude previews these too).
-fn is_listed_file(name: &str) -> bool {
-    const EXTS: &[&str] = &[
-        // Markdown
-        ".md",
-        ".markdown",
-        ".mdown",
-        ".mkd",
-        ".mkdn",
-        ".qmd",
-        // PlantUML
-        ".puml",
-        ".plantuml",
-        ".uml",
-        ".iuml",
-        ".pu",
-        ".wsd",
-        // Mermaid
-        ".mmd",
-        ".mermaid",
-        // Images
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".webp",
-        ".bmp",
-        ".svg",
-        ".avif",
-        ".ico",
-    ];
-    let lower = name.to_lowercase();
-    EXTS.iter().any(|e| lower.ends_with(e))
-}
-
-fn scan_dir_tree_filtered(dir: &Path, show_all_files: bool) -> Result<Vec<FileEntry>, String> {
-    let mut ancestors: Vec<PathBuf> = Vec::new();
-    scan_dir_tree_inner(dir, show_all_files, &mut ancestors)
-}
-
-/// Directory test that follows symlinks. `DirEntry::file_type()` reports a
-/// symlink as a symlink (never a directory), so a symlinked folder would be
-/// treated as a file and dropped by the extension filter. Common on WSL and
-/// in dotfile/skill setups where folders are linked into a vault.
-fn entry_is_dir(entry: &fs::DirEntry) -> bool {
-    match entry.file_type() {
-        Ok(ft) if ft.is_dir() => true,
-        Ok(ft) if ft.is_symlink() => fs::metadata(entry.path())
-            .map(|m| m.is_dir())
-            .unwrap_or(false),
-        _ => false,
-    }
-}
-
-/// Recursive scan. `ancestors` holds the canonical paths of the directories
-/// currently being scanned so a symlink pointing back at an ancestor stops
-/// instead of recursing forever.
-fn scan_dir_tree_inner(
-    dir: &Path,
-    show_all_files: bool,
-    ancestors: &mut Vec<PathBuf>,
-) -> Result<Vec<FileEntry>, String> {
-    let canonical = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-    if ancestors.contains(&canonical) {
-        return Ok(Vec::new());
-    }
-    ancestors.push(canonical);
-    let result = scan_dir_entries(dir, show_all_files, ancestors);
-    ancestors.pop();
-    result
-}
-
-fn scan_dir_entries(
-    dir: &Path,
-    show_all_files: bool,
-    ancestors: &mut Vec<PathBuf>,
-) -> Result<Vec<FileEntry>, String> {
-    let mut entries = Vec::new();
-
-    let read_dir = fs::read_dir(dir)
-        .map_err(|e| format!("Failed to read directory '{}': {}", dir.display(), e))?;
-
-    // Resolve is_dir once per entry (it may hit the filesystem for symlinks)
-    // and sort on it: directories first, then by name.
-    let mut items: Vec<(fs::DirEntry, bool)> = read_dir
-        .filter_map(|entry| entry.ok())
-        .map(|entry| {
-            let is_dir = entry_is_dir(&entry);
-            (entry, is_dir)
-        })
-        .collect();
-
-    items.sort_by(|(a, a_is_dir), (b, b_is_dir)| match (a_is_dir, b_is_dir) {
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => a.file_name().cmp(&b.file_name()),
-    });
-
-    for (item, is_dir) in items {
-        let name = item.file_name().to_string_lossy().to_string();
-        let path = item.path();
-
-        // Skip hidden files and directories
-        if name.starts_with('.') {
-            continue;
-        }
-
-        if is_dir {
-            // Be resilient: a subdirectory we can't read (permissions, special
-            // network entries on WSL/UNC paths, etc.) must not abort the whole
-            // scan — skip it instead.
-            let children =
-                scan_dir_tree_inner(&path, show_all_files, ancestors).unwrap_or_default();
-            // Only include directories that contain files (directly or nested)
-            if !children.is_empty() {
-                let (modified, created, size) = get_file_metadata(&path);
-                entries.push(FileEntry {
-                    name,
-                    path: path.to_string_lossy().to_string(),
-                    is_dir: true,
-                    children: Some(children),
-                    modified,
-                    created,
-                    size,
-                });
-            }
-        } else if show_all_files || is_listed_file(&name) {
-            let (modified, created, size) = get_file_metadata(&path);
-            entries.push(FileEntry {
-                name,
-                path: path.to_string_lossy().to_string(),
-                is_dir: false,
-                children: None,
-                modified,
-                created,
-                size,
-            });
-        }
-    }
-
-    Ok(entries)
-}
-
 // ─── Tauri Commands ────────────────────────────────────────
+//
+// Thin wrappers over fude_core so the same logic serves the CLI and the TUI.
 
 #[tauri::command]
 fn read_file(path: String) -> Result<String, String> {
-    fs::read_to_string(&path).map_err(|e| format!("Failed to read file '{}': {}", path, e))
+    fude_core::read_file(&path)
 }
 
 #[tauri::command]
 fn write_file(path: String, content: String) -> Result<(), String> {
-    let file_path = Path::new(&path);
-    if let Some(parent) = file_path.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent).map_err(|e| {
-                format!("Failed to create parent directories for '{}': {}", path, e)
-            })?;
-        }
-    }
-    file_watcher::mark_self_save(file_path);
-    fs::write(&path, content).map_err(|e| format!("Failed to write file '{}': {}", path, e))
+    file_watcher::mark_self_save(Path::new(&path));
+    fude_core::write_file(&path, &content)
 }
 
 /// Rename/move a file or directory.
 #[tauri::command]
 fn rename_path(from: String, to: String) -> Result<(), String> {
-    if from.is_empty() || to.is_empty() {
-        return Err("Invalid path".to_string());
-    }
-    if Path::new(&to).exists() {
-        return Err(format!("'{}' already exists", to));
-    }
-    fs::rename(&from, &to).map_err(|e| format!("Failed to rename '{}': {}", from, e))
+    fude_core::rename_path(&from, &to)
 }
 
 /// Move a file or directory to the OS trash/recycle bin.
 #[tauri::command]
 fn delete_path(path: String) -> Result<(), String> {
-    if path.is_empty() {
-        return Err("Invalid path".to_string());
-    }
-    trash::delete(&path).map_err(|e| format!("Failed to move '{}' to trash: {}", path, e))
+    fude_core::delete_path(&path)
 }
 
 /// Create a new empty file (errors if it already exists). Parent dirs created.
 #[tauri::command]
 fn create_file(path: String) -> Result<(), String> {
-    let p = Path::new(&path);
-    if p.exists() {
-        return Err(format!("'{}' already exists", path));
-    }
-    if let Some(parent) = p.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create parent of '{}': {}", path, e))?;
-    }
-    fs::write(&path, "").map_err(|e| format!("Failed to create '{}': {}", path, e))
+    fude_core::create_file(&path)
 }
 
 /// Create a new directory (errors if it already exists).
 #[tauri::command]
 fn create_directory(path: String) -> Result<(), String> {
-    let p = Path::new(&path);
-    if p.exists() {
-        return Err(format!("'{}' already exists", path));
-    }
-    fs::create_dir_all(&path).map_err(|e| format!("Failed to create directory '{}': {}", path, e))
+    fude_core::create_directory(&path)
 }
 
 /// Returns the `assets/` directory next to the given document, creating it if needed.
@@ -689,224 +294,56 @@ fn save_image_bytes(bytes: Vec<u8>, doc_path: String, ext: String) -> Result<Str
 
 #[tauri::command]
 fn read_dir_tree(path: String, show_all_files: Option<bool>) -> Result<Vec<FileEntry>, String> {
-    // Don't gate on `is_dir()` first: on some network/UNC paths (e.g. WSL's
-    // \\wsl.localhost\...) metadata can be flaky and falsely report "not a
-    // directory". Attempt the scan directly so the real OS error surfaces and
-    // genuine directories still open.
-    scan_dir_tree_filtered(Path::new(&path), show_all_files.unwrap_or(false))
+    fude_core::scan_dir_tree_filtered(Path::new(&path), show_all_files.unwrap_or(false))
 }
 
 #[tauri::command]
 fn load_session() -> Result<Option<Session>, String> {
-    let path = config_dir()?.join("session.json");
-    if !path.exists() {
-        return Ok(None);
-    }
-    let content =
-        fs::read_to_string(&path).map_err(|e| format!("Failed to read session file: {}", e))?;
-    let session: Session = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse session file: {}", e))?;
-    Ok(Some(session))
+    fude_core::load_session()
 }
 
 #[tauri::command]
 fn save_session(session: Session) -> Result<(), String> {
-    let dir = ensure_config_dir()?;
-    let path = dir.join("session.json");
-    let content = serde_json::to_string_pretty(&session)
-        .map_err(|e| format!("Failed to serialize session: {}", e))?;
-    fs::write(&path, content).map_err(|e| format!("Failed to write session file: {}", e))
-}
-
-fn load_config() -> Result<Config, String> {
-    let path = config_dir()?.join("config.json");
-    if !path.exists() {
-        return Ok(Config::default());
-    }
-    let content =
-        fs::read_to_string(&path).map_err(|e| format!("Failed to read config file: {}", e))?;
-    let config: Config = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse config file: {}", e))?;
-    Ok(config)
+    fude_core::save_session(&session)
 }
 
 #[tauri::command]
 fn get_config() -> Result<ConfigResponse, String> {
-    let config = load_config()?;
+    let config = fude_core::load_config()?;
     // locate_api_key checks the primary storage and then falls back to
     // config.json, so a key that was rescued by the set_api_key fallback
     // path still shows up as present here with the right storage label.
     let (has_api_key, storage_type) = locate_api_key();
-    // Migrate legacy `vim_mode: bool` to `key_mode: String` for the response
-    let key_mode = config.key_mode.clone().unwrap_or_else(|| {
-        if config.vim_mode {
-            "vim".to_string()
-        } else {
-            "normal".to_string()
-        }
-    });
-    Ok(ConfigResponse {
-        theme: config.theme,
-        features: config.features,
-        font_size: config.font_size,
-        ui_font_size: config.ui_font_size,
-        key_mode,
+    Ok(fude_core::config_response(
+        config,
         has_api_key,
-        api_key_storage: storage_type.to_string(),
-        ai_model: config.ai_model,
-        ai_model_chat: config.ai_model_chat,
-        ai_model_composer: config.ai_model_composer,
-        ai_model_inline: config.ai_model_inline,
-        sidebar_sort: config
-            .sidebar_sort
-            .unwrap_or_else(|| "name_asc".to_string()),
-        sidebar_show_all_files: config.sidebar_show_all_files.unwrap_or(false),
-    })
+        storage_type,
+    ))
 }
 
 #[tauri::command]
 fn save_config(config: Config) -> Result<(), String> {
-    let dir = ensure_config_dir()?;
-    let path = dir.join("config.json");
-
-    // Key management is the exclusive responsibility of set_api_key /
-    // delete_api_key. save_config must never read, write, or "preserve" the
-    // key through key storage — earlier attempts to be helpful here ended
-    // up routing the key back through a broken keyring and clobbering the
-    // copy that set_api_key had just written. Always carry forward whatever
-    // is already on disk so this command is a no-op for the key field.
-    let mut config_to_save = config;
-    config_to_save.openrouter_api_key = load_config()
-        .ok()
-        .and_then(|existing| existing.openrouter_api_key);
-
-    let content = serde_json::to_string_pretty(&config_to_save)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    fs::write(&path, &content).map_err(|e| format!("Failed to write config file: {}", e))?;
-
-    // Strengthen file permissions
-    let _ = set_file_permissions(&path);
-    let _ = set_dir_permissions(&dir);
-
-    Ok(())
+    fude_core::save_config(config)
 }
 
 #[tauri::command]
 fn write_temp_file(path: String, content: String) -> Result<(), String> {
-    let temp_path = temp_file_path(&path)?;
-    fs::write(&temp_path, content)
-        .map_err(|e| format!("Failed to write temp file '{}': {}", temp_path.display(), e))
+    fude_core::write_temp_file(&path, &content)
 }
 
 #[tauri::command]
 fn delete_temp_file(path: String) -> Result<(), String> {
-    let temp_path = temp_file_path(&path)?;
-    if temp_path.exists() {
-        fs::remove_file(&temp_path).map_err(|e| {
-            format!(
-                "Failed to delete temp file '{}': {}",
-                temp_path.display(),
-                e
-            )
-        })?;
-    }
-    Ok(())
+    fude_core::delete_temp_file(&path)
 }
 
 #[tauri::command]
 fn check_temp_files(paths: Vec<String>) -> Result<Vec<TempFileInfo>, String> {
-    let mut results = Vec::new();
-
-    for path in paths {
-        let temp_path = match temp_file_path(&path) {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-
-        if temp_path.exists() {
-            let metadata = fs::metadata(&temp_path)
-                .map_err(|e| format!("Failed to read temp file metadata: {}", e))?;
-            let modified = metadata
-                .modified()
-                .map(|t| {
-                    let duration = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-                    format!("{}", duration.as_millis())
-                })
-                .unwrap_or_else(|_| "unknown".to_string());
-
-            results.push(TempFileInfo {
-                original_path: path,
-                temp_path: temp_path.to_string_lossy().to_string(),
-                modified,
-            });
-        }
-    }
-
-    Ok(results)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BrowseEntry {
-    pub name: String,
-    pub path: String,
-    pub is_dir: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BrowseResult {
-    pub current: String,
-    pub parent: String,
-    pub entries: Vec<BrowseEntry>,
-}
-
-fn list_directory(dir: &Path) -> Result<Vec<BrowseEntry>, String> {
-    let read_dir = fs::read_dir(dir)
-        .map_err(|e| format!("Failed to read directory '{}': {}", dir.display(), e))?;
-
-    let mut entries: Vec<BrowseEntry> = Vec::new();
-    for item in read_dir.filter_map(|e| e.ok()) {
-        let name = item.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
-            continue;
-        }
-        let is_dir = item.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-        entries.push(BrowseEntry {
-            name,
-            path: item.path().to_string_lossy().to_string(),
-            is_dir,
-        });
-    }
-
-    entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-    });
-
-    Ok(entries)
+    fude_core::check_temp_files(paths)
 }
 
 #[tauri::command]
 fn browse_dir(path: String) -> Result<BrowseResult, String> {
-    let dir = if path.is_empty() {
-        dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?
-    } else {
-        PathBuf::from(&path)
-    };
-
-    if !dir.is_dir() {
-        return Err(format!("'{}' is not a directory", dir.display()));
-    }
-
-    let parent = dir.parent().unwrap_or(&dir).to_string_lossy().to_string();
-
-    let entries = list_directory(&dir)?;
-
-    Ok(BrowseResult {
-        current: dir.to_string_lossy().to_string(),
-        parent,
-        entries,
-    })
+    fude_core::browse_dir(&path)
 }
 
 #[tauri::command]
@@ -1160,33 +597,6 @@ fn get_open_dir() -> Result<String, String> {
 }
 
 // ─── App Entry ─────────────────────────────────────────────
-
-/// Extract a file path and remote URL from a raw argv slice (argv[0] = executable).
-/// Used as a fallback when tauri-plugin-cli fails to parse (e.g. Windows file
-/// association passes a quoted absolute path that the clap parser may reject).
-/// Resolve a (possibly relative) CLI path argument to an absolute path string,
-/// using `base` (the launch working directory) for relative paths. On Unix the
-/// result is canonicalized when the target exists; otherwise the lexical join is
-/// returned. On Windows the lexical join is used to avoid `\\?\` verbatim paths.
-fn resolve_cli_path(path: &str, base: Option<PathBuf>) -> String {
-    let p = Path::new(path);
-    let joined = if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        let base = base
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("."));
-        base.join(p)
-    };
-
-    #[cfg(not(windows))]
-    {
-        if let Ok(abs) = joined.canonicalize() {
-            return abs.to_string_lossy().to_string();
-        }
-    }
-    joined.to_string_lossy().to_string()
-}
 
 /// Returns (path, remote, new_window). `new_window` is true when `--new-window`
 /// / `-n` is present, requesting the target open in a freshly spawned window.
@@ -1493,8 +903,8 @@ fn gui_ready(
     GUI_SOCKET_STARTED
         .get_or_init(|| {
             let dir = ensure_config_dir()?;
-            let socket = ipc::socket_path(&dir);
-            let name = wait_client::socket_name(&socket).map_err(|e| e.to_string())?;
+            let socket = fude_core::ipc::socket_path(&dir);
+            let name = fude_core::ipc::socket_name(&socket).map_err(|e| e.to_string())?;
             gui_server::start(name, registry, Arc::new(WindowSink(app)))
                 .map_err(|e| format!("cannot listen on {}: {}", socket.display(), e))?;
             #[cfg(unix)]
@@ -1880,7 +1290,7 @@ pub fn run() {
     // `fude --wait ...` is a client of the running GUI, never a GUI itself.
     if let Some(paths) = wait_client::wait_paths(&raw_args) {
         let code = match config_dir() {
-            Ok(dir) => wait_client::run(paths, &ipc::socket_path(&dir)),
+            Ok(dir) => wait_client::run(paths, &fude_core::ipc::socket_path(&dir)),
             Err(e) => {
                 eprintln!("fude: {}", e);
                 2
@@ -2049,469 +1459,6 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
-
-    // --- scan_dir_tree tests ---
-
-    #[test]
-    fn scan_dir_tree_finds_md_files() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("note.md"), "# Hello").unwrap();
-        fs::write(tmp.path().join("readme.txt"), "ignored").unwrap();
-
-        let entries = scan_dir_tree(tmp.path()).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "note.md");
-        assert!(!entries[0].is_dir);
-        assert!(entries[0].children.is_none());
-        assert!(entries[0].modified.is_some());
-        assert!(entries[0].size.is_some());
-    }
-
-    #[test]
-    fn scan_dir_tree_show_all_files() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("note.md"), "# Hello").unwrap();
-        fs::write(tmp.path().join("readme.txt"), "text").unwrap();
-        fs::write(tmp.path().join("data.json"), "{}").unwrap();
-
-        // Default: only .md files
-        let entries = scan_dir_tree(tmp.path()).unwrap();
-        assert_eq!(entries.len(), 1);
-
-        // show_all_files: all files
-        let entries = scan_dir_tree_filtered(tmp.path(), true).unwrap();
-        assert_eq!(entries.len(), 3);
-    }
-
-    #[test]
-    fn scan_dir_tree_finds_qmd_files() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("report.qmd"), "---\ntitle: x\n---").unwrap();
-        fs::write(tmp.path().join("readme.txt"), "ignored").unwrap();
-
-        let entries = scan_dir_tree(tmp.path()).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "report.qmd");
-        assert!(!entries[0].is_dir);
-    }
-
-    /// Regression: a symlink to a directory used to be classified as a file
-    /// (DirEntry::file_type never follows links) and dropped by the extension
-    /// filter, so whole linked folders vanished from the filer.
-    #[cfg(unix)]
-    #[test]
-    fn scan_dir_tree_follows_symlinked_dirs() {
-        use std::os::unix::fs::symlink;
-        let tmp = TempDir::new().unwrap();
-        let real = tmp.path().join("real");
-        fs::create_dir(&real).unwrap();
-        fs::write(real.join("note.md"), "# linked").unwrap();
-        fs::write(real.join("config.yaml"), "a: 1").unwrap();
-        let vault = tmp.path().join("vault");
-        fs::create_dir(&vault).unwrap();
-        symlink(&real, vault.join("linked")).unwrap();
-
-        let entries = scan_dir_tree(&vault).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "linked");
-        assert!(entries[0].is_dir);
-        let children = entries[0].children.as_ref().unwrap();
-        assert_eq!(children.len(), 1);
-        assert_eq!(children[0].name, "note.md");
-
-        // show_all_files applies inside the linked folder too
-        let entries = scan_dir_tree_filtered(&vault, true).unwrap();
-        let children = entries[0].children.as_ref().unwrap();
-        let names: Vec<&str> = children.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["config.yaml", "note.md"]);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn scan_dir_tree_symlinked_dirs_sort_with_dirs() {
-        use std::os::unix::fs::symlink;
-        let tmp = TempDir::new().unwrap();
-        let real = tmp.path().join("real");
-        fs::create_dir(&real).unwrap();
-        fs::write(real.join("x.md"), "").unwrap();
-        let vault = tmp.path().join("vault");
-        fs::create_dir(&vault).unwrap();
-        fs::write(vault.join("a.md"), "").unwrap();
-        symlink(&real, vault.join("zlink")).unwrap();
-
-        let entries = scan_dir_tree(&vault).unwrap();
-        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["zlink", "a.md"]);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn scan_dir_tree_symlinked_file_is_listed_by_extension() {
-        use std::os::unix::fs::symlink;
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("target.txt"), "x").unwrap();
-        let vault = tmp.path().join("vault");
-        fs::create_dir(&vault).unwrap();
-        symlink(tmp.path().join("target.txt"), vault.join("note.md")).unwrap();
-        symlink(tmp.path().join("target.txt"), vault.join("data.txt")).unwrap();
-
-        let entries = scan_dir_tree(&vault).unwrap();
-        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["note.md"]);
-        assert!(!entries[0].is_dir);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn scan_dir_tree_symlink_loop_terminates() {
-        use std::os::unix::fs::symlink;
-        let tmp = TempDir::new().unwrap();
-        let a = tmp.path().join("a");
-        fs::create_dir(&a).unwrap();
-        fs::write(a.join("note.md"), "").unwrap();
-        // a/loop -> a  (cycle) and vault/up -> vault (self-cycle)
-        symlink(&a, a.join("loop")).unwrap();
-        symlink(tmp.path(), tmp.path().join("up")).unwrap();
-
-        let entries = scan_dir_tree(tmp.path()).unwrap();
-        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        // "up" points at an ancestor -> scanned as empty -> excluded.
-        assert_eq!(names, vec!["a"]);
-        let children = entries[0].children.as_ref().unwrap();
-        let names: Vec<&str> = children.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["note.md"]);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn scan_dir_tree_dangling_symlink_is_skipped() {
-        use std::os::unix::fs::symlink;
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("note.md"), "").unwrap();
-        symlink(tmp.path().join("missing"), tmp.path().join("dangling")).unwrap();
-        symlink(
-            tmp.path().join("missing.md"),
-            tmp.path().join("dangling.md"),
-        )
-        .unwrap();
-
-        // Must not error; the .md-named dangling link is listed like a file
-        // (opening it will surface the real error), the other is dropped.
-        let entries = scan_dir_tree_filtered(tmp.path(), false).unwrap();
-        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["dangling.md", "note.md"]);
-    }
-
-    #[test]
-    fn scan_dir_tree_lists_plantuml_and_markdown_variants() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("a.puml"), "@startuml\n@enduml").unwrap();
-        fs::write(tmp.path().join("b.uml"), "@startuml\n@enduml").unwrap();
-        fs::write(tmp.path().join("c.markdown"), "# x").unwrap();
-        fs::write(tmp.path().join("d.png"), "binary").unwrap();
-        fs::write(tmp.path().join("ignored.zip"), "binary").unwrap();
-
-        let names: Vec<String> = scan_dir_tree(tmp.path())
-            .unwrap()
-            .into_iter()
-            .map(|e| e.name)
-            .collect();
-        assert!(names.contains(&"a.puml".to_string()));
-        assert!(names.contains(&"b.uml".to_string()));
-        assert!(names.contains(&"c.markdown".to_string()));
-        assert!(names.contains(&"d.png".to_string()));
-        assert!(!names.contains(&"ignored.zip".to_string()));
-    }
-
-    #[test]
-    fn scan_dir_tree_recurses_into_subdirs() {
-        let tmp = TempDir::new().unwrap();
-        let sub = tmp.path().join("docs");
-        fs::create_dir(&sub).unwrap();
-        fs::write(sub.join("guide.md"), "content").unwrap();
-
-        let entries = scan_dir_tree(tmp.path()).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert!(entries[0].is_dir);
-        assert_eq!(entries[0].name, "docs");
-        let children = entries[0].children.as_ref().unwrap();
-        assert_eq!(children.len(), 1);
-        assert_eq!(children[0].name, "guide.md");
-    }
-
-    #[test]
-    fn scan_dir_tree_skips_hidden_files() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join(".hidden.md"), "secret").unwrap();
-        fs::write(tmp.path().join("visible.md"), "public").unwrap();
-
-        let entries = scan_dir_tree(tmp.path()).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "visible.md");
-    }
-
-    #[test]
-    fn scan_dir_tree_excludes_empty_dirs() {
-        let tmp = TempDir::new().unwrap();
-        let empty_dir = tmp.path().join("empty");
-        fs::create_dir(&empty_dir).unwrap();
-
-        let entries = scan_dir_tree(tmp.path()).unwrap();
-        assert!(entries.is_empty());
-    }
-
-    #[test]
-    fn scan_dir_tree_sorts_dirs_before_files() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("zebra.md"), "z").unwrap();
-        let sub = tmp.path().join("alpha");
-        fs::create_dir(&sub).unwrap();
-        fs::write(sub.join("inner.md"), "i").unwrap();
-
-        let entries = scan_dir_tree(tmp.path()).unwrap();
-        assert_eq!(entries.len(), 2);
-        assert!(entries[0].is_dir, "directory should come first");
-        assert!(!entries[1].is_dir, "file should come second");
-    }
-
-    // --- Config default values ---
-
-    #[test]
-    fn config_default_values() {
-        let config = Config::default();
-        assert_eq!(config.theme, "dark");
-        assert_eq!(config.font_size, 14);
-        assert!(!config.vim_mode);
-        assert!(!config.features.ai_copilot);
-        assert!(config.features.diff_highlight);
-        assert!(config.openrouter_api_key.is_none());
-        assert!(config.ai_model.is_none());
-        assert!(config.sidebar_sort.is_none());
-        assert!(config.sidebar_show_all_files.is_none());
-    }
-
-    // --- Session default values ---
-
-    #[test]
-    fn session_default_values() {
-        let session = Session::default();
-        assert!(session.open_tabs.is_empty());
-        assert_eq!(session.active_tab, 0);
-        assert!(session.vault_path.is_none());
-        assert_eq!(session.view_mode, "split");
-        assert!(session.sidebar_visible);
-        assert!(session.pane_layout.is_none());
-    }
-
-    // --- Serialization round-trip ---
-
-    #[test]
-    fn session_serialization_roundtrip() {
-        let session = Session {
-            open_tabs: vec![TabInfo {
-                path: "/tmp/test.md".to_string(),
-                cursor_line: 10,
-                cursor_col: 5,
-                scroll_top: 120.5,
-                view_mode: "preview".to_string(),
-            }],
-            active_tab: 0,
-            vault_path: Some("/home/user/vault".to_string()),
-            view_mode: "editor".to_string(),
-            sidebar_visible: false,
-            pane_layout: Some(PaneLayout {
-                direction: "horizontal".to_string(),
-                panes: vec![PaneInfo {
-                    tab_id: Some("tab-1".to_string()),
-                    size_percent: 50.0,
-                }],
-            }),
-        };
-
-        let json = serde_json::to_string(&session).unwrap();
-        let restored: Session = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(restored.open_tabs.len(), 1);
-        assert_eq!(restored.open_tabs[0].path, "/tmp/test.md");
-        assert_eq!(restored.open_tabs[0].cursor_line, 10);
-        assert_eq!(restored.open_tabs[0].view_mode, "preview");
-        assert_eq!(restored.active_tab, 0);
-        assert_eq!(restored.vault_path.as_deref(), Some("/home/user/vault"));
-        assert_eq!(restored.view_mode, "editor");
-        assert!(!restored.sidebar_visible);
-        let layout = restored.pane_layout.unwrap();
-        assert_eq!(layout.direction, "horizontal");
-        assert_eq!(layout.panes.len(), 1);
-    }
-
-    #[test]
-    fn tab_info_view_mode_defaults_when_absent() {
-        // Sessions written by older versions have no `view_mode` on tabs.
-        let json = r#"{"path":"/tmp/old.md","cursor_line":0,"cursor_col":0,"scroll_top":0.0}"#;
-        let tab: TabInfo = serde_json::from_str(json).unwrap();
-        assert_eq!(tab.view_mode, "split");
-    }
-
-    #[test]
-    fn tab_info_view_mode_roundtrip() {
-        let json = r#"{"path":"/tmp/n.md","cursor_line":0,"cursor_col":0,"scroll_top":0.0,"view_mode":"editor"}"#;
-        let tab: TabInfo = serde_json::from_str(json).unwrap();
-        assert_eq!(tab.view_mode, "editor");
-    }
-
-    #[test]
-    fn config_serialization_roundtrip() {
-        let config = Config {
-            theme: "light".to_string(),
-            features: Features {
-                ai_copilot: true,
-                diff_highlight: false,
-                code_highlight: true,
-                source_code_mode: true,
-                plantuml_preview: true,
-                mermaid_preview: true,
-            },
-            font_size: 18,
-            ui_font_size: 16,
-            vim_mode: true,
-            key_mode: Some("vim".to_string()),
-            openrouter_api_key: Some("sk-test-key".to_string()),
-            ai_model: Some("openai/gpt-4o".to_string()),
-            ai_model_chat: Some("anthropic/claude-sonnet-4.5".to_string()),
-            ai_model_composer: None,
-            ai_model_inline: Some("google/gemini-2.5-flash".to_string()),
-            sidebar_sort: Some("modified_desc".to_string()),
-            sidebar_show_all_files: Some(true),
-        };
-
-        let json = serde_json::to_string(&config).unwrap();
-        let restored: Config = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(restored.theme, "light");
-        assert!(restored.features.ai_copilot);
-        assert!(!restored.features.diff_highlight);
-        assert!(restored.features.mermaid_preview);
-        assert_eq!(restored.font_size, 18);
-        assert_eq!(restored.ui_font_size, 16);
-        assert!(restored.vim_mode);
-        assert_eq!(restored.openrouter_api_key.as_deref(), Some("sk-test-key"));
-        assert_eq!(restored.ai_model.as_deref(), Some("openai/gpt-4o"));
-        assert_eq!(
-            restored.ai_model_chat.as_deref(),
-            Some("anthropic/claude-sonnet-4.5")
-        );
-        assert!(restored.ai_model_composer.is_none());
-        assert_eq!(
-            restored.ai_model_inline.as_deref(),
-            Some("google/gemini-2.5-flash")
-        );
-        assert_eq!(restored.sidebar_sort.as_deref(), Some("modified_desc"));
-        assert_eq!(restored.sidebar_show_all_files, Some(true));
-    }
-
-    #[test]
-    fn config_deserializes_with_missing_fields() {
-        // Old config files may lack newer fields like ai_model
-        let json = r#"{"theme":"dark","font_size":14,"vim_mode":false}"#;
-        let config: Config = serde_json::from_str(json).unwrap();
-        assert_eq!(config.theme, "dark");
-        assert!(!config.features.ai_copilot); // default
-        assert!(config.features.diff_highlight); // default
-        assert!(config.openrouter_api_key.is_none()); // default
-        assert!(config.ai_model.is_none()); // default
-        assert!(config.sidebar_sort.is_none()); // default
-        assert!(config.sidebar_show_all_files.is_none()); // default
-    }
-
-    // --- Temp file naming convention ---
-
-    #[test]
-    fn temp_file_path_is_in_config_dir() {
-        // Temp files should be stored in ~/.config/fude/tmp/
-        let path = temp_file_path("/home/user/docs/notes.md").unwrap();
-        let path_str = path.to_string_lossy();
-        assert!(path_str.contains("fude"));
-        assert!(path_str.contains("tmp"));
-        assert!(path_str.contains("notes.md"));
-    }
-
-    #[test]
-    fn temp_file_path_is_deterministic() {
-        let path1 = temp_file_path("/home/user/docs/notes.md").unwrap();
-        let path2 = temp_file_path("/home/user/docs/notes.md").unwrap();
-        assert_eq!(path1, path2);
-    }
-
-    #[test]
-    fn temp_file_path_differs_for_different_files() {
-        let path1 = temp_file_path("/home/user/docs/notes.md").unwrap();
-        let path2 = temp_file_path("/home/user/docs/other.md").unwrap();
-        assert_ne!(path1, path2);
-    }
-
-    // --- BrowseResult / list_directory tests ---
-
-    #[test]
-    fn list_directory_returns_entries() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("file.txt"), "hello").unwrap();
-        let sub = tmp.path().join("subdir");
-        fs::create_dir(&sub).unwrap();
-
-        let entries = list_directory(tmp.path()).unwrap();
-        assert_eq!(entries.len(), 2);
-        // Directories first
-        assert!(entries[0].is_dir);
-        assert_eq!(entries[0].name, "subdir");
-        assert!(!entries[1].is_dir);
-        assert_eq!(entries[1].name, "file.txt");
-    }
-
-    #[test]
-    fn list_directory_skips_hidden() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join(".hidden"), "secret").unwrap();
-        fs::write(tmp.path().join("visible.txt"), "public").unwrap();
-
-        let entries = list_directory(tmp.path()).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "visible.txt");
-    }
-
-    #[test]
-    fn list_directory_error_on_nonexistent() {
-        let result = list_directory(Path::new("/nonexistent_dir_12345"));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn browse_result_serialization_roundtrip() {
-        let result = BrowseResult {
-            current: "/home/user".to_string(),
-            parent: "/home".to_string(),
-            entries: vec![
-                BrowseEntry {
-                    name: "docs".to_string(),
-                    path: "/home/user/docs".to_string(),
-                    is_dir: true,
-                },
-                BrowseEntry {
-                    name: "readme.txt".to_string(),
-                    path: "/home/user/readme.txt".to_string(),
-                    is_dir: false,
-                },
-            ],
-        };
-
-        let json = serde_json::to_string(&result).unwrap();
-        let restored: BrowseResult = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(restored.current, "/home/user");
-        assert_eq!(restored.parent, "/home");
-        assert_eq!(restored.entries.len(), 2);
-        assert!(restored.entries[0].is_dir);
-        assert!(!restored.entries[1].is_dir);
-    }
 
     // --- cli_info_text ---
 
@@ -2832,22 +1779,6 @@ mod tests {
 
     // --- resolve_cli_path tests ---
 
-    #[cfg(not(windows))]
-    #[test]
-    fn resolve_cli_path_keeps_absolute_unchanged() {
-        // Nonexistent absolute path: canonicalize fails, returned as-is.
-        let r = resolve_cli_path("/nonexistent/abs/path.md", Some(PathBuf::from("/base")));
-        assert_eq!(r, "/nonexistent/abs/path.md");
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn resolve_cli_path_joins_relative_to_base() {
-        // Nonexistent relative path: canonicalize fails, returns lexical join.
-        let r = resolve_cli_path("notes/a.md", Some(PathBuf::from("/work/dir")));
-        assert_eq!(r, "/work/dir/notes/a.md");
-    }
-
     // --- extension helpers ---
 
     #[test]
@@ -2893,32 +1824,6 @@ mod tests {
         assert_eq!(m.extensions.len(), 1);
         assert_eq!(m.extensions[0].id, "plantuml");
         assert_eq!(m.extensions[0].files[0].rel, "plantuml.js");
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn resolve_cli_path_canonicalizes_existing_relative_dir() {
-        let tmp = TempDir::new().unwrap();
-        let sub = tmp.path().join("docs");
-        fs::create_dir(&sub).unwrap();
-        let r = resolve_cli_path("docs", Some(tmp.path().to_path_buf()));
-        // Result is absolute and points at the existing subdirectory.
-        assert!(Path::new(&r).is_absolute());
-        assert_eq!(
-            Path::new(&r).canonicalize().unwrap(),
-            sub.canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    fn temp_files_are_hidden_from_scan() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("notes.md"), "# Notes").unwrap();
-        fs::write(tmp.path().join(".~notes.md.tmp"), "unsaved draft").unwrap();
-
-        let entries = scan_dir_tree(tmp.path()).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "notes.md");
     }
 
     // --- sanitize_basename tests ---

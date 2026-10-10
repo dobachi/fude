@@ -116,13 +116,13 @@ case "$MODE" in
   test)
     npm run build:frontend
     npx vitest run
-    ( cd src-tauri && cargo test --lib )
+    ( cd src-tauri && cargo test --workspace --lib )
     ;;
   check)
     npx prettier --check 'src/**/*.{js,css,html}'
     npx eslint src/js/
     npx vitest run
-    ( cd src-tauri && cargo fmt --check && cargo clippy --lib -- -D warnings && cargo test --lib )
+    ( cd src-tauri && cargo fmt --check && cargo clippy --workspace --lib -- -D warnings && cargo test --workspace --lib )
     npm run build:frontend
     ;;
   shell)

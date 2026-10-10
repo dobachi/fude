@@ -5,8 +5,9 @@
 //! remote-GUI agent later (see docs/TUI_DESIGN.md §4.3), so file operations
 //! will be added here as further variants rather than as a second channel.
 
+use interprocess::local_socket::{prelude::*, Name};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Bumped whenever a change would confuse an older peer.
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -71,6 +72,26 @@ pub fn socket_path(config_dir: &std::path::Path) -> PathBuf {
     match std::env::var_os(SOCKET_ENV) {
         Some(p) if !p.is_empty() => PathBuf::from(p),
         _ => config_dir.join("gui.sock"),
+    }
+}
+
+/// The local-socket name for `socket`: a filesystem path where those are
+/// supported, else (Windows) a named pipe derived from the file name.
+pub fn socket_name(socket: &Path) -> std::io::Result<Name<'static>> {
+    #[cfg(unix)]
+    {
+        use interprocess::local_socket::GenericFilePath;
+        socket.to_path_buf().to_fs_name::<GenericFilePath>()
+    }
+    #[cfg(not(unix))]
+    {
+        use interprocess::local_socket::GenericNamespaced;
+        let base = socket
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "fude-gui.sock".to_string());
+        let user = std::env::var("USERNAME").unwrap_or_default();
+        format!("fude-{}-{}", user, base).to_ns_name::<GenericNamespaced>()
     }
 }
 

@@ -5,6 +5,9 @@ description = "Fude - A lightweight cross-platform Markdown editor built with Ta
 authors = ["you"]
 edition = "2021"
 
+[workspace]
+members = ["crates/fude-core"]
+
 [lib]
 name = "fude_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
@@ -20,6 +23,7 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-opener = "2"
 interprocess = "2.4"
+fude-core = { path = "crates/fude-core" }
 
 [target."cfg(any(target_os = \"windows\", target_os = \"macos\", target_os = \"linux\"))".dependencies]
 tauri-plugin-single-instance = "2"
@@ -30,7 +34,6 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-util = "0.3"
 sha2 = "0.10"
 hex = "0.4"
-trash = "5"
 tokio = { version = "1", features = ["rt"] }
 keyring = "3"
 notify = "8"
