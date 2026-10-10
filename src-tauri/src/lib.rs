@@ -644,6 +644,7 @@ Options:
   -w, --wait          Open PATH in the running Fude (starting one if needed) and
                       return only when its tab is closed; exit 1 if edits were
                       discarded. Lets Fude serve as $EDITOR / git core.editor.
+                      (On a machine without this GUI use `fude-cli --wait`.)
   -h, --help          Print help
   -V, --version       Print version
 
@@ -651,7 +652,8 @@ Commands:
   setup    Prepare an ssh host so that `fude-cli FILE` there opens the file in
            this Fude: adds the RemoteForward to ~/.ssh/config, copies the GUI
            token and fude-cli over, and checks the connection (docs/REMOTE.md).
-  tui      Show a Markdown file in the terminal (`q` quits, `j`/`k` scroll).
+  tui      Edit in the terminal: files open as tabs, a directory as the file
+           list, with a live preview (Ctrl+S saves, Alt+Q quits, F1: keys).
   check    Report whether a running Fude answers, and through which route.
   bridge   (WSL) Send everything opened from WSL to the Fude on Windows.
   browser  Serve Fude over HTTP and use it from a web browser (needs Node.js).
@@ -659,7 +661,8 @@ Commands:
            (--allow), the access key and TLS: see `fude browser --help`.
            To open a file that is itself named \"browser\", pass ./browser.
 
-  setup/tui/check run the bundled `fude-cli` (also usable on its own).
+  setup/tui/check/bridge run the bundled `fude-cli` (also usable on its own).
+  Guide: docs/REMOTE.md
 ";
 
 /// Text to print for an informational flag (`--help` / `--version`), if one is

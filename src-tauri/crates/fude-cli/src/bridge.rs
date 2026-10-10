@@ -396,16 +396,24 @@ mod unix {
             server.join().unwrap();
         }
 
-        // The bridge only ever runs in WSL; macOS treats a closed listener's
-        // socket file differently, which is of no interest here.
-        #[cfg(target_os = "linux")]
         #[test]
         fn bind_replaces_a_dead_socket_and_refuses_a_live_one() {
             let tmp = TempDir::new().unwrap();
             let sock = tmp.path().join("gui.sock");
             drop(UnixListener::bind(&sock).unwrap()); // leaves the file behind
             assert!(sock.exists());
-            let live = bind(&sock).unwrap();
+            // Another test may be forking a child at this instant; until that
+            // child execs it holds a copy of the listener we just dropped, so
+            // the socket can look alive for a moment. Give it that moment.
+            let mut live = bind(&sock);
+            for _ in 0..50 {
+                if live.is_ok() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                live = bind(&sock);
+            }
+            let live = live.unwrap();
             assert!(bind(&sock).unwrap_err().contains("in use"));
             drop(live);
         }

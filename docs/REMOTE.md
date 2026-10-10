@@ -150,6 +150,9 @@ TCP の `RemoteForward` と `scp` はそのまま通る。Unix ソケットの�
 
 ## 4. Windows 版 Fude で受ける（WSL を使っている場合）
 
+> Fude 0.8.3 以降（Windows 版・WSL 側とも）。WSL のファイルと k16 のファイルを Windows の Fude で開き、
+> 編集・保存・書き戻しまで実機で確認済み。
+
 WSL で作業しつつ、表示は Windows の Fude にしたい場合。**WSL で 1 コマンド**、PowerShell からの ssh も
 ファイアウォールの設定も要らない:
 
@@ -205,9 +208,11 @@ PowerShell で `fude-cli.exe setup k16`（インストール先の `fude-cli.exe
 
 | 症状 | 見るところ |
 | --- | --- |
-| `fude-cli` が端末内エディタになってしまう | 手元で Fude が起動しているか。`fude-cli --check` で経路を確認 |
+| `fude-cli` が端末内エディタになってしまう | 手元で Fude が起動しているか（Windows の Fude で受けるなら WSL で `fude bridge` が動いているか）。`fude-cli --check` で経路を確認 |
+| `fude bridge`: `gui.sock is in use` | WSL の Fude（または別の bridge）が動いている。どちらか一方にする |
+| `fude bridge` 経由で `no Fude GUI on Windows answers` | Windows の Fude が起動していない |
 | `remote agents must present the GUI token` | 鍵が違う。`fude setup <host>` をやり直すか `~/.config/fude/gui-token` を手元のものと揃える |
 | `tcp://127.0.0.1:47821: Connection refused` | ssh の転送が張られていない。`~/.ssh/config` の `RemoteForward` 行と、`ssh` でログインし直したか |
-| `remote port forwarding failed for listen port 47821` | k16 側で別のものが 47821 を使っている。`fude setup k16 --port 47822` で別ポートに |
+| `remote port forwarding failed for listen port 47821` | 同じホストへ ssh を複数本張ると、転送を持てるのは最初の 1 本だけ（2 本目以降はこの警告が出る）。最初の 1 本を閉じると届かなくなるので、ログインし直す。他人や別のソフトが 47821 を使っている場合は `fude setup k16 --port 47822` で別ポートに |
 | Fude 側に「k16 との接続が切れました」 | ssh を閉じた／`fude-cli` を止めた。タブは残り、未保存分は暫定保存にある。繋ぎ直してもう一度開く |
 | `fude --wait` が戻らない | そのタブを閉じる（Ctrl+Shift+W）。Fude を終了しても戻る |

@@ -32,14 +32,17 @@ Usage: fude-cli [OPTIONS] [--] <PATH>...
        fude-cli bridge [--exe PATH]
        fude-cli --check
 
-Open files in the Fude GUI that your ssh session forwards to (see
-docs/TUI_DESIGN.md §4.2), serving them to it until their tabs are closed.
+Open files in the Fude GUI this machine can reach — the one your ssh session
+forwards to, a `fude bridge`, or a local Fude — and serve them to it until
+their tabs are closed. Without a reachable GUI, edit in the terminal instead.
+Guide: docs/REMOTE.md
 
 Options:
   -w, --wait     Stay in the foreground until every tab is closed; exit 1 if
                  edits were discarded. Lets fude-cli serve as $EDITOR.
-      --gui      Only use a forwarded GUI; fail if none answers
-      --tui      Use the terminal UI (not implemented yet)
+      --gui      Only use a GUI; fail if none answers
+      --tui      Edit in the terminal: tabs, file list (pass a directory),
+                 live preview. Ctrl+S saves, Alt+Q quits, F1 lists the keys.
       --check    Report which GUI answers (and how), without opening anything
   -h, --help     Print help
   -V, --version  Print version
@@ -53,8 +56,9 @@ Commands:
                  started from here — by relaying ~/.config/fude/gui.sock to
                  it. Needs no ssh from PowerShell and no firewall rule.
 
-The GUI is found through $FUDE_GUI_SOCK, then ~/.cache/fude/gui/*.sock
-(ssh RemoteForward targets), then the local ~/.config/fude/gui.sock.
+The GUI is found through $FUDE_GUI_SOCK, $FUDE_GUI_ADDR, ~/.cache/fude/gui/*.sock,
+127.0.0.1:47821 (what `setup` makes ssh forward), then ~/.config/fude/gui.sock.
+Remote agents present the token in ~/.config/fude/gui-token ($FUDE_GUI_TOKEN).
 ";
 
 /// Parse argv (argv[0] = executable). Unknown flags are an error so a typo

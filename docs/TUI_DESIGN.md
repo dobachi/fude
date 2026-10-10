@@ -462,6 +462,6 @@ CLAUDE.md の「テストの無い変更は未完成」に従う。
 | `fude-cli` の配布 | **済**: GitHub Releases に `fude-cli-<os>-<arch>`（CI）。deb には未同梱（`make install` は `/usr/bin/fude-cli` を置く）。`fude-cli setup` は CPU が違う相手に Releases から取る |
 | 既存 `fude-browser` との関係 | 残す。「ブラウザを GUI にする」用途は別物。将来 `fude-cli` が serve.js の API を話せるようになれば統合候補 |
 | リモート側の暫定ファイル | 操作側に置く（§4.4）。リモート側には置かない |
-| Windows の GUI | **実装済み・実機未確認**: 名前付きパイプに加えて `127.0.0.1:47821` の TCP でも待ち受け。Windows の ssh は `RemoteForward 47821 127.0.0.1:47821`。v0.8.0 の exe で確認する |
+| Windows の GUI | **実機確認済み（2026-10-10、Fude 0.8.2）**: WSL の `fude bridge` 経由で、WSL のファイルと k16 のファイル（WSL から張った ssh 転送）を Windows の Fude で開き、編集・保存・書き戻し・終了コードまで確認。PowerShell から ssh する経路（`RemoteForward 47821 127.0.0.1:47821`）は未確認 |
 | 操作側 GUI の自動起動 | v1 は「GUI を起動しておく」が前提。後で Linux は systemd user socket（`fude-gui.socket`）、macOS は launchd のソケットアクティベーションを配布物に同梱する。Windows はログイン時起動で代替 |
 | 切断時の退避・リモートタブのセッション復元 | 未着手（§4.4 / §4.5）。現状はトーストを出すのみ。未保存分は操作側の暫定保存に残る |
