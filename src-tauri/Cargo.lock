@@ -1543,7 +1543,7 @@ dependencies = [
 
 [[package]]
 name = "fude"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "dirs 5.0.1",
  "fude-core",
