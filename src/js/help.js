@@ -113,9 +113,10 @@ const sections = [
     items: [
       ['fude FILE / DIR', 'ファイル・フォルダを開く'],
       ['fude --wait FILE', 'タブを閉じるまで待つ（git / Claude Code の $EDITOR 用）'],
-      ['fude-cli setup HOST', 'ssh 先 HOST を準備（転送・鍵・fude-cli の配置）'],
+      ['fude setup HOST', 'ssh 先 HOST を準備（転送・鍵・fude-cli の配置、1 回だけ）'],
       ['fude-cli FILE（ssh 先で）', '手元の Fude にタブを開く。--wait で閉じるまで待つ'],
-      ['fude-cli --tui FILE', '端末内でプレビュー（q で終了）'],
+      ['fude tui FILE', '端末内でプレビュー（q で終了）'],
+      ['fude check', '起動中の Fude に届くか・どの経路かを表示'],
     ],
   },
   {

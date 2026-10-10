@@ -126,7 +126,7 @@ GUI の無いサーバに ssh しているとき、サーバ側で `fude-cli fil
 **設定は手元で 1 コマンド**（Fude を起動した状態で）：
 
 ```bash
-fude-cli setup dev        # dev は ~/.ssh/config のホスト名
+fude setup dev            # dev は ~/.ssh/config のホスト名（fude-cli setup dev でも同じ）
 ```
 
 これで次が済みます：`~/.ssh/config` の `Host dev` に `RemoteForward 47821 ~/.config/fude/gui.sock` を追記
@@ -146,7 +146,7 @@ fude-cli --check           # どの経路で手元の Fude に届いているか
 仕組み: サーバのループバック 47821 番ポートが ssh で手元の `~/.config/fude/gui.sock` へ転送されます。
 このポートはサーバ上の他のユーザからも繋げるため、鍵が合わない接続は GUI が拒否します（`FUDE_GUI_TOKEN`
 環境変数でも渡せます）。公開されるのは起動時に渡したファイルの親ディレクトリ（ディレクトリを渡した場合は
-その配下）だけです。ポートは `fude-cli setup dev --port N` / `FUDE_GUI_ADDR=127.0.0.1:N` で変更できます。
+その配下）だけです。ポートは `fude setup dev --port N` / `FUDE_GUI_ADDR=127.0.0.1:N` で変更できます。
 Unix ソケットの逆転送（`RemoteForward ~/.cache/fude/gui/%C.sock …`）も探しますが、sshd がソケットを
 root 所有で作る環境では使えないため、TCP を既定にしています。
 
@@ -163,7 +163,7 @@ GUI は名前付きパイプに加えて **`127.0.0.1:47821` の TCP** でも待
   Windows 側で `FUDE_GUI_TCP=0.0.0.0:47821` を設定して起動してください（鍵が無いと拒否されます）
 
 GUI に繋がらないとき（転送が無い・手元の Fude が起動していない）は端末内のビューアに
-フォールバックします（`fude-cli --tui file.md` で明示も可）。Markdown を整形して表示し、
+フォールバックします（`fude tui file.md` で明示も可）。Markdown を整形して表示し、
 ファイルの変更に追従します。`q` で終了、`j`/`k` でスクロール。編集機能は今後追加予定です。
 詳細は [docs/TUI_DESIGN.md](docs/TUI_DESIGN.md)。
 

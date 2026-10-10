@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | **Fude（GUI）** | 画面のあるマシン | いつものエディタ。起動すると「開いてほしい」という依頼を受ける口を開けて待つ |
 | **`fude --wait`** | GUI と同じマシン | 「このファイルを開いて、タブを閉じるまで待て」と GUI に頼むコマンド。`git commit` や Claude Code が `$EDITOR` として呼ぶ用 |
-| **`fude-cli`** | 画面のないマシン（ssh 先など）| 同じ依頼を**ネットワーク越し**に GUI へ送り、そのファイルの読み書きを代行する。GUI が見つからなければ端末内ビューアになる |
+| **`fude-cli`** | 画面のないマシン（ssh 先など）| 同じ依頼を**ネットワーク越し**に GUI へ送り、そのファイルの読み書きを代行する。GUI が見つからなければ端末内ビューアになる。Fude に同梱され、手元では `fude setup` / `fude tui` / `fude check` として呼べる |
 
 考え方は一つだけ: **ファイルのある場所で `fude-cli` を打つと、手元の Fude にタブが開く。** 編集は手元の Fude で普通に行い、保存すると元の場所に書き戻される。
 
@@ -23,7 +23,7 @@
  │    ・ 127.0.0.1:47821 (TCP)    │  (RemoteForward)   │     ・鍵 gui-token を提示     │
  │    ・ 鍵 ~/.config/fude/gui-token│                   │     ・notes.md を読み書き代行 │
  │                              │                   │        タブが閉じたら終了     │
- │ ② fude-cli setup k16 ← 初回だけ │─── ssh/scp ──────▶│  （setup が鍵と fude-cli を置く）│
+ │ ② fude setup k16  ← 初回だけ    │─── ssh/scp ──────▶│  （setup が鍵と fude-cli を置く）│
  │                              │                   │                              │
  │ タブ「k16:/home/you/notes.md」 │                   │  /home/you/notes.md          │
  │   編集・保存 ──────────────────┼── 書き戻し ───────▶│                              │
@@ -31,7 +31,7 @@
 
  実行するコマンドは 3 つ:
    手元   ①  fude                   （いつも通り起動しておく）
-   手元   ②  fude-cli setup k16     （そのホストにつき 1 回。~/.ssh/config・鍵・fude-cli を整える）
+   手元   ②  fude setup k16         （そのホストにつき 1 回。~/.ssh/config・鍵・fude-cli を整える）
    k16    ③  ssh k16 → fude-cli notes.md   （毎回これだけ。--wait を付けると $EDITOR になる）
 ```
 
@@ -59,7 +59,7 @@ Fude が起動していなければ自動で起動する。
 ### 端末内で Markdown を読む
 
 ```bash
-fude-cli --tui README.md     # 整形して表示。ファイルの変更に追従する
+fude tui README.md           # 整形して表示。ファイルの変更に追従する（fude-cli --tui でも同じ）
 ```
 
 | キー | 動作 |
@@ -81,7 +81,7 @@ fude-cli --tui README.md     # 整形して表示。ファイルの変更に追�
 手元で Fude を起動した状態で:
 
 ```bash
-fude-cli setup k16           # k16 は ~/.ssh/config のホスト名（無ければブロックが追加される）
+fude setup k16               # k16 は ~/.ssh/config のホスト名（無ければブロックが追加される）
 ```
 
 これで次が終わる:
@@ -170,8 +170,8 @@ Windows の Fude は名前付きパイプに加えて `127.0.0.1:47821` の TCP 
 | 症状 | 見るところ |
 | --- | --- |
 | `fude-cli` が端末内ビューアになってしまう | 手元で Fude が起動しているか。`fude-cli --check` で経路を確認 |
-| `remote agents must present the GUI token` | 鍵が違う。`fude-cli setup <host>` をやり直すか `~/.config/fude/gui-token` を手元のものと揃える |
+| `remote agents must present the GUI token` | 鍵が違う。`fude setup <host>` をやり直すか `~/.config/fude/gui-token` を手元のものと揃える |
 | `tcp://127.0.0.1:47821: Connection refused` | ssh の転送が張られていない。`~/.ssh/config` の `RemoteForward` 行と、`ssh` でログインし直したか |
-| `remote port forwarding failed for listen port 47821` | k16 側で別のものが 47821 を使っている。`fude-cli setup k16 --port 47822` で別ポートに |
+| `remote port forwarding failed for listen port 47821` | k16 側で別のものが 47821 を使っている。`fude setup k16 --port 47822` で別ポートに |
 | Fude 側に「k16 との接続が切れました」 | ssh を閉じた／`fude-cli` を止めた。タブは残り、未保存分は暫定保存にある。繋ぎ直してもう一度開く |
 | `fude --wait` が戻らない | そのタブを閉じる（Ctrl+Shift+W）。Fude を終了しても戻る |

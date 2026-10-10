@@ -629,6 +629,9 @@ fn parse_open_args(args: &[String]) -> (Option<String>, Option<String>, bool) {
 /// Usage text printed by `fude --help`.
 const CLI_USAGE: &str = "\
 Usage: fude [OPTIONS] [PATH]
+       fude setup <SSH-HOST> [--port N]
+       fude tui <FILE>
+       fude check
        fude browser [BROWSER OPTIONS]
 
 Arguments:
@@ -644,10 +647,17 @@ Options:
   -V, --version       Print version
 
 Commands:
+  setup    Prepare an ssh host so that `fude-cli FILE` there opens the file in
+           this Fude: adds the RemoteForward to ~/.ssh/config, copies the GUI
+           token and fude-cli over, and checks the connection (docs/REMOTE.md).
+  tui      Show a Markdown file in the terminal (`q` quits, `j`/`k` scroll).
+  check    Report whether a running Fude answers, and through which route.
   browser  Serve Fude over HTTP and use it from a web browser (needs Node.js).
            Options cover the listen address, which IP ranges may connect
            (--allow), the access key and TLS: see `fude browser --help`.
            To open a file that is itself named \"browser\", pass ./browser.
+
+  setup/tui/check run the bundled `fude-cli` (also usable on its own).
 ";
 
 /// Text to print for an informational flag (`--help` / `--version`), if one is
@@ -671,6 +681,75 @@ fn cli_info_text(args: &[String]) -> Option<String> {
         i += 1;
     }
     version.then(|| format!("fude {}\n", env!("CARGO_PKG_VERSION")))
+}
+
+// ─── `fude setup` / `fude tui` / `fude check` → fude-cli ────
+
+/// Arguments for `fude-cli` when argv (argv[0] = executable) is one of the
+/// subcommands it implements; `None` otherwise. Like `browser`, only the
+/// first argument counts, so a file called "check" still opens as a file
+/// when given as `./check`.
+fn cli_subcommand_args(args: &[String]) -> Option<Vec<String>> {
+    let rest = args.get(2..).unwrap_or(&[]);
+    let mapped = match args.get(1).map(String::as_str) {
+        Some("setup") => std::iter::once("setup".to_string())
+            .chain(rest.iter().cloned())
+            .collect(),
+        Some("tui") => std::iter::once("--tui".to_string())
+            .chain(rest.iter().cloned())
+            .collect(),
+        Some("check") => std::iter::once("--check".to_string())
+            .chain(rest.iter().cloned())
+            .collect(),
+        _ => return None,
+    };
+    Some(mapped)
+}
+
+/// Where the bundled `fude-cli` may be, relative to the directory holding the
+/// executable: Tauri places sidecars next to the main binary on every
+/// platform, and a development build has both in `target/<profile>/`.
+fn fude_cli_candidates(exe_dir: &Path) -> Vec<PathBuf> {
+    let name = if cfg!(windows) {
+        "fude-cli.exe"
+    } else {
+        "fude-cli"
+    };
+    vec![exe_dir.join(name), exe_dir.join("../lib/fude").join(name)]
+}
+
+/// Run `fude-cli` with `args` and return the process exit code. Falls back to
+/// a `fude-cli` on PATH when none is bundled next to this binary.
+fn run_cli_subcommand(args: &[String]) -> i32 {
+    let bundled = std::env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .and_then(|dir| fude_cli_candidates(&dir).into_iter().find(|c| c.is_file()));
+    let program = bundled.unwrap_or_else(|| PathBuf::from("fude-cli"));
+    let mut cmd = std::process::Command::new(&program);
+    cmd.args(args);
+
+    #[cfg(unix)]
+    let err = {
+        use std::os::unix::process::CommandExt;
+        cmd.exec()
+    };
+    #[cfg(not(unix))]
+    let err = match cmd.status() {
+        Ok(status) => return status.code().unwrap_or(1),
+        Err(e) => e,
+    };
+
+    if err.kind() == std::io::ErrorKind::NotFound {
+        eprintln!(
+            "fude: `fude-cli` was not found next to this binary or in PATH ({})",
+            program.display()
+        );
+        return 127;
+    }
+    eprintln!("fude: failed to start fude-cli: {}", err);
+    1
 }
 
 // ─── `fude browser` subcommand ─────────────────────────────
@@ -1411,6 +1490,9 @@ pub fn run() {
     if let Some(rest) = browser_subcommand_args(&raw_args) {
         std::process::exit(run_browser_subcommand(rest));
     }
+    if let Some(args) = cli_subcommand_args(&raw_args) {
+        std::process::exit(run_cli_subcommand(&args));
+    }
     if let Some(text) = cli_info_text(&raw_args) {
         print!("{}", text);
         return;
@@ -1667,6 +1749,32 @@ mod tests {
         let text = cli_info_text(&args(&["fude", "--help"])).unwrap();
         assert!(text.contains("fude browser --help"));
         assert!(text.contains("--allow"));
+    }
+
+    #[test]
+    fn cli_subcommands_map_onto_fude_cli_flags() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            cli_subcommand_args(&a(&["fude", "setup", "k16", "--port", "5"])),
+            Some(a(&["setup", "k16", "--port", "5"]))
+        );
+        assert_eq!(
+            cli_subcommand_args(&a(&["fude", "tui", "x.md"])),
+            Some(a(&["--tui", "x.md"]))
+        );
+        assert_eq!(
+            cli_subcommand_args(&a(&["fude", "check"])),
+            Some(a(&["--check"]))
+        );
+        assert_eq!(cli_subcommand_args(&a(&["fude", "./check"])), None);
+        assert_eq!(cli_subcommand_args(&a(&["fude", "x.md", "tui"])), None);
+        assert_eq!(cli_subcommand_args(&a(&["fude"])), None);
+        let c = fude_cli_candidates(Path::new("/usr/bin"));
+        assert!(c[0].ends_with(if cfg!(windows) {
+            "fude-cli.exe"
+        } else {
+            "fude-cli"
+        }));
     }
 
     #[test]

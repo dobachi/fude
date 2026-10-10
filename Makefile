@@ -101,7 +101,7 @@ setup: doctor
 	@echo "==> セットアップ完了"
 
 # 開発モード（Tauriネイティブ）
-dev:
+dev: sidecar
 	npm run build:frontend
 	npx tauri dev
 
@@ -129,10 +129,15 @@ build-frontend:
 	npm run build:frontend
 
 # プロダクションビルド（AppImage失敗はWSL環境では正常）
-build:
+# fude-cli を Tauri の sidecar として src-tauri/binaries/ に置く（tauri build / dev が同梱する）。
+# ファイル名は <name>-<host triple> でなければならない。
+# cargo test / clippy も fude クレートをビルドするので、それらの前にも必要。
+sidecar:
+	sh scripts/sidecar.sh
+
+build: sidecar
 	npm run build:frontend
 	npx tauri build || echo "Note: Some bundle targets may have failed (e.g., AppImage on WSL). Check output above."
-	cd src-tauri && cargo build --release -p fude-cli
 
 # テスト
 test: test-js test-rust
@@ -140,7 +145,7 @@ test: test-js test-rust
 test-js:
 	npx vitest run
 
-test-rust:
+test-rust: sidecar
 	cd src-tauri && cargo test --workspace --lib --bins
 
 # Lint
@@ -149,7 +154,7 @@ lint: lint-js lint-rust
 lint-js:
 	npx eslint src/js/
 
-lint-rust:
+lint-rust: sidecar
 	cd src-tauri && cargo clippy --workspace -- -D warnings
 
 # フォーマット
@@ -172,6 +177,7 @@ check: format-check lint test build-frontend
 install: build
 	# 過去のビルドの deb も残るので、いちばん新しいものだけを入れる
 	sudo dpkg -i "$$(ls -t src-tauri/target/release/bundle/deb/Fude_*_amd64.deb | head -1)"
+	# deb が /usr/bin/fude-cli も同梱するようになったが、古い deb からの更新のため念のため置く
 	sudo install -m 755 src-tauri/target/release/fude-cli /usr/bin/fude-cli
 	sudo mkdir -p /usr/lib/fude
 	sudo cp dist/* /usr/lib/fude/

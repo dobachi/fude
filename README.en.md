@@ -102,7 +102,7 @@ for that file and exits when the tab is closed.
 **One command sets a host up** (with Fude running locally):
 
 ```bash
-fude-cli setup dev        # dev is a host name from ~/.ssh/config
+fude setup dev            # dev is a host name from ~/.ssh/config (same as fude-cli setup dev)
 ```
 
 It adds `RemoteForward 47821 ~/.config/fude/gui.sock` to `Host dev` in `~/.ssh/config`
@@ -124,7 +124,7 @@ How it works: the server's loopback port 47821 is forwarded by ssh to your local
 `~/.config/fude/gui.sock`. Other users on the server can reach that port too, so the GUI
 refuses any connection without the matching token (`FUDE_GUI_TOKEN` works as well). Only the
 directory of each file you pass (or the directory itself) is exposed. Change the port with
-`fude-cli setup dev --port N` / `FUDE_GUI_ADDR=127.0.0.1:N`. A Unix-socket reverse forward
+`fude setup dev --port N` / `FUDE_GUI_ADDR=127.0.0.1:N`. A Unix-socket reverse forward
 (`RemoteForward ~/.cache/fude/gui/%C.sock …`) is also searched, but some sshds create that
 socket owned by root, so TCP is the default.
 
@@ -142,7 +142,7 @@ The token lives in `%APPDATA%\fude\gui-token`.
   still guards it)
 
 When no GUI answers (no forward, or Fude is not running on your machine) it falls back
-to an in-terminal viewer (`fude-cli --tui file.md` forces it): rendered Markdown that
+to an in-terminal viewer (`fude tui file.md` forces it): rendered Markdown that
 follows changes on disk. `q` quits, `j`/`k` scroll. Editing is planned.
 See [docs/TUI_DESIGN.md](docs/TUI_DESIGN.md) for the design.
 

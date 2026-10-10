@@ -11,3 +11,5 @@ testfile2.md
 # 計測用フィクスチャ。scripts/gen-perf-fixtures.js が決定的に再生成するので
 # 生成物そのものは追跡しない。
 .perf-fixtures/
+# fude-cli sidecar staged for `tauri build` (make sidecar)
+src-tauri/binaries/

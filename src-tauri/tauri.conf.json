@@ -32,6 +32,7 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/fude-cli"],
     "resources": {
       "../dist/index.html": "browser/index.html",
       "../dist/style.css": "browser/style.css",

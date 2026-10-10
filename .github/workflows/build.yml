@@ -91,6 +91,14 @@ jobs:
       - name: Run JS tests
         run: npx vitest run
 
+      # fude-cli ships inside the bundles as a Tauri sidecar (externalBin), so
+      # `fude setup` / `fude tui` work out of the box. tauri-build will not
+      # compile the app crate without the staged file, so this precedes the
+      # Rust tests as well.
+      - name: Build fude-cli sidecar
+        shell: bash
+        run: sh scripts/sidecar.sh
+
       - name: Run Rust tests
         run: cd src-tauri && cargo test --workspace --lib --bins
 
@@ -118,11 +126,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload ${{ github.ref_name }} src-tauri/target/release/fude.exe --clobber
 
-      # fude-cli: the remote agent / terminal UI. A single binary with no GUI
-      # dependencies, so it is published on its own for copying to servers.
-      - name: Build fude-cli
-        run: cd src-tauri && cargo build --release -p fude-cli
-
+      # fude-cli is also published on its own (no GUI dependencies) for
+      # copying to servers; `fude setup` downloads it from here when the
+      # remote's OS/CPU differ from the local machine's.
       - name: Upload fude-cli to release
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash

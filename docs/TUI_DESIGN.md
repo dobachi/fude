@@ -58,8 +58,9 @@ fude-core（新規, ライブラリ）    ← 両者が共有するロジック
 
 - リモート GUI の主用途は「webkit の無いマシン」なので、Tauri バイナリとは**別の実行ファイル**が必須
   （動的リンク失敗で起動すらできないため）
-- deb / dmg / exe には両方を同梱し、`fude` ランチャーが分岐する。サーバには `fude-cli` だけ
-  `curl` で落とす運用も可（`fude` 名のシンボリックリンクを張れば同じ分岐が働く）
+- deb / dmg / exe には `fude-cli` を Tauri の sidecar（`bundle.externalBin`）として同梱し、`fude setup` /
+  `fude tui` / `fude check` は同梱の `fude-cli` に委譲する。サーバには Releases の `fude-cli-<os>-<arch>`
+  だけを置く（`fude setup` が置く）
 
 ### 2.3 `fude-core` に切り出すもの
 
