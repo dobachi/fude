@@ -34,7 +34,7 @@ fn main() {
         return;
     }
     if let Some(host) = &args.setup {
-        std::process::exit(setup::run(host, args.port));
+        std::process::exit(setup::run(host, args.port, !args.no_share));
     }
     if args.bridge {
         std::process::exit(bridge::run_bridge(args.exe.as_deref()));

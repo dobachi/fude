@@ -101,6 +101,13 @@ fude setup k16               # k16 は ~/.ssh/config のホスト名（無けれ
    （手元と同じ OS/CPU なら手元のバイナリをコピー、違えば GitHub Releases から取得）
 3. ssh 越しに接続確認（`✓ check: Fude 0.8.0 answers via tcp://127.0.0.1:47821`）
 
+あわせて、そのホストへの **ssh の接続共有**（`ControlMaster auto` / `ControlPath ~/.ssh/fude-%C` /
+`ControlPersist 10m`）を `Host k16` に足す。転送用のポートを持てる ssh 接続は 1 本だけなので、共有しないと
+「最初に開いたセッションだけが Fude に届き、それを閉じると他のセッションも届かなくなる」。共有すると
+何本 `ssh k16` しても同じ接続に相乗りし、最後のセッションを閉じても 10 分は接続が残る（2 本目以降のログインも速くなる）。
+すでに `ControlMaster` などを自分で設定している場合は触らない。不要なら `fude setup k16 --no-share`、
+共有中の接続を切るには `ssh -O exit k16`。Windows の OpenSSH は接続共有に対応していないので Windows では足さない。
+
 ### 毎回
 
 ```bash
@@ -110,8 +117,7 @@ fude-cli --wait notes.md     # タブを閉じるまで待つ（k16 側の $EDIT
 fude-cli --check             # 手元の Fude にどの経路で届いているか確認
 ```
 
-- ssh セッションを閉じると転送も閉じるので、`fude-cli` はログインしている間だけ使える
-  （`ssh k16 'fude-cli x.md'` のようなワンショットは、コマンド終了と同時に切れる）
+- 転送は ssh の接続に付いている。接続共有が入っていれば、どのセッションからでも届き、全部閉じても 10 分は残る
 - 公開されるのは `fude-cli` に渡したファイルの親ディレクトリ（ディレクトリを渡した場合はその配下）だけ
 - 手元の Fude が起動していないと `fude-cli notes.md` は端末内ビューアに切り替わる
 
@@ -213,6 +219,6 @@ PowerShell で `fude-cli.exe setup k16`（インストール先の `fude-cli.exe
 | `fude bridge` 経由で `no Fude GUI on Windows answers` | Windows の Fude が起動していない |
 | `remote agents must present the GUI token` | 鍵が違う。`fude setup <host>` をやり直すか `~/.config/fude/gui-token` を手元のものと揃える |
 | `tcp://127.0.0.1:47821: Connection refused` | ssh の転送が張られていない。`~/.ssh/config` の `RemoteForward` 行と、`ssh` でログインし直したか |
-| `remote port forwarding failed for listen port 47821` | 同じホストへ ssh を複数本張ると、転送を持てるのは最初の 1 本だけ（2 本目以降はこの警告が出る）。最初の 1 本を閉じると届かなくなるので、ログインし直す。他人や別のソフトが 47821 を使っている場合は `fude setup k16 --port 47822` で別ポートに |
+| `remote port forwarding failed for listen port 47821` | 接続共有が無い状態で同じホストへ ssh を複数本張ると出る（転送を持てるのは最初の 1 本だけ）。`fude setup k16` をやり直すと接続共有が入り、解消する。共有を入れる前から開いていたセッションは閉じて入り直す。他人や別のソフトが 47821 を使っている場合は `fude setup k16 --port 47822` で別ポートに |
 | Fude 側に「k16 との接続が切れました」 | ssh を閉じた／`fude-cli` を止めた。タブは残り、未保存分は暫定保存にある。繋ぎ直してもう一度開く |
 | `fude --wait` が戻らない | そのタブを閉じる（Ctrl+Shift+W）。Fude を終了しても戻る |

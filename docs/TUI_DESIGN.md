@@ -233,6 +233,13 @@ GUI 側の実装:
 `mkdir -p` → 鍵と `fude-cli` を配置（`uname -sm` が手元と同じなら自分自身を scp、違えば Releases の
 `fude-cli-<os>-<arch>` を curl）→ `ssh host fude-cli --check` で疎通確認。`--check` は接続して GUI の版と経路を表示するだけ。
 
+同じホストへの ssh が複数本あると、リモートのポートを bind できるのは最初の 1 本だけで、それを閉じると残りは届かなくなる。
+接続ごとに別ポートを割り当てる方法は ssh の設定では表現できない（動的割り当ての番号はリモートから分からない）ため、
+`setup` は `ControlMaster auto` / `ControlPath ~/.ssh/fude-%C` / `ControlPersist 10m` を同じ `Host` ブロックに足して
+全セッションを 1 本の接続に相乗りさせる（`ensure_host_lines`。既に Control* があれば触らない、`--no-share` で省略、
+Windows の OpenSSH は非対応なので足さない）。k16（Tailscale SSH）で、セッションを重ねても警告が出ず、最初のセッションを
+閉じた後も他のセッションと新規セッションから届くことを確認済み。
+
 ### 4.3.3 `fude bridge`: WSL → Windows の Fude（2026-10-10）
 
 WSL2（NAT）からは Windows の localhost に届かず、0.0.0.0 待ち受けはファイアウォールと動的 IP が絡む。

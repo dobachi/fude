@@ -629,7 +629,7 @@ fn parse_open_args(args: &[String]) -> (Option<String>, Option<String>, bool) {
 /// Usage text printed by `fude --help`.
 const CLI_USAGE: &str = "\
 Usage: fude [OPTIONS] [PATH]
-       fude setup <SSH-HOST> [--port N]
+       fude setup <SSH-HOST> [--port N] [--no-share]
        fude tui <FILE>
        fude check
        fude bridge
@@ -652,6 +652,8 @@ Commands:
   setup    Prepare an ssh host so that `fude-cli FILE` there opens the file in
            this Fude: adds the RemoteForward to ~/.ssh/config, copies the GUI
            token and fude-cli over, and checks the connection (docs/REMOTE.md).
+           Also enables ssh connection sharing for the host so every session
+           to it reaches Fude, not only the first (--no-share skips that).
   tui      Edit in the terminal: files open as tabs, a directory as the file
            list, with a live preview (Ctrl+S saves, Alt+Q quits, F1: keys).
   check    Report whether a running Fude answers, and through which route.

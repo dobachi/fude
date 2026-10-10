@@ -17,6 +17,7 @@ pub const DEFAULT_PORT: u16 = 47821;
 const RELEASES: &str = "https://github.com/dobachi/fude/releases/latest/download";
 
 /// What `with_forward` did to the config text.
+#[cfg(test)]
 #[derive(Debug, PartialEq)]
 pub enum ConfigChange {
     /// The forward was already there.
@@ -32,19 +33,56 @@ fn forward_line(port: u16, local_socket: &str) -> String {
     format!("RemoteForward {} {}", port, local_socket)
 }
 
-/// Return `config` with the forward for `host` in place.
+/// A line a `Host` block should contain. `keys` are lowercase keyword
+/// prefixes: when the block already has a line starting with any of them,
+/// the user's setting stands and nothing is added.
+#[derive(Debug, Clone)]
+pub struct Want {
+    pub keys: Vec<String>,
+    pub lines: Vec<String>,
+}
+
+/// Connection sharing for the host: every `ssh` to it rides one connection,
+/// which also owns the forward and outlives the session that opened it.
+/// Without this only the first of several sessions gets the forward (the
+/// remote port is taken), and closing that one cuts the others off.
+pub fn sharing_want() -> Want {
+    Want {
+        keys: vec![
+            "controlmaster".into(),
+            "controlpath".into(),
+            "controlpersist".into(),
+        ],
+        lines: vec![
+            "ControlMaster auto".into(),
+            "ControlPath ~/.ssh/fude-%C".into(),
+            "ControlPersist 10m".into(),
+        ],
+    }
+}
+
+pub fn forward_want(port: u16, target: &str) -> Want {
+    Want {
+        keys: vec![format!("remoteforward {}", port)],
+        lines: vec![forward_line(port, target)],
+    }
+}
+
+fn has_key(line: &str, key: &str) -> bool {
+    let t = line.trim_start().to_ascii_lowercase();
+    match t.strip_prefix(key) {
+        Some(rest) => rest.is_empty() || rest.starts_with([' ', '\t', '=']),
+        None => false,
+    }
+}
+
+/// Return `config` with every `want` satisfied in `host`'s block, plus the
+/// lines that had to be added and whether a new block was appended.
 ///
-/// A `Host` line whose patterns include `host` exactly gets the forward
+/// A `Host` line whose patterns include `host` exactly gets the lines
 /// inserted right after it (keeping the block's indentation); otherwise a
-/// new block is appended. An existing `RemoteForward <port> …` in that block
-/// is left alone, whatever it points at, since the user may have moved the
-/// socket on purpose.
-pub fn with_forward(
-    config: &str,
-    host: &str,
-    port: u16,
-    local_socket: &str,
-) -> (String, ConfigChange) {
+/// new block is appended.
+pub fn ensure_host_lines(config: &str, host: &str, wants: &[Want]) -> (String, Vec<String>, bool) {
     let lines: Vec<&str> = config.lines().collect();
     // Byte-safe: config comments may hold non-ASCII text, so never slice
     // at a fixed byte offset.
@@ -58,6 +96,7 @@ pub fn with_forward(
         .iter()
         .position(|l| is_host_line(l) && l.trim_start()[5..].split_whitespace().any(|p| p == host));
     let Some(start) = block_start else {
+        let added: Vec<String> = wants.iter().flat_map(|w| w.lines.clone()).collect();
         let mut out = config.to_string();
         if !out.is_empty() && !out.ends_with('\n') {
             out.push('\n');
@@ -66,38 +105,63 @@ pub fn with_forward(
             out.push('\n');
         }
         out.push_str(&format!(
-            "# Fude: `fude-cli` on {host} opens files in this machine's Fude (fude-cli setup)\nHost {host}\n  {}\n",
-            forward_line(port, local_socket)
+            "# Fude: `fude-cli` on {host} opens files in this machine's Fude (fude setup)\nHost {host}\n"
         ));
-        return (out, ConfigChange::AppendedBlock);
+        for l in &added {
+            out.push_str(&format!("  {}\n", l));
+        }
+        return (out, added, true);
     };
     let end = lines[start + 1..]
         .iter()
         .position(|l| is_host_line(l) || l.trim_start().to_ascii_lowercase().starts_with("match "))
         .map(|i| start + 1 + i)
         .unwrap_or(lines.len());
-    let marker = format!("remoteforward {} ", port);
-    if lines[start + 1..end].iter().any(|l| {
-        let t = l.trim_start().to_ascii_lowercase();
-        t.starts_with(&marker) || t == marker.trim_end()
-    }) {
-        return (config.to_string(), ConfigChange::Unchanged);
+    let block = &lines[start + 1..end];
+    let added: Vec<String> = wants
+        .iter()
+        .filter(|w| !block.iter().any(|l| w.keys.iter().any(|k| has_key(l, k))))
+        .flat_map(|w| w.lines.clone())
+        .collect();
+    if added.is_empty() {
+        return (config.to_string(), added, false);
     }
-    let indent = lines[start + 1..end]
+    let indent = block
         .iter()
         .find(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
         .map(|l| &l[..l.len() - l.trim_start().len()])
         .unwrap_or("  ");
     let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
-    out.insert(
-        start + 1,
-        format!("{}{}", indent, forward_line(port, local_socket)),
-    );
+    for (n, l) in added.iter().enumerate() {
+        out.insert(start + 1 + n, format!("{}{}", indent, l));
+    }
     let mut text = out.join("\n");
     if config.ends_with('\n') {
         text.push('\n');
     }
-    (text, ConfigChange::AddedToBlock)
+    (text, added, false)
+}
+
+/// Return `config` with the forward for `host` in place. An existing
+/// `RemoteForward <port> …` in that block is left alone, whatever it points
+/// at, since the user may have moved the socket on purpose.
+#[cfg(test)]
+pub fn with_forward(
+    config: &str,
+    host: &str,
+    port: u16,
+    local_socket: &str,
+) -> (String, ConfigChange) {
+    let (text, added, appended) =
+        ensure_host_lines(config, host, &[forward_want(port, local_socket)]);
+    let change = if appended {
+        ConfigChange::AppendedBlock
+    } else if added.is_empty() {
+        ConfigChange::Unchanged
+    } else {
+        ConfigChange::AddedToBlock
+    };
+    (text, change)
 }
 
 /// `fude-cli-<os>-<arch>` as published on Releases, from `uname -sm` output.
@@ -191,8 +255,8 @@ fn scp(src: &Path, host: &str, dest: &str) -> Result<(), String> {
 }
 
 /// Run the whole setup. Returns the exit code.
-pub fn run(host: &str, port: u16) -> i32 {
-    match run_inner(host, port) {
+pub fn run(host: &str, port: u16, share: bool) -> i32 {
+    match run_inner(host, port, share) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("fude-cli setup: {}", e);
@@ -201,7 +265,7 @@ pub fn run(host: &str, port: u16) -> i32 {
     }
 }
 
-fn run_inner(host: &str, port: u16) -> Result<(), String> {
+fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
     if host.is_empty() || host.starts_with('-') {
         return Err("usage: fude-cli setup <ssh-host>".into());
     }
@@ -220,26 +284,40 @@ fn run_inner(host: &str, port: u16) -> Result<(), String> {
         .join(".ssh");
     let cfg_path = ssh_dir.join("config");
     let existing = std::fs::read_to_string(&cfg_path).unwrap_or_default();
-    let (updated, change) = with_forward(&existing, host, port, &target);
-    match change {
-        ConfigChange::Unchanged => Step("ssh config").ok("forward already present"),
-        _ => {
-            std::fs::create_dir_all(&ssh_dir).map_err(|e| e.to_string())?;
-            if cfg_path.exists() {
-                let bak = ssh_dir.join("config.fude-bak");
-                std::fs::copy(&cfg_path, &bak).map_err(|e| e.to_string())?;
+    // Windows' OpenSSH has no connection sharing; there the first session
+    // keeps the forward.
+    let mut wants = vec![forward_want(port, &target)];
+    if share && !cfg!(windows) {
+        wants.push(sharing_want());
+    }
+    let (updated, added, appended) = ensure_host_lines(&existing, host, &wants);
+    if added.is_empty() {
+        Step("ssh config").ok("already set up");
+    } else {
+        std::fs::create_dir_all(&ssh_dir).map_err(|e| e.to_string())?;
+        if cfg_path.exists() {
+            let bak = ssh_dir.join("config.fude-bak");
+            std::fs::copy(&cfg_path, &bak).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&cfg_path, updated).map_err(|e| e.to_string())?;
+        let _ = fude_core::paths::set_file_permissions(&cfg_path);
+        Step("ssh config").ok(&format!(
+            "{} (backup: config.fude-bak)",
+            if appended {
+                format!("appended `Host {}`", host)
+            } else {
+                format!("added to `Host {}`", host)
             }
-            std::fs::write(&cfg_path, updated).map_err(|e| e.to_string())?;
-            let _ = fude_core::paths::set_file_permissions(&cfg_path);
-            Step("ssh config").ok(&format!(
-                "{} `RemoteForward {} …` (backup: config.fude-bak)",
-                if change == ConfigChange::AddedToBlock {
-                    "added"
-                } else {
-                    "appended block with"
-                },
-                port
-            ));
+        ));
+        for l in &added {
+            eprintln!("      {}", l);
+        }
+        if added.iter().any(|l| l.starts_with("ControlMaster")) {
+            eprintln!(
+                "    ssh sessions to {} now share one connection, so each of them reaches Fude \
+                 (`ssh -O exit {}` closes it; `fude setup {} --no-share` leaves ssh alone).",
+                host, host, host
+            );
         }
     }
 
@@ -340,6 +418,41 @@ mod tests {
         let cfg = "Host a\n  RemoteForward 47821 x\nHost k16\n  User u\n";
         let (_, c) = with_forward(cfg, "k16", 47821, SOCK);
         assert_eq!(c, ConfigChange::AddedToBlock);
+    }
+
+    #[test]
+    fn sharing_is_added_once_and_respects_existing_settings() {
+        let wants = [forward_want(47821, SOCK), sharing_want()];
+        let (out, added, appended) = ensure_host_lines("Host k16\n  User u\n", "k16", &wants);
+        assert!(!appended);
+        assert_eq!(added.len(), 4);
+        assert_eq!(
+            out,
+            "Host k16\n  RemoteForward 47821 /home/u/.config/fude/gui.sock\n  ControlMaster auto\n  ControlPath ~/.ssh/fude-%C\n  ControlPersist 10m\n  User u\n"
+        );
+        // Idempotent.
+        let (again, added, _) = ensure_host_lines(&out, "k16", &wants);
+        assert!(added.is_empty());
+        assert_eq!(again, out);
+
+        // The user already manages sharing for this host: only the forward.
+        let cfg = "Host k16\n  controlpath /tmp/x\n";
+        let (out, added, _) = ensure_host_lines(cfg, "k16", &wants);
+        assert_eq!(
+            added,
+            vec!["RemoteForward 47821 /home/u/.config/fude/gui.sock"]
+        );
+        assert!(!out.contains("ControlMaster"));
+
+        // No block yet: everything goes into the new one.
+        let (out, added, appended) = ensure_host_lines("", "new", &wants);
+        assert!(appended);
+        assert_eq!(added.len(), 4);
+        assert!(out.ends_with("  ControlPersist 10m\n"));
+
+        // A keyword that merely shares a prefix does not count.
+        assert!(!has_key("  ControlPathological x", "controlpath"));
+        assert!(has_key("ControlPath=/x", "controlpath"));
     }
 
     #[test]

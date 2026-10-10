@@ -132,7 +132,8 @@ fude setup dev            # dev は ~/.ssh/config のホスト名（fude-cli set
 これで次が済みます：`~/.ssh/config` の `Host dev` に `RemoteForward 47821 ~/.config/fude/gui.sock` を追記
 （無ければブロックを追加、元の設定は `config.fude-bak` に退避）、サーバに `~/.config/fude/gui-token`
 （手元の Fude が作った鍵）と `~/.local/bin/fude-cli`（同じ OS/CPU なら手元のバイナリをコピー、違えば
-GitHub Releases から取得）を配置、最後に ssh 越しの接続確認。
+GitHub Releases から取得）を配置、最後に ssh 越しの接続確認。そのホストへの ssh の接続共有（`ControlMaster`）も
+有効にするので、ssh を何本張ってもどのセッションからでも届きます（不要なら `--no-share`）。
 
 あとはサーバで：
 

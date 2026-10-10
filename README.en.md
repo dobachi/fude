@@ -109,7 +109,8 @@ It adds `RemoteForward 47821 ~/.config/fude/gui.sock` to `Host dev` in `~/.ssh/c
 (appending a block if there is none; the previous file is kept as `config.fude-bak`),
 puts `~/.config/fude/gui-token` (the token your Fude created) and `~/.local/bin/fude-cli`
 on the server (a copy of the local binary when OS/CPU match, else the GitHub Releases build),
-and finally checks the connection through ssh.
+and finally checks the connection through ssh. It also turns on ssh connection sharing (`ControlMaster`)
+for that host, so every session to it reaches Fude rather than only the first (`--no-share` skips this).
 
 Then, on the server:
 

@@ -24,11 +24,13 @@ pub struct Args {
     pub pipe: bool,
     /// `--exe PATH`: the Windows fude-cli.exe `bridge` should run.
     pub exe: Option<String>,
+    /// `setup --no-share`: do not add ssh connection sharing for the host.
+    pub no_share: bool,
 }
 
 pub const USAGE: &str = "\
 Usage: fude-cli [OPTIONS] [--] <PATH>...
-       fude-cli setup <SSH-HOST> [--port N]
+       fude-cli setup <SSH-HOST> [--port N] [--no-share]
        fude-cli bridge [--exe PATH]
        fude-cli --check
 
@@ -50,7 +52,9 @@ Options:
 Commands:
   setup HOST     Prepare ssh host HOST: add the RemoteForward to ~/.ssh/config,
                  copy the GUI token and fude-cli there, verify the connection.
-                 --port N uses a loopback port other than 47821.
+                 --port N uses a loopback port other than 47821. Also turns
+                 on ssh connection sharing for HOST, so that every session
+                 to it reaches Fude, not just the first (--no-share skips).
   bridge         (WSL) Make the Fude running on Windows receive everything
                  opened from WSL — `fude-cli FILE` here and in ssh sessions
                  started from here — by relaying ~/.config/fude/gui.sock to
@@ -106,6 +110,7 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
             "--check" => a.check = true,
             "--port" => want_port = true,
             "--exe" => want_exe = true,
+            "--no-share" => a.no_share = true,
             "--" => operands_only = true,
             "-w" | "--wait" => a.wait = true,
             "--gui" => a.gui = true,
@@ -171,6 +176,12 @@ mod tests {
         let a = parse(&argv(&["fude-cli", "setup", "k16", "--port", "5000"])).unwrap();
         assert_eq!(a.port, 5000);
         assert!(parse(&argv(&["fude-cli", "setup"])).is_err());
+        assert!(!a.no_share);
+        assert!(
+            parse(&argv(&["fude-cli", "setup", "k16", "--no-share"]))
+                .unwrap()
+                .no_share
+        );
         assert!(parse(&argv(&["fude-cli", "setup", "k16", "--port"])).is_err());
         assert!(parse(&argv(&["fude-cli", "setup", "k16", "--port", "x"])).is_err());
         // A file literally named "setup" is still a path when not first.
