@@ -754,6 +754,9 @@ mod tests {
         }
     }
 
+    // Local paths are resolved with the host OS's separator; these spell
+    // out Unix results (the resolution itself is tested in fude_core::cli).
+    #[cfg(not(windows))]
     #[test]
     fn open_with_wait_registers_resolved_paths_and_waits_for_closed() {
         let sink = Recorder::default();
@@ -799,6 +802,9 @@ mod tests {
         assert!(st.finished());
     }
 
+    // Local paths are resolved with the host OS's separator; these spell
+    // out Unix results (the resolution itself is tested in fude_core::cli).
+    #[cfg(not(windows))]
     #[test]
     fn open_without_wait_finishes_immediately_with_bye() {
         let sink = Recorder::default();
@@ -814,6 +820,9 @@ mod tests {
         );
     }
 
+    // Local paths are resolved with the host OS's separator; these spell
+    // out Unix results (the resolution itself is tested in fude_core::cli).
+    #[cfg(not(windows))]
     #[test]
     fn a_path_the_gui_rejects_is_reported_and_not_waited_for() {
         let sink = Recorder {
