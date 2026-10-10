@@ -31,6 +31,9 @@ pub enum Message {
         /// shows it and keys the tab paths (`remote://<host>/...`) on it.
         #[serde(default)]
         host: Option<String>,
+        /// Required from a remote agent: the GUI's secret (`token.rs`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<String>,
     },
     /// The GUI's answer to `Hello`. Its arrival is what tells a client that a
     /// forwarded socket really reaches a running GUI (ssh accepts and then
@@ -250,6 +253,7 @@ mod tests {
                 cwd: None,
                 cli_version: None,
                 host: None,
+                token: None,
             }
         );
     }

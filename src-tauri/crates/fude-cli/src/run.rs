@@ -3,7 +3,7 @@
 
 use crate::agent::{Agent, Side};
 use crate::args::Args;
-use crate::discover::{self, Connected};
+use crate::discover::{self, Candidate, Connected};
 use crate::watch::Watcher;
 use fude_core::ipc::{self, Message, PROTOCOL_VERSION};
 use fude_core::wait::{exit_code, WaitState};
@@ -53,7 +53,7 @@ pub fn absolute_paths(paths: &[String]) -> Vec<String> {
 }
 
 /// Connect, or explain why not. `candidates` are tried in order.
-pub fn connect(candidates: &[PathBuf]) -> Result<Connected, String> {
+pub fn connect(candidates: &[Candidate]) -> Result<Connected, String> {
     let hello = Message::Hello {
         protocol: PROTOCOL_VERSION,
         cwd: std::env::current_dir()
@@ -61,6 +61,9 @@ pub fn connect(candidates: &[PathBuf]) -> Result<Connected, String> {
             .map(|p| p.to_string_lossy().to_string()),
         cli_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         host: Some(host_name()),
+        token: fude_core::config_dir()
+            .ok()
+            .and_then(|d| fude_core::token::client_token(&d.join(fude_core::token::TOKEN_FILE))),
     };
     discover::connect_any(candidates, &hello).map_err(|reasons| {
         let mut msg = String::from("no Fude GUI reachable:");
@@ -86,7 +89,7 @@ pub fn serve(mut conn: Connected, paths: Vec<String>, announce: bool) -> i32 {
                 .collect::<Vec<_>>()
                 .join(", "),
             conn.gui_version.as_deref().unwrap_or("?"),
-            conn.socket.display()
+            conn.via
         );
     }
     let (tx, rx) = mpsc::channel::<Event>();
@@ -109,8 +112,8 @@ pub fn serve(mut conn: Connected, paths: Vec<String>, announce: bool) -> i32 {
     });
 
     let reader_tx = tx;
-    let mut reader =
-        std::mem::replace(&mut conn.reader, std::io::BufReader::new(dummy_recv_half()));
+    let mut reader: Box<dyn BufRead + Send> =
+        std::mem::replace(&mut conn.reader, Box::new(std::io::empty()));
     thread::spawn(move || {
         let mut line = String::new();
         loop {
@@ -189,29 +192,6 @@ pub fn serve(mut conn: Connected, paths: Vec<String>, announce: bool) -> i32 {
     }
     let _ = conn.writer.write_all(ipc::encode(&Message::Bye).as_bytes());
     exit_code(&state.outcomes())
-}
-
-/// Stand-in for the reader half once it has been handed to its thread.
-fn dummy_recv_half() -> interprocess::local_socket::RecvHalf {
-    // A connected pair that is immediately dropped on one side: reads
-    // return EOF, which is never observed because the real reader thread
-    // owns the live half.
-    use interprocess::local_socket::{prelude::*, GenericFilePath, ListenerOptions, Stream};
-    let dir = std::env::temp_dir();
-    let path = dir.join(format!("fude-cli-{}.sock", std::process::id()));
-    let _ = std::fs::remove_file(&path);
-    let name = path
-        .clone()
-        .to_fs_name::<GenericFilePath>()
-        .expect("temp socket name");
-    let listener = ListenerOptions::new()
-        .name(name.clone())
-        .create_sync()
-        .expect("temp listener");
-    let client = Stream::connect(name).expect("temp connect");
-    let _ = std::fs::remove_file(&path);
-    drop(listener);
-    client.split().0
 }
 
 struct NoWatch;

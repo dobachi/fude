@@ -256,6 +256,9 @@ impl RemoteSessions {
 /// the replies to write; `closed` turns a tab closure into a reply.
 #[derive(Debug, Default)]
 pub struct ConnState {
+    /// The secret a remote agent must present (`fude_core::token`). Local
+    /// clients (no host) are trusted by the socket's own permissions.
+    required_token: Option<String>,
     cwd: Option<String>,
     /// Set when the peer is a remote agent (its hello carried a host).
     host: Option<String>,
@@ -271,6 +274,13 @@ pub struct ConnState {
 }
 
 impl ConnState {
+    pub fn with_token(token: Option<String>) -> ConnState {
+        ConnState {
+            required_token: token,
+            ..Default::default()
+        }
+    }
+
     /// Paths this connection asked to wait for (for cleanup on disconnect).
     pub fn pending(&self) -> &HashSet<String> {
         &self.pending
@@ -307,6 +317,7 @@ impl ConnState {
                 protocol,
                 cwd,
                 host,
+                token,
                 ..
             } => {
                 if protocol != PROTOCOL_VERSION {
@@ -324,9 +335,30 @@ impl ConnState {
                         vec![],
                     );
                 }
+                let host = host.filter(|h| !h.is_empty() && !h.contains('/'));
+                if host.is_some() {
+                    let ok = match &self.required_token {
+                        Some(t) => fude_core::token::matches(t, token.as_deref()),
+                        None => false,
+                    };
+                    if !ok {
+                        return (
+                            vec![
+                                Message::Error {
+                                    path: None,
+                                    message: "remote agents must present the GUI token \
+                                              (copy ~/.config/fude/gui-token from the GUI machine)"
+                                        .into(),
+                                },
+                                Message::Bye,
+                            ],
+                            vec![],
+                        );
+                    }
+                }
                 self.greeted = true;
                 self.cwd = cwd;
-                self.host = host.filter(|h| !h.is_empty() && !h.contains('/'));
+                self.host = host;
                 (
                     vec![Message::Welcome {
                         protocol: PROTOCOL_VERSION,
@@ -457,10 +489,12 @@ pub fn clear_stale_socket(socket: &std::path::Path) -> Result<(), String> {
 /// are served on background threads.
 pub fn start(
     name: Name<'static>,
+    token: String,
     registry: Arc<WaitRegistry>,
     sessions: Arc<RemoteSessions>,
     sink: Arc<dyn OpenSink>,
 ) -> io::Result<()> {
+    let token = Arc::new(token);
     let listener = ListenerOptions::new()
         .name(name)
         .reclaim_name(true)
@@ -474,9 +508,10 @@ pub fn start(
                         let registry = Arc::clone(&registry);
                         let sessions = Arc::clone(&sessions);
                         let sink = Arc::clone(&sink);
+                        let token = Arc::clone(&token);
                         let _ = thread::Builder::new()
                             .name("fude-gui-ipc-conn".into())
-                            .spawn(move || serve(stream, registry, sessions, sink));
+                            .spawn(move || serve(stream, token, registry, sessions, sink));
                     }
                     Err(e) => eprintln!("fude: IPC accept failed: {}", e),
                 }
@@ -487,6 +522,7 @@ pub fn start(
 
 fn serve(
     stream: interprocess::local_socket::Stream,
+    token: Arc<String>,
     registry: Arc<WaitRegistry>,
     sessions: Arc<RemoteSessions>,
     sink: Arc<dyn OpenSink>,
@@ -517,7 +553,7 @@ fn serve(
         });
 
     let conn_id = registry.new_conn_id();
-    let mut state = ConnState::default();
+    let mut state = ConnState::with_token(Some(token.to_string()));
     let mut session: Option<Arc<RemoteSession>> = None;
     let write_all = |send: &mut dyn Write, msgs: &[Message]| -> bool {
         for m in msgs {
@@ -629,6 +665,7 @@ mod tests {
             cwd: Some(cwd.into()),
             cli_version: None,
             host: None,
+            token: None,
         }
     }
 
@@ -729,6 +766,7 @@ mod tests {
                 cwd: None,
                 cli_version: None,
                 host: None,
+                token: None,
             },
             &sink,
         );
@@ -766,15 +804,55 @@ mod tests {
     }
 
     #[test]
+    fn remote_agents_need_the_token_and_local_clients_do_not() {
+        let sink = Recorder::default();
+        let mut st = ConnState::with_token(Some("secret".into()));
+        for bad in [None, Some("wrong".to_string())] {
+            let (replies, _) = st.handle(
+                Message::Hello {
+                    protocol: PROTOCOL_VERSION,
+                    cwd: None,
+                    cli_version: None,
+                    host: Some("box".into()),
+                    token: bad,
+                },
+                &sink,
+            );
+            assert!(
+                matches!(&replies[0], Message::Error { message, .. } if message.contains("token"))
+            );
+            assert_eq!(replies[1], Message::Bye);
+            assert_eq!(st.host(), None);
+        }
+        // A local `fude --wait` presents no token and is welcome.
+        let (replies, _) = st.handle(hello("/w"), &sink);
+        assert!(matches!(replies[0], Message::Welcome { .. }));
+        // No token configured at all: remote agents are refused outright.
+        let mut none = ConnState::default();
+        let (replies, _) = none.handle(
+            Message::Hello {
+                protocol: PROTOCOL_VERSION,
+                cwd: None,
+                cli_version: None,
+                host: Some("box".into()),
+                token: Some("anything".into()),
+            },
+            &sink,
+        );
+        assert!(matches!(replies[0], Message::Error { .. }));
+    }
+
+    #[test]
     fn remote_agent_paths_are_prefixed_with_the_host_not_resolved() {
         let sink = Recorder::default();
-        let mut st = ConnState::default();
+        let mut st = ConnState::with_token(Some("secret".into()));
         st.handle(
             Message::Hello {
                 protocol: PROTOCOL_VERSION,
                 cwd: Some("/home/u".into()),
                 cli_version: None,
                 host: Some("box".into()),
+                token: Some("secret\n".into()),
             },
             &sink,
         );
@@ -810,13 +888,14 @@ mod tests {
     #[test]
     fn a_host_with_a_slash_is_ignored() {
         let sink = Recorder::default();
-        let mut st = ConnState::default();
+        let mut st = ConnState::with_token(Some("secret".into()));
         st.handle(
             Message::Hello {
                 protocol: PROTOCOL_VERSION,
                 cwd: None,
                 cli_version: None,
                 host: Some("evil/host".into()),
+                token: Some("secret".into()),
             },
             &sink,
         );

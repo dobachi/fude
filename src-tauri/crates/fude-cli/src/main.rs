@@ -90,7 +90,7 @@ fn cache_dir() -> PathBuf {
     dirs::cache_dir().unwrap_or_else(std::env::temp_dir)
 }
 
-fn socket_candidates() -> Vec<PathBuf> {
+fn socket_candidates() -> Vec<discover::Candidate> {
     let local = fude_core::config_dir()
         .map(|d| fude_core::ipc::socket_path(&d))
         .unwrap_or_else(|_| PathBuf::from("gui.sock"));

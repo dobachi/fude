@@ -120,23 +120,30 @@ export EDITOR="fude --wait"
 GUI の無いサーバに ssh しているとき、サーバ側で `fude-cli file.md` と打つと**手元の Fude** にタブが開きます。
 サーバ側の `fude-cli` がそのファイルの読み書きと変更監視を担当し、タブを閉じると終了します。
 
-1. 手元で Fude を起動しておく（`~/.config/fude/gui.sock` で待ち受けます）
-2. `~/.ssh/config` に逆転送を 1 行足す（接続ごとに別名になるよう `%C` を使う）
+1. 手元で Fude を起動しておく（`~/.config/fude/gui.sock` で待ち受け、初回起動時に
+   `~/.config/fude/gui-token` を作ります）
+2. `~/.ssh/config` に逆転送を 1 行足す。サーバのループバック 47821 番ポートを手元のソケットへ転送します
 
    ```
    Host dev
-     RemoteForward ~/.cache/fude/gui/%C.sock ~/.config/fude/gui.sock
-     StreamLocalBindUnlink yes
+     RemoteForward 47821 /home/<you>/.config/fude/gui.sock
    ```
 
-   `StreamLocalBindUnlink yes` が無いと、前回のセッションが残したソケットファイルのせいで
-   次の接続で転送が張れません（`remote port forwarding failed` の警告）。サーバ側に
-   `~/.cache/fude/gui` ディレクトリを作っておく必要もあります（`mkdir -p`）。
+3. サーバに `fude-cli` と鍵を置く
 
-3. サーバに `fude-cli` を置く（`cargo build --release -p fude-cli` で単体の静的バイナリ）
+   ```bash
+   scp ~/.config/fude/gui-token dev:~/.config/fude/gui-token   # （先に ssh dev 'mkdir -p ~/.config/fude'）
+   scp src-tauri/target/release/fude-cli dev:~/.local/bin/       # cargo build --release -p fude-cli で作る単体バイナリ
+   ```
+
+   47821 番はサーバ上の他のユーザからも繋げるので、鍵が合わない接続は GUI が拒否します。
+   `FUDE_GUI_TOKEN` 環境変数でも渡せます。
+
 4. `ssh dev` して `fude-cli notes.md`（`--wait` を付けると `$EDITOR` として使えます）
 
 公開されるのは起動時に渡したファイルの親ディレクトリ（ディレクトリを渡した場合はその配下）だけです。
+Unix ソケットの逆転送（`RemoteForward ~/.cache/fude/gui/%C.sock …`）も探しますが、sshd がソケットを
+root 所有で作る環境では使えないため、TCP を既定にしています。ポートは `FUDE_GUI_ADDR=127.0.0.1:<port>` で変更できます。
 
 GUI に繋がらないとき（転送が無い・手元の Fude が起動していない）は端末内のビューアに
 フォールバックします（`fude-cli --tui file.md` で明示も可）。Markdown を整形して表示し、

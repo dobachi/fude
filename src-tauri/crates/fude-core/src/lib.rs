@@ -11,6 +11,7 @@ pub mod ipc;
 pub mod paths;
 pub mod session;
 pub mod temp;
+pub mod token;
 pub mod wait;
 
 pub use browse::*;

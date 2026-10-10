@@ -1,12 +1,16 @@
 //! Finding a GUI to talk to.
 //!
-//! Order: `$FUDE_GUI_SOCK`; the sockets an ssh `RemoteForward` created under
-//! `~/.cache/fude/gui/` (newest first — a stale one from a dead connection
-//! is unlinked when it refuses); finally the local GUI's own socket.
+//! Order: `$FUDE_GUI_SOCK` / `$FUDE_GUI_ADDR` when set; the Unix sockets an
+//! ssh `RemoteForward` created under `~/.cache/fude/gui/` (newest first — a
+//! stale one from a dead connection is unlinked when it refuses); the TCP
+//! port an ssh `RemoteForward 47821 …` listens on (sshd creates Unix
+//! sockets as root on some systems, which makes TCP the portable choice);
+//! finally the local GUI's own socket.
 
 use fude_core::ipc::{self, socket_name, Message, SOCKET_ENV};
 use interprocess::local_socket::{prelude::*, Stream};
 use std::io::{self, BufRead, BufReader, Write};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -15,15 +19,43 @@ use std::time::Duration;
 /// end and only then closes it, so "connected" alone proves nothing.
 pub const WELCOME_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Environment variable naming a TCP `host:port` to try first.
+pub const ADDR_ENV: &str = "FUDE_GUI_ADDR";
+
+/// The loopback port an ssh `RemoteForward` is expected to use.
+pub const DEFAULT_TCP_ADDR: &str = "127.0.0.1:47821";
+
+/// One place a GUI might be listening.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Candidate {
+    Socket(PathBuf),
+    Tcp(String),
+}
+
+impl std::fmt::Display for Candidate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Candidate::Socket(p) => write!(f, "{}", p.display()),
+            Candidate::Tcp(a) => write!(f, "tcp://{}", a),
+        }
+    }
+}
+
 /// The directory ssh forwards land in (`~/.cache/fude/gui`).
 pub fn forward_dir(cache_dir: &Path) -> PathBuf {
     cache_dir.join("fude").join("gui")
 }
 
-/// Candidate socket paths in the order to try them.
-pub fn candidates(forward_dir: &Path, local_socket: &Path) -> Vec<PathBuf> {
+/// Candidates in the order to try them.
+pub fn candidates(forward_dir: &Path, local_socket: &Path) -> Vec<Candidate> {
     if let Some(p) = std::env::var_os(SOCKET_ENV).filter(|p| !p.is_empty()) {
-        return vec![PathBuf::from(p)];
+        return vec![Candidate::Socket(PathBuf::from(p))];
+    }
+    if let Some(a) = std::env::var(ADDR_ENV)
+        .ok()
+        .filter(|a| !a.trim().is_empty())
+    {
+        return vec![Candidate::Tcp(a.trim().to_string())];
     }
     let mut found: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(forward_dir) {
@@ -39,36 +71,47 @@ pub fn candidates(forward_dir: &Path, local_socket: &Path) -> Vec<PathBuf> {
         }
     }
     found.sort_by(|a, b| b.0.cmp(&a.0));
-    let mut out: Vec<PathBuf> = found.into_iter().map(|(_, p)| p).collect();
-    out.push(local_socket.to_path_buf());
+    let mut out: Vec<Candidate> = found
+        .into_iter()
+        .map(|(_, p)| Candidate::Socket(p))
+        .collect();
+    out.push(Candidate::Tcp(DEFAULT_TCP_ADDR.to_string()));
+    out.push(Candidate::Socket(local_socket.to_path_buf()));
     out
 }
 
 /// A live connection that has completed the `hello` / `welcome` handshake.
-#[derive(Debug)]
 pub struct Connected {
-    pub reader: BufReader<interprocess::local_socket::RecvHalf>,
-    pub writer: interprocess::local_socket::SendHalf,
-    pub socket: PathBuf,
+    pub reader: Box<dyn BufRead + Send>,
+    pub writer: Box<dyn Write + Send>,
+    pub via: Candidate,
     pub gui_version: Option<String>,
+}
+
+impl std::fmt::Debug for Connected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Connected({})", self.via)
+    }
 }
 
 /// Connect to the first candidate that answers `hello` with `welcome`.
 /// Returns the reasons each candidate was rejected on failure.
-pub fn connect_any(cands: &[PathBuf], hello: &Message) -> Result<Connected, Vec<String>> {
+pub fn connect_any(cands: &[Candidate], hello: &Message) -> Result<Connected, Vec<String>> {
     let mut reasons = Vec::new();
-    for sock in cands {
-        match try_one(sock, hello) {
+    for cand in cands {
+        match try_one(cand, hello) {
             Ok(c) => return Ok(c),
             Err(e) => {
                 let refused = e.kind() == io::ErrorKind::ConnectionRefused;
-                reasons.push(format!("{}: {}", sock.display(), e));
+                reasons.push(format!("{}: {}", cand, e));
                 #[cfg(unix)]
                 {
                     // A refusing socket file is a corpse (its ssh session or
                     // GUI is gone); nobody rebinds it, so stop retrying it.
-                    if refused && sock.exists() {
-                        let _ = std::fs::remove_file(sock);
+                    if let Candidate::Socket(sock) = cand {
+                        if refused && sock.exists() {
+                            let _ = std::fs::remove_file(sock);
+                        }
                     }
                 }
                 #[cfg(not(unix))]
@@ -79,27 +122,50 @@ pub fn connect_any(cands: &[PathBuf], hello: &Message) -> Result<Connected, Vec<
     Err(reasons)
 }
 
-fn try_one(sock: &Path, hello: &Message) -> io::Result<Connected> {
-    let name = socket_name(sock)?;
-    let stream = Stream::connect(name)?;
-    let (recv, mut send) = stream.split();
-    send.write_all(ipc::encode(hello).as_bytes())?;
-    send.flush()?;
-    // The handshake read blocks, and a peer that accepts but never answers
-    // (a hung GUI, a forward to the wrong thing) must not hang us with it:
-    // read on a helper thread and give up after WELCOME_TIMEOUT. On timeout
-    // the helper is abandoned with the stream; it ends with the process.
-    let mut reader = BufReader::new(recv);
+fn try_one(cand: &Candidate, hello: &Message) -> io::Result<Connected> {
+    let (reader, writer): (Box<dyn BufRead + Send>, Box<dyn Write + Send>) = match cand {
+        Candidate::Socket(sock) => {
+            let name = socket_name(sock)?;
+            let (recv, send) = Stream::connect(name)?.split();
+            (Box::new(BufReader::new(recv)), Box::new(send))
+        }
+        Candidate::Tcp(addr) => {
+            let sa = addr
+                .to_socket_addrs()?
+                .next()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "bad address"))?;
+            let stream = TcpStream::connect_timeout(&sa, Duration::from_secs(2))?;
+            let _ = stream.set_nodelay(true);
+            let w = stream.try_clone()?;
+            (Box::new(BufReader::new(stream)), Box::new(w))
+        }
+    };
+    handshake(reader, writer, cand.clone(), hello)
+}
+
+/// Send `hello` and wait for `welcome`. The handshake read blocks, and a
+/// peer that accepts but never answers (a hung GUI, a forward to the wrong
+/// thing) must not hang us with it: read on a helper thread and give up
+/// after WELCOME_TIMEOUT. On timeout the helper is abandoned with the
+/// stream; it ends with the process.
+fn handshake(
+    mut reader: Box<dyn BufRead + Send>,
+    mut writer: Box<dyn Write + Send>,
+    via: Candidate,
+    hello: &Message,
+) -> io::Result<Connected> {
+    writer.write_all(ipc::encode(hello).as_bytes())?;
+    writer.flush()?;
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let r = await_welcome(&mut reader);
+        let r = await_welcome(&mut *reader);
         let _ = tx.send((r, reader));
     });
     match rx.recv_timeout(WELCOME_TIMEOUT) {
         Ok((Ok(gui_version), reader)) => Ok(Connected {
             reader,
-            writer: send,
-            socket: sock.to_path_buf(),
+            writer,
+            via,
             gui_version,
         }),
         Ok((Err(e), _)) => Err(e),
@@ -112,7 +178,7 @@ fn try_one(sock: &Path, hello: &Message) -> io::Result<Connected> {
 
 /// Read until `welcome` (or fail). A dead ssh forward closes the stream at
 /// once (EOF); a peer that never answers is cut off by the caller's timeout.
-fn await_welcome<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
+fn await_welcome(reader: &mut dyn BufRead) -> io::Result<Option<String>> {
     let mut line = String::new();
     loop {
         line.clear();
@@ -153,8 +219,18 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    fn hello() -> Message {
+        Message::Hello {
+            protocol: ipc::PROTOCOL_VERSION,
+            cwd: None,
+            cli_version: None,
+            host: None,
+            token: None,
+        }
+    }
+
     #[test]
-    fn candidates_prefer_newest_forward_then_local() {
+    fn candidates_prefer_newest_forward_then_tcp_then_local() {
         let tmp = TempDir::new().unwrap();
         let fwd = forward_dir(tmp.path());
         fs::create_dir_all(&fwd).unwrap();
@@ -168,22 +244,44 @@ mod tests {
         let local = tmp.path().join("gui.sock");
 
         std::env::remove_var(SOCKET_ENV);
+        std::env::remove_var(ADDR_ENV);
         let c = candidates(&fwd, &local);
-        assert_eq!(c, vec![fwd.join("new.sock"), old, local.clone()]);
+        assert_eq!(
+            c,
+            vec![
+                Candidate::Socket(fwd.join("new.sock")),
+                Candidate::Socket(old),
+                Candidate::Tcp(DEFAULT_TCP_ADDR.into()),
+                Candidate::Socket(local.clone()),
+            ]
+        );
 
+        std::env::set_var(ADDR_ENV, "10.0.0.1:1234");
+        assert_eq!(
+            candidates(&fwd, &local),
+            vec![Candidate::Tcp("10.0.0.1:1234".into())]
+        );
         std::env::set_var(SOCKET_ENV, "/x/override.sock");
         assert_eq!(
             candidates(&fwd, &local),
-            vec![PathBuf::from("/x/override.sock")]
+            vec![Candidate::Socket(PathBuf::from("/x/override.sock"))]
         );
         std::env::remove_var(SOCKET_ENV);
+        std::env::remove_var(ADDR_ENV);
     }
 
     #[test]
-    fn missing_forward_dir_still_yields_the_local_socket() {
+    fn missing_forward_dir_still_yields_tcp_and_the_local_socket() {
         std::env::remove_var(SOCKET_ENV);
+        std::env::remove_var(ADDR_ENV);
         let c = candidates(Path::new("/nonexistent/dir"), Path::new("/l.sock"));
-        assert_eq!(c, vec![PathBuf::from("/l.sock")]);
+        assert_eq!(
+            c,
+            vec![
+                Candidate::Tcp(DEFAULT_TCP_ADDR.into()),
+                Candidate::Socket(PathBuf::from("/l.sock"))
+            ]
+        );
     }
 
     #[test]
@@ -211,6 +309,13 @@ mod tests {
         });
         let e = await_welcome(&mut wrong.as_bytes()).unwrap_err();
         assert_eq!(e.kind(), io::ErrorKind::Unsupported);
+
+        let refused = ipc::encode(&Message::Error {
+            path: None,
+            message: "bad token".into(),
+        });
+        let e = await_welcome(&mut refused.as_bytes()).unwrap_err();
+        assert_eq!(e.to_string(), "bad token");
     }
 
     #[test]
@@ -226,31 +331,50 @@ mod tests {
             std::thread::sleep(Duration::from_secs(10));
             drop(conn);
         });
-        let hello = Message::Hello {
-            protocol: ipc::PROTOCOL_VERSION,
-            cwd: None,
-            cli_version: None,
-            host: None,
-        };
         let start = std::time::Instant::now();
-        let e = try_one(&sock, &hello).unwrap_err();
+        let e = try_one(&Candidate::Socket(sock), &hello()).unwrap_err();
         assert_eq!(e.kind(), io::ErrorKind::TimedOut);
         assert!(start.elapsed() < WELCOME_TIMEOUT + Duration::from_secs(2));
         drop(keep); // the helper threads end with the test process
     }
 
     #[test]
+    fn tcp_candidates_complete_the_same_handshake() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut r = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            r.read_line(&mut line).unwrap();
+            assert!(line.contains("\"hello\""));
+            let mut w = stream;
+            w.write_all(
+                ipc::encode(&Message::Welcome {
+                    protocol: ipc::PROTOCOL_VERSION,
+                    gui_version: Some("t".into()),
+                })
+                .as_bytes(),
+            )
+            .unwrap();
+        });
+        let c = try_one(&Candidate::Tcp(addr.to_string()), &hello()).unwrap();
+        assert_eq!(c.gui_version.as_deref(), Some("t"));
+        assert_eq!(c.via, Candidate::Tcp(addr.to_string()));
+        server.join().unwrap();
+    }
+
+    #[test]
     fn connecting_to_nothing_reports_every_candidate() {
         let tmp = TempDir::new().unwrap();
         let dead = tmp.path().join("dead.sock");
-        let hello = Message::Hello {
-            protocol: ipc::PROTOCOL_VERSION,
-            cwd: None,
-            cli_version: None,
-            host: None,
-        };
-        let reasons = connect_any(std::slice::from_ref(&dead), &hello).unwrap_err();
-        assert_eq!(reasons.len(), 1);
+        let cands = vec![
+            Candidate::Socket(dead.clone()),
+            Candidate::Tcp("127.0.0.1:1".into()),
+        ];
+        let reasons = connect_any(&cands, &hello()).unwrap_err();
+        assert_eq!(reasons.len(), 2);
         assert!(reasons[0].starts_with(&dead.to_string_lossy().to_string()));
+        assert!(reasons[1].starts_with("tcp://127.0.0.1:1"));
     }
 }

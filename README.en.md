@@ -97,23 +97,31 @@ On a server without a display, `fude-cli file.md` opens the file in the Fude run
 **your** machine. The server-side `fude-cli` serves reads, writes and change notifications
 for that file and exits when the tab is closed.
 
-1. Have Fude running locally (it listens on `~/.config/fude/gui.sock`)
-2. Add a reverse forward to `~/.ssh/config` (`%C` keeps each connection's socket distinct)
+1. Have Fude running locally (it listens on `~/.config/fude/gui.sock` and creates
+   `~/.config/fude/gui-token` on first start)
+2. Add a reverse forward to `~/.ssh/config`: the server's loopback port 47821 reaches your socket
 
    ```
    Host dev
-     RemoteForward ~/.cache/fude/gui/%C.sock ~/.config/fude/gui.sock
-     StreamLocalBindUnlink yes
+     RemoteForward 47821 /home/<you>/.config/fude/gui.sock
    ```
 
-   Without `StreamLocalBindUnlink yes` the socket file left by the previous session blocks
-   the next connection's forward (`remote port forwarding failed`). The server also needs
-   the `~/.cache/fude/gui` directory to exist (`mkdir -p`).
+3. Put `fude-cli` and the token on the server
 
-3. Put `fude-cli` on the server (`cargo build --release -p fude-cli` builds a single binary)
+   ```bash
+   scp ~/.config/fude/gui-token dev:~/.config/fude/gui-token   # after: ssh dev 'mkdir -p ~/.config/fude'
+   scp src-tauri/target/release/fude-cli dev:~/.local/bin/       # single binary from cargo build --release -p fude-cli
+   ```
+
+   Other users on the server can reach port 47821 too, so the GUI refuses any connection
+   without the matching token (`FUDE_GUI_TOKEN` works as well).
+
 4. `ssh dev`, then `fude-cli notes.md` (add `--wait` to use it as `$EDITOR`)
 
 Only the directory of each file you pass (or the directory itself) is exposed.
+A Unix-socket reverse forward (`RemoteForward ~/.cache/fude/gui/%C.sock …`) is also searched,
+but some sshds create that socket owned by root, so TCP is the default. Change the port with
+`FUDE_GUI_ADDR=127.0.0.1:<port>`.
 
 When no GUI answers (no forward, or Fude is not running on your machine) it falls back
 to an in-terminal viewer (`fude-cli --tui file.md` forces it): rendered Markdown that

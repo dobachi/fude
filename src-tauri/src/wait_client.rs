@@ -96,6 +96,7 @@ fn talk(stream: Stream, paths: Vec<String>) -> io::Result<i32> {
         cwd,
         cli_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         host: None,
+        token: None,
     }));
     out.push_str(&ipc::encode(&Message::Open {
         paths: paths.clone(),

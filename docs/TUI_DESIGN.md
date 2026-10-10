@@ -176,9 +176,14 @@ Host dev
   Linux は systemd のソケットアクティベーション（`fude-gui.socket`）、macOS は launchd で
   ソケットを先に握らせておく（§9）
 - tmux の中や後から開いたシェルからも、ソケットはファイルシステム上にあるので見つかる
-- 実機確認（k16）: sshd はセッション終了時にソケットファイルを**消さない**ので、次の接続の bind が失敗する。
-  クライアント側 `~/.ssh/config` の `StreamLocalBindUnlink yes` で解決（sshd 側の設定は不要だった）。
-  転送先ディレクトリ `~/.cache/fude/gui` は事前に作る（無いと bind が失敗する）
+- 実機確認（k16、Ubuntu の sshd）: (1) セッション終了時にソケットファイルが**消えず**次の bind が失敗する
+  → クライアント側 `StreamLocalBindUnlink yes` で回避可。(2) それ以上に、sshd が転送ソケットを
+  **root 所有 0600** で作るためユーザから接続できない（Permission denied）。これは回避できないので、
+  **既定を TCP 逆転送（`RemoteForward 47821 <local gui.sock>`）＋トークン**に変更した。
+  `fude-cli` は `$FUDE_GUI_SOCK` → `$FUDE_GUI_ADDR` → `~/.cache/fude/gui/*.sock` → `127.0.0.1:47821` →
+  ローカル `gui.sock` の順に探す。トークンは GUI が `~/.config/fude/gui-token` に作り、リモートの
+  同名ファイルか `$FUDE_GUI_TOKEN` から `hello.token` で送る。host 付きの hello はトークン一致が必須
+  （ローカルの `fude --wait` はソケットのパーミッションで守られているので不要）
 
 #### TCP フォールバック
 

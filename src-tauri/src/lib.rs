@@ -922,7 +922,9 @@ fn gui_ready(
             let socket = fude_core::ipc::socket_path(&dir);
             gui_server::clear_stale_socket(&socket)?;
             let name = fude_core::ipc::socket_name(&socket).map_err(|e| e.to_string())?;
-            gui_server::start(name, registry, sessions, Arc::new(WindowSink(app)))
+            // Remote agents must present this; see fude_core::token.
+            let token = fude_core::token::load_or_create(&dir.join(fude_core::token::TOKEN_FILE))?;
+            gui_server::start(name, token, registry, sessions, Arc::new(WindowSink(app)))
                 .map_err(|e| format!("cannot listen on {}: {}", socket.display(), e))?;
             #[cfg(unix)]
             {
