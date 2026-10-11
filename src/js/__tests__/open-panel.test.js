@@ -16,7 +16,14 @@ const key = (el, k, extra = {}) => {
   return e;
 };
 
-function mount({ recent = [], setupHosts = ['k16'], completions = {}, open, wslOpen } = {}) {
+function mount({
+  recent = [],
+  setupHosts = ['k16'],
+  completions = {},
+  open,
+  wslOpen,
+  preset,
+} = {}) {
   document.body.innerHTML = `<div id="root">${openSectionHtml()}</div>`;
   const root = document.getElementById('root');
   const saved = [];
@@ -35,7 +42,13 @@ function mount({ recent = [], setupHosts = ['k16'], completions = {}, open, wslO
   };
   const store = createRecentStore(backend, recent);
   const onOpened = vi.fn();
-  const api = initOpenSection(root, backend, { recent: store, setupHosts, onOpened, debounce: 0 });
+  const api = initOpenSection(root, backend, {
+    recent: store,
+    setupHosts,
+    onOpened,
+    debounce: 0,
+    preset,
+  });
   const $ = (sel) => root.querySelector(sel);
   const targets = () => [...$('#remote-target').options].map((o) => o.textContent);
   const suggestions = () =>
@@ -93,6 +106,31 @@ describe('open section: destination', () => {
     expect(targets()).toEqual(['k16', 'WSL（Ubuntu）', '別のホストを入力…']);
     api.setWsl({ supported: false, distro: 'Ubuntu' });
     expect(targets()).toEqual(['k16', '別のホストを入力…']);
+  });
+
+  it('starts where it was asked to, even on a host not yet listed', () => {
+    const { $, targets } = mount({
+      recent: ['dev\t~/work'],
+      preset: { kind: 'ssh', host: 'me@box', path: '/srv/docs/' },
+    });
+    expect(targets()[0]).toBe('me@box');
+    expect($('#remote-target').value).toBe('ssh:me@box');
+    expect($('#remote-open-path').value).toBe('/srv/docs/');
+  });
+
+  it('a WSL start waits for the distro to be known, then takes it', () => {
+    const { api, $ } = mount({ preset: { kind: 'wsl', path: '~/Sources/' } });
+    expect($('#remote-target').value).toBe('ssh:k16');
+    api.setWsl({ supported: true, distro: 'Ubuntu' });
+    expect($('#remote-target').value).toBe('wsl');
+  });
+
+  it('picking another destination lets go of the one asked for', () => {
+    const { api, $ } = mount({ preset: { kind: 'ssh', host: 'box', path: '/srv/' } });
+    $('#remote-target').value = 'ssh:k16';
+    $('#remote-target').dispatchEvent(new Event('change'));
+    api.setCandidates(['git']);
+    expect($('#remote-target').value).toBe('ssh:k16');
   });
 
   it('another host is typed in, and checked before anything runs', async () => {

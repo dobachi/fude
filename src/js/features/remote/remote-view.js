@@ -37,7 +37,7 @@ export function closeRemoteView() {
  * Separate from openRemoteView so the layout can be shown with a stand-in
  * backend.
  */
-export function mountRemoteView(api, config, onClose) {
+export function mountRemoteView(api, config, onClose, preset = null) {
   const el = document.createElement('div');
   el.className = 'settings-overlay remote-overlay';
   el.innerHTML = `
@@ -68,6 +68,7 @@ export function mountRemoteView(api, config, onClose) {
   const open = initOpenSection(el, api, {
     recent,
     setupHosts: config.setup_hosts,
+    preset,
     // What was opened appears as a tab behind this view: get out of its way.
     onOpened: onClose,
   });
@@ -84,8 +85,13 @@ export function mountRemoteView(api, config, onClose) {
   return { el, conns };
 }
 
-/** Open the view (desktop app only; elsewhere there is nothing to run). */
-export async function openRemoteView() {
+/**
+ * Open the view (desktop app only; elsewhere there is nothing to run).
+ * `preset` (`{ kind: 'ssh', host } | { kind: 'wsl' }`, plus `path`) starts
+ * it on that destination — for opening another place on the machine whose
+ * folder is shown.
+ */
+export async function openRemoteView(preset = null) {
   if (view || !backend.isLocalTauri()) return;
 
   let config = {};
@@ -96,7 +102,7 @@ export async function openRemoteView() {
   }
   if (view) return;
 
-  const mounted = mountRemoteView(backend, config, closeRemoteView);
+  const mounted = mountRemoteView(backend, config, closeRemoteView, preset);
   view = mounted.el;
   connections = mounted.conns;
   // Bubble phase: the path field closes its own list on Escape first.

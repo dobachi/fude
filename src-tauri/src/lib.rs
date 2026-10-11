@@ -897,6 +897,7 @@ fn open_direct(
     let outcome = remote_direct::open(
         &program,
         &args,
+        &target.origin(),
         Arc::clone(registry),
         Arc::clone(sessions),
         sink,
@@ -977,6 +978,9 @@ pub struct RemoteConnection {
     pub id: u64,
     pub host: String,
     pub roots: Vec<String>,
+    /// `ssh:<host>` / `wsl` when this window opened it; null when the
+    /// agent connected by itself (`fude FILE` typed over there).
+    pub origin: Option<String>,
 }
 
 /// The agents connected to this window, however they got here.
@@ -987,7 +991,12 @@ fn remote_connections(
     sessions
         .list()
         .into_iter()
-        .map(|(id, host, roots)| RemoteConnection { id, host, roots })
+        .map(|(id, host, roots, origin)| RemoteConnection {
+            id,
+            host,
+            roots,
+            origin,
+        })
         .collect()
 }
 

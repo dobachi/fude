@@ -6,6 +6,9 @@ import {
   displayRemotePath,
   resolveRemotePath,
   imageMime,
+  remoteParent,
+  connectionFor,
+  remoteReach,
 } from '../core/remote-path.js';
 
 describe('remote-path', () => {
@@ -89,5 +92,58 @@ describe('imageMime', () => {
     expect(imageMime('noext')).toBe('application/octet-stream');
     expect(imageMime('')).toBe('application/octet-stream');
     expect(imageMime(null)).toBe('application/octet-stream');
+  });
+});
+
+describe('moving around on a remote machine', () => {
+  it('finds the folder above, stopping at the root', () => {
+    expect(remoteParent('remote://k16/home/u/notes')).toBe('remote://k16/home/u');
+    expect(remoteParent('remote://k16/home/u/notes/')).toBe('remote://k16/home/u');
+    expect(remoteParent('remote://k16/home')).toBe('remote://k16/');
+    expect(remoteParent('remote://k16/')).toBeNull();
+    expect(remoteParent('/home/u/notes')).toBeNull();
+    expect(remoteParent('')).toBeNull();
+    expect(remoteParent(null)).toBeNull();
+  });
+
+  const conns = [
+    { id: 1, host: 'k16', roots: ['/home/u'], origin: null },
+    { id: 2, host: 'k16', roots: ['/home/u/notes'], origin: 'ssh:me@k16' },
+    { id: 3, host: 'home', roots: ['/home/d/Sources/'], origin: 'wsl' },
+    { id: 4, host: 'box', roots: ['/'], origin: 'ssh:box' },
+  ];
+
+  it('picks the connection whose root is the closest above the path', () => {
+    expect(connectionFor('remote://k16/home/u/notes/a.md', conns).id).toBe(2);
+    expect(connectionFor('remote://k16/home/u/notes', conns).id).toBe(2);
+    expect(connectionFor('remote://k16/home/u/other', conns).id).toBe(1);
+    // Not fooled by a name that merely starts the same.
+    expect(connectionFor('remote://k16/home/u/notes2/x', conns).id).toBe(1);
+    expect(connectionFor('remote://home/home/d/Sources/x', conns).id).toBe(3);
+    expect(connectionFor('remote://box/anything', conns).id).toBe(4);
+    expect(connectionFor('remote://k16/srv', conns)).toBeNull();
+    expect(connectionFor('remote://gone/x', conns)).toBeNull();
+    expect(connectionFor('/local/x', conns)).toBeNull();
+    expect(connectionFor('remote://k16/home/u', null)).toBeNull();
+  });
+
+  it('reaches the machine the way this window got there', () => {
+    expect(remoteReach('remote://k16/home/u/notes/a.md', conns)).toEqual({
+      kind: 'ssh',
+      host: 'me@k16',
+      known: true,
+    });
+    expect(remoteReach('remote://home/home/d/Sources/x', conns)).toEqual({
+      kind: 'wsl',
+      known: true,
+    });
+    // An agent that connected by itself: only its name is known.
+    expect(remoteReach('remote://k16/home/u/other', conns)).toEqual({
+      kind: 'ssh',
+      host: 'k16',
+      known: false,
+    });
+    expect(remoteReach('remote://gone/x', [])).toEqual({ kind: 'ssh', host: 'gone', known: false });
+    expect(remoteReach('/local', conns)).toBeNull();
   });
 });

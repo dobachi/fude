@@ -141,6 +141,10 @@ impl WaitRegistry {
 pub struct RemoteSession {
     /// Identifies the session to the frontend (to disconnect it).
     pub id: u64,
+    /// How this application reached the agent when it started it itself
+    /// (`ssh:<host>` or `wsl`), so that another place can be opened the
+    /// same way. None for an agent that connected on its own.
+    pub origin: Option<String>,
     pub host: String,
     /// Directories the agent serves (absolute, on its machine).
     pub roots: Vec<String>,
@@ -262,19 +266,19 @@ impl RemoteSessions {
         Ok((session, path.to_string()))
     }
 
-    /// Every connected agent as (id, host, roots), in a stable order.
-    pub fn list(&self) -> Vec<(u64, String, Vec<String>)> {
+    /// Every connected agent as (id, host, roots, origin), in a stable order.
+    pub fn list(&self) -> Vec<(u64, String, Vec<String>, Option<String>)> {
         let mut all: Vec<_> = self
             .by_host
             .lock()
             .map(|m| {
                 m.values()
                     .flatten()
-                    .map(|s| (s.id, s.host.clone(), s.roots.clone()))
+                    .map(|s| (s.id, s.host.clone(), s.roots.clone(), s.origin.clone()))
                     .collect()
             })
             .unwrap_or_default();
-        all.sort_by_key(|(id, _, _)| *id);
+        all.sort_by_key(|(id, ..)| *id);
         all
     }
 
@@ -598,8 +602,11 @@ pub fn start_tcp(
                                 serve(
                                     Box::new(stream),
                                     Box::new(w),
-                                    Some(token),
-                                    true,
+                                    Peer {
+                                        token: Some(token),
+                                        token_always: true,
+                                        origin: None,
+                                    },
                                     registry,
                                     sessions,
                                     sink,
@@ -644,8 +651,11 @@ pub fn start(
                                 serve(
                                     Box::new(recv),
                                     Box::new(send),
-                                    Some(token),
-                                    false,
+                                    Peer {
+                                        token: Some(token),
+                                        token_always: false,
+                                        origin: None,
+                                    },
                                     registry,
                                     sessions,
                                     sink,
@@ -662,22 +672,37 @@ pub fn start(
 /// Serve an agent this application started itself, over the pipes to it
 /// (`recv` its stdout, `send` its stdin). No token is asked for: nobody
 /// else can be at the other end of a pipe we opened. Returns when the
-/// connection ends.
+/// connection ends. `origin` records how the agent was reached.
 pub fn serve_child(
     recv: Box<dyn std::io::Read + Send>,
     send: Box<dyn Write + Send>,
+    origin: String,
     registry: Arc<WaitRegistry>,
     sessions: Arc<RemoteSessions>,
     sink: Arc<dyn OpenSink>,
 ) {
-    serve(recv, send, None, false, registry, sessions, sink)
+    let peer = Peer {
+        token: None,
+        token_always: false,
+        origin: Some(origin),
+    };
+    serve(recv, send, peer, registry, sessions, sink)
+}
+
+/// What is known about the other end of a connection before it speaks.
+struct Peer {
+    /// The secret it must present; None for an agent we started ourselves.
+    token: Option<Arc<String>>,
+    /// Whether even a local client must present it (TCP).
+    token_always: bool,
+    /// How we reached it, when we started it (`RemoteSession::origin`).
+    origin: Option<String>,
 }
 
 fn serve(
     recv: Box<dyn std::io::Read + Send>,
     mut send: Box<dyn Write + Send>,
-    token: Option<Arc<String>>,
-    token_always: bool,
+    peer: Peer,
     registry: Arc<WaitRegistry>,
     sessions: Arc<RemoteSessions>,
     sink: Arc<dyn OpenSink>,
@@ -707,6 +732,11 @@ fn serve(
         });
 
     let conn_id = registry.new_conn_id();
+    let Peer {
+        token,
+        token_always,
+        origin,
+    } = peer;
     let mut state = match token {
         Some(token) if token_always => ConnState::with_token_always(Some(token.to_string())),
         Some(token) => ConnState::with_token(Some(token.to_string())),
@@ -745,6 +775,7 @@ fn serve(
                             if let Some(host) = state.host() {
                                 let s = Arc::new(RemoteSession {
                                     id: conn_id,
+                                    origin: origin.clone(),
                                     host: host.to_string(),
                                     roots: state.roots().to_vec(),
                                     tx: tx.clone(),
@@ -1020,7 +1051,14 @@ mod tests {
             );
             let w = gui_side.try_clone().unwrap();
             thread::spawn(move || {
-                serve_child(Box::new(gui_side), Box::new(w), registry, sessions, sink)
+                serve_child(
+                    Box::new(gui_side),
+                    Box::new(w),
+                    "ssh:me@k16".into(),
+                    registry,
+                    sessions,
+                    sink,
+                )
             })
         };
         let mut to_gui = agent.try_clone().unwrap();
@@ -1062,7 +1100,8 @@ mod tests {
         );
         let listed = sessions.list();
         assert_eq!(listed.len(), 1);
-        let (id, host, roots) = listed[0].clone();
+        let (id, host, roots, origin) = listed[0].clone();
+        assert_eq!(origin.as_deref(), Some("ssh:me@k16"));
         assert_eq!(
             (host.as_str(), roots.as_slice()),
             ("k16", ["/home/u/notes".to_string()].as_slice())
@@ -1330,6 +1369,7 @@ mod tests {
         (
             Arc::new(RemoteSession {
                 id: 0,
+                origin: None,
                 host: host.into(),
                 roots: roots.iter().map(|s| s.to_string()).collect(),
                 tx,

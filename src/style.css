@@ -3391,3 +3391,12 @@ body:has(#app.ai-panel-open) #mode-indicator {
   border-radius: 3px;
   font-size: 0.9em;
 }
+
+/* Sidebar header while a remote folder is shown */
+#sidebar-header.is-remote .sidebar-root {
+  color: var(--fg-accent);
+}
+
+#sidebar-remote-btn[hidden] {
+  display: none;
+}

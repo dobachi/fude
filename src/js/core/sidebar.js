@@ -2,6 +2,7 @@
 
 import { createListKeyHandler } from './list-nav.js';
 import { parentDir, samePath } from './pathnorm.js';
+import { isRemotePath, remoteParent, splitRemotePath } from './remote-path.js';
 
 let fileTreeContainer = null;
 let onFileSelect = null;
@@ -17,6 +18,7 @@ let onContextMenu = null;
 let onRootClick = null;
 let onRootUp = null;
 let onOpenFolder = null;
+let onRemoteOpen = null;
 let rootPath = '';
 
 const ROOT_EMPTY_TEXT = 'フォルダ未選択';
@@ -44,6 +46,7 @@ export function initSidebar(container, fileSelectCallback, opts) {
     if (opts.onRootClick) onRootClick = opts.onRootClick;
     if (opts.onRootUp) onRootUp = opts.onRootUp;
     if (opts.onOpenFolder) onOpenFolder = opts.onOpenFolder;
+    if (opts.onRemoteOpen) onRemoteOpen = opts.onRemoteOpen;
   }
 
   initRootLabel();
@@ -144,6 +147,9 @@ function initPopover() {
  * @returns {string}
  */
 export function rootLabel(path) {
+  // A remote folder says where it is: `k16:notes`.
+  const remote = splitRemotePath(path);
+  if (remote) return `${remote.host}:${rootLabel(remote.path)}`;
   const p = String(path ?? '');
   const trimmed = p.replace(/[/\\]+$/, '');
   if (!trimmed || /^[A-Za-z]:$/.test(trimmed)) return p;
@@ -166,31 +172,68 @@ function initRootLabel() {
   const up = document.getElementById('sidebar-up-btn');
   if (up) {
     up.addEventListener('click', () => {
-      if (parentDir(rootPath) && onRootUp) onRootUp();
+      if (rootParent(rootPath) && onRootUp) onRootUp();
+    });
+  }
+  const remote = document.getElementById('sidebar-remote-btn');
+  if (remote) {
+    remote.addEventListener('click', () => {
+      if (isRemotePath(rootPath) && onRemoteOpen) onRemoteOpen(rootPath);
     });
   }
   renderRoot();
 }
 
+/** The folder above `path`, local or remote; '' when there is none. */
+export function rootParent(path) {
+  return isRemotePath(path) ? remoteParent(path) || '' : parentDir(path);
+}
+
+const OPEN_TITLE = 'フォルダを開く（ファイラの場所を移動） Ctrl+Shift+O';
+
 function renderRoot() {
+  const remote = isRemotePath(rootPath);
   // The "up" button is only live while there is a folder above the root.
   const up = document.getElementById('sidebar-up-btn');
   if (up) {
-    const parent = parentDir(rootPath);
+    const parent = rootParent(rootPath);
     up.disabled = !parent;
-    up.title = parent ? `一つ上のフォルダへ: ${parent}` : '';
+    const shown = remote && parent ? rootTooltip(parent) : parent;
+    up.title = parent ? `一つ上のフォルダへ: ${shown}` : '';
+  }
+  // While a remote folder is shown, the header says so: the folder button
+  // is for this machine, and a button of its own opens places over there.
+  const header = document.getElementById('sidebar-header');
+  if (header) header.classList.toggle('is-remote', remote);
+  const open = document.getElementById('sidebar-open-btn');
+  if (open) {
+    open.title = remote
+      ? `この PC のフォルダを開く（リモートから離れる） Ctrl+Shift+O`
+      : OPEN_TITLE;
+  }
+  const remoteBtn = document.getElementById('sidebar-remote-btn');
+  if (remoteBtn) {
+    remoteBtn.hidden = !remote;
+    const host = remote ? splitRemotePath(rootPath)?.host : '';
+    remoteBtn.title = host ? `${host} の別の場所を開く…` : 'リモートの別の場所を開く…';
   }
   const el = document.getElementById('sidebar-root');
   if (!el) return;
   if (rootPath) {
     el.textContent = rootLabel(rootPath);
-    el.title = rootPath;
+    el.title = rootTooltip(rootPath);
     el.classList.remove('is-empty');
   } else {
     el.textContent = ROOT_EMPTY_TEXT;
     el.title = '';
     el.classList.add('is-empty');
   }
+}
+
+/** The full place a root stands for, as shown in tooltips. */
+function rootTooltip(path) {
+  const remote = splitRemotePath(path);
+  return remote ? `${remote.host}:${remote.path}` : path;
 }
 
 /** Show `path` (the open folder / vault root) in the sidebar header. */

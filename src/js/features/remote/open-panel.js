@@ -68,7 +68,8 @@ const sshValue = (host) => `ssh:${host}`;
  * `backend` needs remoteOpen(host, path), wslOpen(path) and
  * remoteComplete(hostOrNull, partial). `opts`: `recent` (createRecentStore),
  * `setupHosts`, `onOpened()`, `debounce` (ms before a completion is asked
- * for). Returns `{ setHosts, setCandidates, setWsl }` for what changes while
+ * for), `preset` (`{ kind: 'ssh', host } | { kind: 'wsl' }` with `path`: the
+ * destination and path to start on). Returns `{ setHosts, setCandidates, setWsl }` for what changes while
  * the view is open.
  */
 export function initOpenSection(root, backend, opts = {}) {
@@ -87,6 +88,9 @@ export function initOpenSection(root, backend, opts = {}) {
   let candidates = [];
   let wslDistro = null;
   let busy = false;
+  // A destination asked for from outside (the sidebar) wins over "the one
+  // used last" until the user picks another.
+  let preset = opts.preset && (opts.preset.kind === 'wsl' || opts.preset.host) ? opts.preset : null;
 
   const setStatus = (text, kind, log) => {
     statusEl.textContent = text;
@@ -115,11 +119,16 @@ export function initOpenSection(root, backend, opts = {}) {
       targetEl.appendChild(opt);
     };
     const hosts = openTargets(recent ? recent.list() : [], setupHosts, candidates);
+    if (preset?.kind === 'ssh' && !hosts.includes(preset.host)) hosts.unshift(preset.host);
     for (const h of hosts) add(sshValue(h), h);
     if (wslDistro) add(WSL, `WSL（${wslDistro}）`);
     add(OTHER, '別のホストを入力…');
     const values = [...targetEl.options].map((o) => o.value);
-    if (values.includes(before)) {
+    const asked = preset ? (preset.kind === 'wsl' ? WSL : sshValue(preset.host)) : null;
+    if (asked && values.includes(asked)) {
+      targetEl.value = asked;
+      if (typeof preset.path === 'string' && !pathEl.value) pathEl.value = preset.path;
+    } else if (values.includes(before)) {
       targetEl.value = before;
     } else {
       // The destination used last, else the first there is.
@@ -306,6 +315,7 @@ export function initOpenSection(root, backend, opts = {}) {
 
   btn.addEventListener('click', open);
   targetEl.addEventListener('change', () => {
+    preset = null;
     onTargetChange(true);
     if (targetEl.value === OTHER) hostEl.focus();
   });

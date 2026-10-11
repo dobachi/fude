@@ -86,3 +86,61 @@ export function imageMime(path) {
   const m = /\.([A-Za-z0-9]+)$/.exec(String(path ?? ''));
   return (m && IMAGE_MIME[m[1].toLowerCase()]) || 'application/octet-stream';
 }
+
+/**
+ * The folder above a remote folder, as a remote path; null at the host's
+ * root and for anything that is not a remote path.
+ * @param {string} path
+ * @returns {string|null}
+ */
+export function remoteParent(path) {
+  const parts = splitRemotePath(path);
+  if (!parts) return null;
+  const p = parts.path.replace(/\/+$/, '');
+  if (!p) return null; // already the root
+  const cut = p.lastIndexOf('/');
+  return `${REMOTE_SCHEME}${parts.host}${cut <= 0 ? '/' : p.slice(0, cut)}`;
+}
+
+/**
+ * The connection that serves `path`: on the same host, with the longest root
+ * `path` lies in. Null when none does (the agent went away).
+ * @param {string} path a remote path
+ * @param {{id:number,host:string,roots:string[],origin:?string}[]} connections
+ */
+export function connectionFor(path, connections) {
+  const parts = splitRemotePath(path);
+  if (!parts) return null;
+  let best = null;
+  let bestLen = -1;
+  for (const c of Array.isArray(connections) ? connections : []) {
+    if (!c || c.host !== parts.host) continue;
+    for (const root of Array.isArray(c.roots) ? c.roots : []) {
+      const r = String(root).replace(/\/+$/, '') || '/';
+      const inside = r === '/' || parts.path === r || parts.path.startsWith(`${r}/`);
+      if (inside && r.length > bestLen) {
+        best = c;
+        bestLen = r.length;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * How to reach the machine a remote folder is on again, for opening another
+ * place there: `{ kind: 'wsl' }`, or `{ kind: 'ssh', host }` — the ssh
+ * destination this window used when it opened the connection itself, else
+ * the name the agent goes by (which ssh may or may not know: `known` tells).
+ * Null for anything that is not a remote path.
+ */
+export function remoteReach(path, connections) {
+  const parts = splitRemotePath(path);
+  if (!parts) return null;
+  const origin = connectionFor(path, connections)?.origin || '';
+  if (origin === 'wsl') return { kind: 'wsl', known: true };
+  if (origin.startsWith('ssh:') && origin.length > 4) {
+    return { kind: 'ssh', host: origin.slice(4), known: true };
+  }
+  return { kind: 'ssh', host: parts.host, known: false };
+}

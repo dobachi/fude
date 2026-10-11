@@ -74,6 +74,70 @@ describe('sidebar module', () => {
       expect(onRootClick).toHaveBeenCalledWith('/home/me/vault');
     });
 
+    describe('while a remote folder is shown', () => {
+      const html = `
+        <div id="sidebar-header">
+          <button id="sidebar-root"></button>
+          <button id="sidebar-open-btn"></button>
+          <button id="sidebar-up-btn"></button>
+          <button id="sidebar-remote-btn" hidden></button>
+        </div>
+        <div id="file-tree"></div>`;
+
+      it('names the machine and offers a button for places over there', () => {
+        document.body.innerHTML = html;
+        mod.initSidebar(document.getElementById('file-tree'), vi.fn());
+        const remoteBtn = document.getElementById('sidebar-remote-btn');
+        const header = document.getElementById('sidebar-header');
+        expect(remoteBtn.hidden).toBe(true);
+        expect(header.classList.contains('is-remote')).toBe(false);
+
+        mod.setRootPath('remote://k16/home/u/notes');
+        expect(document.getElementById('sidebar-root').textContent).toBe('k16:notes');
+        expect(document.getElementById('sidebar-root').title).toBe('k16:/home/u/notes');
+        expect(remoteBtn.hidden).toBe(false);
+        expect(remoteBtn.title).toMatch(/k16/);
+        expect(header.classList.contains('is-remote')).toBe(true);
+        // The folder button is plainly this machine's.
+        expect(document.getElementById('sidebar-open-btn').title).toMatch(/この PC/);
+
+        mod.setRootPath('/home/me/vault');
+        expect(remoteBtn.hidden).toBe(true);
+        expect(header.classList.contains('is-remote')).toBe(false);
+        expect(document.getElementById('sidebar-open-btn').title).not.toMatch(/この PC/);
+      });
+
+      it('the remote button reports the folder; it does nothing for a local one', () => {
+        document.body.innerHTML = html;
+        const onRemoteOpen = vi.fn();
+        mod.initSidebar(document.getElementById('file-tree'), vi.fn(), { onRemoteOpen });
+        const remoteBtn = document.getElementById('sidebar-remote-btn');
+        mod.setRootPath('/home/me/vault');
+        remoteBtn.click();
+        expect(onRemoteOpen).not.toHaveBeenCalled();
+        mod.setRootPath('remote://k16/home/u/notes');
+        remoteBtn.click();
+        expect(onRemoteOpen).toHaveBeenCalledWith('remote://k16/home/u/notes');
+      });
+
+      it('up goes to the folder above on that machine, until its root', () => {
+        document.body.innerHTML = html;
+        const onRootUp = vi.fn();
+        mod.initSidebar(document.getElementById('file-tree'), vi.fn(), { onRootUp });
+        const up = document.getElementById('sidebar-up-btn');
+        mod.setRootPath('remote://k16/home/u/notes');
+        expect(up.disabled).toBe(false);
+        expect(up.title).toBe('一つ上のフォルダへ: k16:/home/u');
+        up.click();
+        expect(onRootUp).toHaveBeenCalledTimes(1);
+        mod.setRootPath('remote://k16/');
+        expect(up.disabled).toBe(true);
+        expect(mod.rootParent('remote://k16/home')).toBe('remote://k16/');
+        expect(mod.rootParent('remote://k16/')).toBe('');
+        expect(mod.rootParent('/home/me')).toBe('/home');
+      });
+    });
+
     describe('up button (move the root one folder up)', () => {
       const upHtml = rootHtml.replace(
         '</button></div>',

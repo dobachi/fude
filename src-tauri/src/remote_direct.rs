@@ -28,6 +28,17 @@ pub enum Target {
     Wsl,
 }
 
+impl Target {
+    /// How a session opened this way is labelled (`RemoteSession::origin`),
+    /// so the frontend can open another place the same way.
+    pub fn origin(&self) -> String {
+        match self {
+            Target::Ssh(host) => format!("ssh:{}", host),
+            Target::Wsl => "wsl".to_string(),
+        }
+    }
+}
+
 /// `s` as hex. Paths travel like this: through ssh, the far shell and (on
 /// Windows) wsl.exe, each with quoting rules of its own, hex needs none.
 pub fn hex(s: &str) -> String {
@@ -178,6 +189,7 @@ impl OpenSink for Notify {
 pub fn open(
     program: &str,
     args: &[String],
+    origin: &str,
     registry: Arc<WaitRegistry>,
     sessions: Arc<RemoteSessions>,
     sink: Arc<dyn OpenSink>,
@@ -224,12 +236,14 @@ pub fn open(
     });
     let child: Arc<Mutex<Child>> = Arc::new(Mutex::new(child));
     let child_s = Arc::clone(&child);
+    let origin = origin.to_string();
     std::thread::Builder::new()
         .name("fude-remote-direct".into())
         .spawn(move || {
             gui_server::serve_child(
                 Box::new(stdout),
                 Box::new(stdin),
+                origin,
                 registry,
                 sessions,
                 notify,
@@ -482,6 +496,7 @@ done"#,
         let outcome = open(
             &script,
             &[],
+            "ssh:k16",
             Arc::clone(&registry),
             Arc::clone(&sessions),
             sink.clone(),
@@ -496,6 +511,9 @@ done"#,
         let listed = sessions.list();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].1, "k16");
+        assert_eq!(listed[0].3.as_deref(), Some("ssh:k16"));
+        assert_eq!(Target::Ssh("me@k16".into()).origin(), "ssh:me@k16");
+        assert_eq!(Target::Wsl.origin(), "wsl");
 
         assert!(sessions.hang_up(listed[0].0));
         let ended = tmp.path().join("agent.sh.ended");
@@ -518,6 +536,7 @@ done"#,
         let outcome = open(
             &script,
             &[],
+            "ssh:k16",
             Arc::new(WaitRegistry::default()),
             Arc::new(RemoteSessions::default()),
             Arc::new(Recorder::default()),
@@ -543,6 +562,7 @@ sleep 30"#,
         let outcome = open(
             &script,
             &[],
+            "ssh:k16",
             Arc::new(WaitRegistry::default()),
             Arc::clone(&sessions),
             Arc::new(Recorder::default()),
@@ -563,11 +583,125 @@ sleep 30"#,
         drop(tmp);
     }
 
+    /// The bundled fude-cli, when the sidecar has been built (`make test`
+    /// and CI do that first).
+    fn sidecar() -> Option<std::path::PathBuf> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
+        std::fs::read_dir(dir)
+            .ok()?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("fude-cli"))
+            })
+    }
+
+    /// The real agent against the real server, over real pipes: what the
+    /// stand-ins above each cover one half of.
+    #[cfg(unix)]
+    #[test]
+    fn the_real_fude_cli_opens_a_folder_over_its_stdio() {
+        let Some(cli) = sidecar() else {
+            eprintln!("skipped: no bundled fude-cli (run scripts/sidecar.sh)");
+            return;
+        };
+        let home = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(home.path().join("my notes")).unwrap();
+        std::fs::write(home.path().join("my notes/a.md"), "# a").unwrap();
+        // HOME decides what `~` means for the agent; the env reaches the
+        // child because `open` inherits it.
+        let wrapper = home.path().join("run.sh");
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\nHOME='{}' FUDE_HOST=farbox exec '{}' here --_stdio --hex {}\n",
+                home.path().display(),
+                cli.display(),
+                hex("~/my notes")
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sessions = Arc::new(RemoteSessions::default());
+        let sink = Arc::new(Recorder::default());
+        let outcome = open(
+            &wrapper.to_string_lossy(),
+            &[],
+            "ssh:farbox",
+            Arc::new(WaitRegistry::default()),
+            Arc::clone(&sessions),
+            sink.clone(),
+            Some(Duration::from_secs(20)),
+        )
+        .unwrap();
+        assert_eq!(outcome, Outcome::Opened);
+        let dir = format!("{}/my notes", home.path().display());
+        assert_eq!(
+            sink.opened.lock().unwrap().as_slice(),
+            [format!("remote://farbox{}", dir)]
+        );
+        let listed = sessions.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].2, [dir.clone()]);
+        // The agent answers for its files over the same pipe.
+        let (session, path) = sessions
+            .lookup(&format!("remote://farbox{}/a.md", dir))
+            .unwrap();
+        let reply = session
+            .request(|id| fude_core::ipc::Message::ReadFile {
+                id,
+                path: path.clone(),
+                base64: false,
+            })
+            .unwrap();
+        assert_eq!(reply.as_str(), Some("# a"), "{reply}");
+        // And leaves when hung up on.
+        assert!(sessions.hang_up(listed[0].0));
+        for _ in 0..150 {
+            if sessions.list().is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(sessions.list().is_empty());
+
+        // A place that is not there is refused with the agent's own words.
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\nHOME='{}' exec '{}' here --_stdio --hex {}\n",
+                home.path().display(),
+                cli.display(),
+                hex("~/nope")
+            ),
+        )
+        .unwrap();
+        let outcome = open(
+            &wrapper.to_string_lossy(),
+            &[],
+            "ssh:farbox",
+            Arc::new(WaitRegistry::default()),
+            Arc::new(RemoteSessions::default()),
+            Arc::new(Recorder::default()),
+            Some(Duration::from_secs(20)),
+        )
+        .unwrap();
+        match outcome {
+            Outcome::Failed(why) => assert!(why.contains("no such file or directory"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
     #[test]
     fn something_that_cannot_be_run_is_an_error() {
         let r = open(
             "/no/such/program-zz",
             &[],
+            "wsl",
             Arc::new(WaitRegistry::default()),
             Arc::new(RemoteSessions::default()),
             Arc::new(Recorder::default()),

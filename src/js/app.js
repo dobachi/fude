@@ -37,7 +37,7 @@ import { attachPanZoom } from './core/svg-panzoom.js';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
 import { outdatedCliMessage } from './core/setup-hosts.js';
-import { isRemotePath } from './core/remote-path.js';
+import { isRemotePath, remoteParent, remoteReach, splitRemotePath } from './core/remote-path.js';
 import { createStatusBar } from './core/statusbar.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
@@ -787,6 +787,7 @@ async function init() {
       onRootClick: (path) => copyText(path),
       onRootUp: handleFilerGoUp,
       onOpenFolder: handleOpenFolder,
+      onRemoteOpen: handleRemoteOpenElsewhere,
     });
 
   // Init outline (document headings) below the file tree.
@@ -1881,9 +1882,79 @@ async function revealFileDir(filePath) {
  * Sidebar "up" button / menu: re-root the file tree at the parent of the open
  * folder. The folder we came from stays expanded so the view is not lost.
  */
+/** How to reach the machine the remote folder `path` is on (see remoteReach). */
+async function reachFor(path) {
+  let connections = [];
+  try {
+    connections = await backend.remoteConnections();
+  } catch {
+    /* fall back to the name the folder carries */
+  }
+  return remoteReach(path, connections);
+}
+
+/** The remote view, started on the machine whose folder the filer shows. */
+async function handleRemoteOpenElsewhere(path = vaultPath) {
+  const parts = splitRemotePath(path);
+  if (!parts) return;
+  const reach = await reachFor(path);
+  const dir = parts.path.endsWith('/') ? parts.path : `${parts.path}/`;
+  openRemoteView({ ...reach, path: dir });
+}
+
+/** "Up" while the filer shows a remote folder: its parent, on that machine. */
+async function handleRemoteGoUp() {
+  const parent = remoteParent(vaultPath);
+  if (!parent) {
+    showToast('これより上のフォルダはありません');
+    return;
+  }
+  // A connection that already serves the parent can simply show it.
+  try {
+    const tree = await backend.readDirTree(parent, getShowAllFiles());
+    setVaultPath(parent);
+    loadDirectory(tree);
+    const tab = getActiveTab();
+    if (tab && tab.path) highlightFile(tab.path);
+    watchVault(vaultPath);
+    scheduleSessionSave();
+    return;
+  } catch {
+    /* outside what is served: open it over there, below */
+  }
+  const reach = await reachFor(vaultPath);
+  const where = splitRemotePath(parent).path;
+  const label = reach.kind === 'wsl' ? 'WSL' : reach.host;
+  showToast(`${label}: ${where} を開いています…`);
+  try {
+    // The far side then asks this window to show the folder, as any open does.
+    const res =
+      reach.kind === 'wsl'
+        ? await backend.wslOpen(where)
+        : await backend.remoteOpen(reach.host, where);
+    if (res?.ok) return;
+    const why = String(res?.log || '').split('\n')[0];
+    showToast(`上のフォルダを開けませんでした${why ? `: ${why}` : ''}`, {
+      type: 'error',
+      duration: 8000,
+    });
+  } catch (e) {
+    showToast(`上のフォルダを開けませんでした: ${e?.message || e}`, {
+      type: 'error',
+      duration: 8000,
+    });
+  }
+  // Let the user say how to get there (the name may not be an ssh host).
+  if (!reach.known) openRemoteView({ ...reach, path: where });
+}
+
 async function handleFilerGoUp() {
   if (!vaultPath) {
     showToast('フォルダを開いてから実行してください', { type: 'error' });
+    return;
+  }
+  if (isRemotePath(vaultPath)) {
+    await handleRemoteGoUp();
     return;
   }
   const parent = parentDir(vaultPath);
