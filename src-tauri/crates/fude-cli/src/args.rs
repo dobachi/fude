@@ -17,7 +17,9 @@ pub struct Args {
     pub check: bool,
     /// `setup <ssh-host>`: configure a remote machine (see setup.rs).
     pub setup: Option<String>,
-    pub port: u16,
+    pub port: Option<u16>,
+    /// `--to NAME`: the machine whose Fude gets the files, when several do.
+    pub to: Option<String>,
     /// `bridge`: relay this machine's GUI socket to the Fude on Windows.
     pub bridge: bool,
     /// `pipe`: the Windows half of `bridge` (internal).
@@ -45,6 +47,9 @@ Options:
       --gui      Only use a GUI; fail if none answers
       --tui      Edit in the terminal: tabs, file list (pass a directory),
                  live preview. Ctrl+S saves, Alt+Q quits, F1 lists the keys.
+      --to NAME  Open on the machine NAME, when Fude answers on several
+                 (they are listed, and asked about, without it; $FUDE_TO
+                 sets it for a whole session)
       --check    Report which GUI answers (and how), without opening anything
   -h, --help     Print help
   -V, --version  Print version
@@ -52,7 +57,8 @@ Options:
 Commands:
   setup HOST     Prepare ssh host HOST: add the RemoteForward to ~/.ssh/config,
                  copy the GUI token and fude-cli there, verify the connection.
-                 --port N uses a loopback port other than 47821. Also turns
+                 Each machine gets a loopback port of its own on HOST, so
+                 several can use HOST at once (--port N picks it). Also turns
                  on ssh connection sharing for HOST, so that every session
                  to it reaches Fude, not just the first (--no-share skips).
                  --check changes nothing: it only asks HOST which Fude its
@@ -63,21 +69,23 @@ Commands:
                  it. Needs no ssh from PowerShell and no firewall rule.
 
 The GUI is found through $FUDE_GUI_SOCK, $FUDE_GUI_ADDR, ~/.cache/fude/gui/*.sock,
-127.0.0.1:47821 (what `setup` makes ssh forward), then ~/.config/fude/gui.sock.
-Remote agents present the token in ~/.config/fude/gui-token ($FUDE_GUI_TOKEN).
+the loopback ports `setup` makes ssh forward, then ~/.config/fude/gui.sock.
+Remote agents present the token `fude setup` left in ~/.config/fude/guis/
+(or ~/.config/fude/gui-token; $FUDE_GUI_TOKEN overrides both).
 ";
 
 /// Parse argv (argv[0] = executable). Unknown flags are an error so a typo
 /// never silently becomes a file name.
 pub fn parse(argv: &[String]) -> Result<Args, String> {
     let mut a = Args {
-        port: crate::setup::DEFAULT_PORT,
+        port: None,
         ..Default::default()
     };
     let mut operands_only = false;
     let mut want_port = false;
     let mut want_setup_host = argv.get(1).map(|s| s == "setup").unwrap_or(false);
     let mut want_exe = false;
+    let mut want_to = false;
     match argv.get(1).map(String::as_str) {
         Some("bridge") => a.bridge = true,
         Some("pipe") => a.pipe = true,
@@ -94,8 +102,13 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
             want_exe = false;
             continue;
         }
+        if want_to {
+            a.to = Some(arg.clone());
+            want_to = false;
+            continue;
+        }
         if want_port {
-            a.port = arg.parse().map_err(|_| format!("bad port '{}'", arg))?;
+            a.port = Some(arg.parse().map_err(|_| format!("bad port '{}'", arg))?);
             want_port = false;
             continue;
         }
@@ -112,6 +125,8 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
             "--check" => a.check = true,
             "--port" => want_port = true,
             "--exe" => want_exe = true,
+            "--to" => want_to = true,
+            s if s.starts_with("--to=") => a.to = Some(s["--to=".len()..].to_string()),
             "--no-share" => a.no_share = true,
             "--" => operands_only = true,
             "-w" | "--wait" => a.wait = true,
@@ -134,6 +149,9 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
     }
     if want_exe {
         return Err("--exe needs a value".into());
+    }
+    if want_to || a.to.as_deref().is_some_and(|t| t.trim().is_empty()) {
+        return Err("--to needs a machine name".into());
     }
     if argv.get(1).map(|s| s == "setup").unwrap_or(false) && a.setup.is_none() && !a.help {
         return Err("setup needs an ssh host".into());
@@ -174,9 +192,16 @@ mod tests {
     fn setup_takes_a_host_and_an_optional_port() {
         let a = parse(&argv(&["fude-cli", "setup", "k16"])).unwrap();
         assert_eq!(a.setup.as_deref(), Some("k16"));
-        assert_eq!(a.port, 47821);
+        assert_eq!(a.port, None);
         let a = parse(&argv(&["fude-cli", "setup", "k16", "--port", "5000"])).unwrap();
-        assert_eq!(a.port, 5000);
+        assert_eq!(a.port, Some(5000));
+        let a = parse(&argv(&["fude-cli", "--to", "gpdmd", "x.md"])).unwrap();
+        assert_eq!(a.to.as_deref(), Some("gpdmd"));
+        assert_eq!(a.paths, ["x.md"]);
+        let a = parse(&argv(&["fude-cli", "--to=home-wsl", "x.md"])).unwrap();
+        assert_eq!(a.to.as_deref(), Some("home-wsl"));
+        assert!(parse(&argv(&["fude-cli", "x.md", "--to"])).is_err());
+        assert!(parse(&argv(&["fude-cli", "--to=", "x.md"])).is_err());
         assert!(parse(&argv(&["fude-cli", "setup"])).is_err());
         assert!(!a.no_share);
         assert!(

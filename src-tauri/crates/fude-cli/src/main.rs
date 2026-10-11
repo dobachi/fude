@@ -9,6 +9,7 @@ mod agent;
 mod args;
 mod bridge;
 mod discover;
+mod guis;
 mod run;
 mod setup;
 mod tui;
@@ -53,14 +54,19 @@ fn main() {
         ];
         std::process::exit(bridge::run_pipe(&cands));
     }
+    let to = run::wanted_machine(args.to.as_deref());
     if args.check {
-        match run::connect(&socket_candidates()) {
-            Ok(c) => {
-                println!(
-                    "Fude {} answers via {}",
-                    c.gui_version.as_deref().unwrap_or("?"),
-                    c.via
-                );
+        match run::connect_all(&socket_candidates(), to.as_deref()) {
+            Ok(all) => {
+                for r in &all {
+                    let version = r.conn.gui_version.as_deref().unwrap_or("?");
+                    match &r.name {
+                        Some(name) => {
+                            println!("Fude {} on {} answers via {}", version, name, r.conn.via)
+                        }
+                        None => println!("Fude {} answers via {}", version, r.conn.via),
+                    }
+                }
                 return;
             }
             Err(e) => {
@@ -81,8 +87,15 @@ fn main() {
 
     // The parent of a detached agent only checks that a GUI answers, so a
     // missing forward is reported on the terminal rather than in the log.
-    let conn = match run::connect(&candidates) {
-        Ok(c) => c,
+    let conn = match run::connect(&candidates, to.as_deref()) {
+        Ok(reached) => {
+            // Say where the tab appears: with several machines set up, or a
+            // Fude left open somewhere, "it opened" is not enough.
+            if !args.foreground && reached.conn.via != discover::Candidate::Socket(local_socket()) {
+                eprintln!("fude-cli: opened in {}", reached.describe());
+            }
+            reached.conn
+        }
         Err(e) => {
             // No GUI answers: fall back to the terminal UI (viewer for now),
             // unless that is pointless because there is no terminal either.
@@ -97,9 +110,10 @@ fn main() {
 
     if !args.wait && !args.foreground {
         // Hand the socket back (the child opens its own) and return the shell.
+        let via = conn.via.clone();
         drop(conn);
         let log = run::log_path(&cache_dir());
-        if let Err(e) = run::detach(&args, &log) {
+        if let Err(e) = run::detach(&args, &log, &via) {
             eprintln!("fude-cli: could not detach: {}", e);
             std::process::exit(2);
         }
@@ -119,9 +133,19 @@ fn cache_dir() -> PathBuf {
     dirs::cache_dir().unwrap_or_else(std::env::temp_dir)
 }
 
-fn socket_candidates() -> Vec<discover::Candidate> {
-    let local = fude_core::config_dir()
+fn local_socket() -> PathBuf {
+    fude_core::config_dir()
         .map(|d| fude_core::ipc::socket_path(&d))
-        .unwrap_or_else(|_| PathBuf::from("gui.sock"));
-    discover::candidates(&discover::forward_dir(&cache_dir()), &local)
+        .unwrap_or_else(|_| PathBuf::from("gui.sock"))
+}
+
+fn socket_candidates() -> Vec<discover::Candidate> {
+    let local = local_socket();
+    let registered: Vec<u16> = fude_core::config_dir()
+        .map(|d| guis::list(&guis::dir(&d)))
+        .unwrap_or_default()
+        .iter()
+        .map(|g| g.port)
+        .collect();
+    discover::candidates(&discover::forward_dir(&cache_dir()), &local, &registered)
 }

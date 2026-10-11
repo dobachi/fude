@@ -129,9 +129,9 @@ GUI の無いサーバに ssh しているとき、サーバ側で `fude-cli fil
 fude setup dev            # dev は ~/.ssh/config のホスト名（fude-cli setup dev でも同じ）
 ```
 
-これで次が済みます：`~/.ssh/config` の `Host dev` に `RemoteForward 47821 ~/.config/fude/gui.sock` を追記
-（無ければブロックを追加、元の設定は `config.fude-bak` に退避）、サーバに `~/.config/fude/gui-token`
-（手元の Fude が作った鍵）と `~/.local/bin/fude-cli`（同じ OS/CPU なら手元のバイナリをコピー、違えば
+これで次が済みます：`~/.ssh/config` の `Host dev` に `RemoteForward <ポート> ~/.config/fude/gui.sock` を追記
+（無ければブロックを追加、元の設定は `config.fude-bak` に退避）、サーバに `~/.config/fude/guis/<ポート>`
+（手元の Fude が作った鍵。ポートと鍵は手元の PC ごとに別なので、複数の PC から同じサーバを使える）と `~/.local/bin/fude-cli`（同じ OS/CPU なら手元のバイナリをコピー、違えば
 GitHub Releases から取得）を配置、最後に ssh 越しの接続確認。そのホストへの ssh の接続共有（`ControlMaster`）も
 有効にするので、ssh を何本張ってもどのセッションからでも届きます（不要なら `--no-share`）。
 
@@ -144,7 +144,10 @@ fude-cli --wait notes.md   # タブを閉じるまで待つ（$EDITOR 用）
 fude-cli --check           # どの経路で手元の Fude に届いているか確認
 ```
 
-仕組み: サーバのループバック 47821 番ポートが ssh で手元の `~/.config/fude/gui.sock` へ転送されます。
+開いた先は端末に表示されます（`fude-cli: opened in Fude 0.8.9 on home`）。複数の PC の Fude が応答するときは
+一覧から選べ、`--to PC名`（または環境変数 `FUDE_TO`）で指定もできます。
+
+仕組み: サーバのループバックのポート（PC ごとの番号）が ssh で手元の `~/.config/fude/gui.sock` へ転送されます。
 このポートはサーバ上の他のユーザからも繋げるため、鍵が合わない接続は GUI が拒否します（`FUDE_GUI_TOKEN`
 環境変数でも渡せます）。公開されるのは起動時に渡したファイルの親ディレクトリ（ディレクトリを渡した場合は
 その配下）だけです。ポートは `fude setup dev --port N` / `FUDE_GUI_ADDR=127.0.0.1:N` で変更できます。

@@ -52,27 +52,233 @@ pub fn absolute_paths(paths: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// Connect, or explain why not. `candidates` are tried in order.
-pub fn connect(candidates: &[Candidate]) -> Result<Connected, String> {
-    let hello = Message::Hello {
-        protocol: PROTOCOL_VERSION,
-        cwd: std::env::current_dir()
-            .ok()
-            .map(|p| p.to_string_lossy().to_string()),
-        cli_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-        host: Some(host_name()),
-        token: fude_core::config_dir()
-            .ok()
-            .and_then(|d| fude_core::token::client_token(&d.join(fude_core::token::TOKEN_FILE))),
-    };
-    discover::connect_any(candidates, &hello).map_err(|reasons| {
+/// The token to present to `cand`: `$FUDE_GUI_TOKEN` when set, else the
+/// token of the machine the candidate leads to, else the host's one
+/// `gui-token` (setups made before machines had their own).
+pub fn token_for(
+    cand: &Candidate,
+    guis: &[crate::guis::Gui],
+    env: Option<String>,
+    shared: Option<String>,
+) -> Option<String> {
+    env.filter(|t| !t.trim().is_empty())
+        .map(|t| t.trim().to_string())
+        .or_else(|| crate::guis::gui_for(guis, cand).map(|g| g.token.clone()))
+        .or(shared)
+}
+
+/// Environment variable naming the machine whose Fude to use (`--to`).
+pub const TO_ENV: &str = "FUDE_TO";
+
+/// A Fude that answered, and what to call it.
+#[derive(Debug)]
+pub struct Reached {
+    pub conn: Connected,
+    /// The machine's name when it is a registered one.
+    pub name: Option<String>,
+}
+
+impl Reached {
+    /// "Fude 0.8.9 on gpdmd" / "Fude 0.8.9 via tcp://127.0.0.1:47821".
+    pub fn describe(&self) -> String {
+        let version = self.conn.gui_version.as_deref().unwrap_or("?");
+        match &self.name {
+            Some(name) => format!("Fude {} on {}", version, name),
+            None => format!("Fude {} via {}", version, self.conn.via),
+        }
+    }
+}
+
+/// What a registered machine is called: its name, or its port without one.
+fn gui_label(gui: &crate::guis::Gui) -> String {
+    if gui.name.is_empty() {
+        format!("port {}", gui.port)
+    } else {
+        gui.name.clone()
+    }
+}
+
+/// The registered machine `to` names: by name (ignoring case) or by port.
+pub fn pick_named<'a>(
+    guis: &'a [crate::guis::Gui],
+    to: &str,
+) -> Result<&'a crate::guis::Gui, String> {
+    let want = to.trim();
+    guis.iter()
+        .find(|g| g.name.eq_ignore_ascii_case(want) || g.port.to_string() == want)
+        .ok_or_else(|| {
+            if guis.is_empty() {
+                format!(
+                    "no machine is set up to receive files from this host, so '{}' \
+                     means nothing here (run `fude setup` for this host on that machine)",
+                    want
+                )
+            } else {
+                format!(
+                    "no machine named '{}' is set up for this host (known: {})",
+                    want,
+                    guis.iter().map(gui_label).collect::<Vec<_>>().join(", ")
+                )
+            }
+        })
+}
+
+/// The answer to "which one?": a number from 1 to `count`; an empty line
+/// takes the first. Anything else is asked again.
+pub fn parse_choice(input: &str, count: usize) -> Option<usize> {
+    let t = input.trim();
+    if t.is_empty() {
+        return (count > 0).then_some(0);
+    }
+    t.parse::<usize>()
+        .ok()
+        .filter(|n| (1..=count).contains(n))
+        .map(|n| n - 1)
+}
+
+/// Every Fude that may take the files, or why none does.
+///
+/// With `to`, only that machine is asked. Otherwise the candidates are
+/// walked in order; the registered machines form one group in which every
+/// one that answers is returned, because nothing on this host says which
+/// of them the user is sitting at — a Tailscale SSH session carries no
+/// trace of where it came from.
+pub fn reachable(
+    candidates: &[Candidate],
+    guis: &[crate::guis::Gui],
+    to: Option<&str>,
+    hello_for: impl Fn(&Candidate) -> Message,
+) -> Result<Vec<Reached>, String> {
+    let failed = |reasons: Vec<String>| {
         let mut msg = String::from("no Fude GUI reachable:");
         for r in reasons {
             msg.push_str("\n  ");
             msg.push_str(&r);
         }
         msg
-    })
+    };
+    let named = |conn: Connected| Reached {
+        name: crate::guis::gui_for(guis, &conn.via).map(gui_label),
+        conn,
+    };
+    if let Some(to) = to.map(str::trim).filter(|t| !t.is_empty()) {
+        let gui = pick_named(guis, to)?;
+        let cand = Candidate::Tcp(format!("127.0.0.1:{}", gui.port));
+        return discover::connect_with(&[cand], &hello_for)
+            .map(|c| vec![named(c)])
+            .map_err(failed);
+    }
+    let mut reasons = Vec::new();
+    let mut answered = Vec::new();
+    let mut asked_group = false;
+    for cand in candidates {
+        let registered = crate::guis::gui_for(guis, cand).is_some();
+        if !registered && asked_group && !answered.is_empty() {
+            break;
+        }
+        asked_group |= registered;
+        match discover::connect_with(std::slice::from_ref(cand), &hello_for) {
+            Ok(c) if registered => answered.push(named(c)),
+            Ok(c) => return Ok(vec![named(c)]),
+            Err(mut r) => reasons.append(&mut r),
+        }
+    }
+    if answered.is_empty() {
+        Err(failed(reasons))
+    } else {
+        Ok(answered)
+    }
+}
+
+/// Settle on one of several Fudes. With a terminal the user is asked;
+/// without one (an editor command in a script) the first is taken, and
+/// said so.
+fn choose(mut reached: Vec<Reached>) -> Result<Reached, String> {
+    use std::io::IsTerminal;
+    if reached.len() <= 1 {
+        return reached.pop().ok_or_else(|| "no Fude GUI reachable".into());
+    }
+    let names: Vec<String> = reached
+        .iter()
+        .map(|r| r.name.clone().unwrap_or_else(|| r.conn.via.to_string()))
+        .collect();
+    let hint = format!("--to NAME or {}=NAME", TO_ENV);
+    if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
+        eprintln!(
+            "fude-cli: Fude answers on {} machines ({}); using {} (choose with {})",
+            names.len(),
+            names.join(", "),
+            names[0],
+            hint
+        );
+        return Ok(reached.swap_remove(0));
+    }
+    eprintln!("fude-cli: Fude answers on {} machines:", names.len());
+    for (n, name) in names.iter().enumerate() {
+        eprintln!("  {}) {}", n + 1, name);
+    }
+    for _ in 0..3 {
+        eprint!(
+            "Open on which? [1-{}, Enter = 1] (skip this with {}): ",
+            names.len(),
+            hint
+        );
+        let mut line = String::new();
+        match std::io::stdin().read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        if let Some(n) = parse_choice(&line, names.len()) {
+            return Ok(reached.swap_remove(n));
+        }
+    }
+    Err("no machine chosen".into())
+}
+
+fn hello_maker() -> (Vec<crate::guis::Gui>, impl Fn(&Candidate) -> Message) {
+    let config_dir = fude_core::config_dir().ok();
+    let guis = config_dir
+        .as_deref()
+        .map(|d| crate::guis::list(&crate::guis::dir(d)))
+        .unwrap_or_default();
+    let shared = config_dir
+        .as_deref()
+        .and_then(|d| fude_core::token::read(&d.join(fude_core::token::TOKEN_FILE)).ok())
+        .flatten();
+    let env = std::env::var(fude_core::token::TOKEN_ENV).ok();
+    let cwd = std::env::current_dir()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string());
+    let host = host_name();
+    let for_hello = guis.clone();
+    let hello_for = move |cand: &Candidate| Message::Hello {
+        protocol: PROTOCOL_VERSION,
+        cwd: cwd.clone(),
+        cli_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        host: Some(host.clone()),
+        token: token_for(cand, &for_hello, env.clone(), shared.clone()),
+    };
+    (guis, hello_for)
+}
+
+/// `--to`, else `$FUDE_TO`.
+pub fn wanted_machine(flag: Option<&str>) -> Option<String> {
+    flag.map(str::to_string)
+        .or_else(|| std::env::var(TO_ENV).ok())
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+}
+
+/// Every Fude that answers (for `--check`).
+pub fn connect_all(candidates: &[Candidate], to: Option<&str>) -> Result<Vec<Reached>, String> {
+    let (guis, hello_for) = hello_maker();
+    reachable(candidates, &guis, to, hello_for)
+}
+
+/// Connect, or explain why not. `candidates` are tried in order; when
+/// several machines answer, the user picks.
+pub fn connect(candidates: &[Candidate], to: Option<&str>) -> Result<Reached, String> {
+    choose(connect_all(candidates, to)?)
 }
 
 /// Serve `paths` over `conn` until their tabs are closed. Returns the exit
@@ -207,7 +413,7 @@ impl Side for NoWatch {
 
 /// Re-run ourselves detached so the shell gets its prompt back while the
 /// agent keeps serving files. Output goes to the log file.
-pub fn detach(args: &Args, log: &Path) -> Result<(), String> {
+pub fn detach(args: &Args, log: &Path, via: &Candidate) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     if let Some(dir) = log.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -226,6 +432,13 @@ pub fn detach(args: &Args, log: &Path) -> Result<(), String> {
     }
     cmd.arg("--");
     cmd.args(&args.paths);
+    // The child must reach the Fude this process settled on, not go looking
+    // again: it has no terminal to ask on.
+    match via {
+        Candidate::Tcp(addr) => cmd.env(discover::ADDR_ENV, addr),
+        Candidate::Socket(path) => cmd.env(ipc::SOCKET_ENV, path),
+    };
+    cmd.env_remove(TO_ENV);
     cmd.stdin(std::process::Stdio::null())
         .stdout(open_log()?)
         .stderr(open_log()?);
@@ -240,6 +453,176 @@ pub fn detach(args: &Args, log: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn gui(port: u16, name: &str) -> crate::guis::Gui {
+        crate::guis::Gui {
+            port,
+            token: format!("tok-{}", port),
+            name: name.into(),
+        }
+    }
+
+    #[test]
+    fn a_machine_is_picked_by_name_or_port() {
+        let guis = [gui(47900, "home-wsl"), gui(48000, "gpdmd"), gui(48100, "")];
+        assert_eq!(pick_named(&guis, "GPDMD").unwrap().port, 48000);
+        assert_eq!(pick_named(&guis, " home-wsl ").unwrap().port, 47900);
+        assert_eq!(pick_named(&guis, "48100").unwrap().port, 48100);
+        let e = pick_named(&guis, "laptop").unwrap_err();
+        assert!(
+            e.contains("'laptop'") && e.contains("home-wsl, gpdmd, port 48100"),
+            "{e}"
+        );
+        let e = pick_named(&[], "laptop").unwrap_err();
+        assert!(e.contains("fude setup"), "{e}");
+    }
+
+    #[test]
+    fn the_answer_to_which_one_is_a_number_in_range() {
+        assert_eq!(parse_choice("1\n", 2), Some(0));
+        assert_eq!(parse_choice(" 2 ", 2), Some(1));
+        assert_eq!(parse_choice("\n", 2), Some(0));
+        assert_eq!(parse_choice("0", 2), None);
+        assert_eq!(parse_choice("3", 2), None);
+        assert_eq!(parse_choice("gpdmd", 2), None);
+        assert_eq!(parse_choice("", 0), None);
+    }
+
+    /// A Fude that welcomes whoever connects, `times` times, on its own port.
+    fn fake_fude(version: &'static str, times: usize) -> (u16, thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            for _ in 0..times {
+                let (stream, _) = listener.accept().unwrap();
+                let mut r = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                r.read_line(&mut line).unwrap();
+                let mut w = stream;
+                w.write_all(
+                    ipc::encode(&Message::Welcome {
+                        protocol: PROTOCOL_VERSION,
+                        gui_version: Some(version.into()),
+                    })
+                    .as_bytes(),
+                )
+                .unwrap();
+            }
+        });
+        (port, server)
+    }
+
+    fn plain_hello(_: &Candidate) -> Message {
+        Message::Hello {
+            protocol: PROTOCOL_VERSION,
+            cwd: None,
+            cli_version: None,
+            host: None,
+            token: None,
+        }
+    }
+
+    fn tcp(port: u16) -> Candidate {
+        Candidate::Tcp(format!("127.0.0.1:{}", port))
+    }
+
+    #[test]
+    fn every_registered_machine_that_answers_is_offered() {
+        let (a, sa) = fake_fude("a", 1);
+        let (b, sb) = fake_fude("b", 1);
+        // One more is registered but its forward is down.
+        let dead = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        // The shared port answers too, yet is not asked: machines answered.
+        let (shared, _never) = fake_fude("shared", 1);
+        let guis = [gui(a, "home-wsl"), gui(dead, "laptop"), gui(b, "gpdmd")];
+        let cands = [tcp(a), tcp(dead), tcp(b), tcp(shared)];
+        let got = reachable(&cands, &guis, None, plain_hello).unwrap();
+        let names: Vec<_> = got.iter().map(|r| r.name.clone().unwrap()).collect();
+        assert_eq!(names, ["home-wsl", "gpdmd"]);
+        assert_eq!(got[1].describe(), "Fude b on gpdmd");
+        sa.join().unwrap();
+        sb.join().unwrap();
+    }
+
+    #[test]
+    fn naming_a_machine_asks_only_that_one() {
+        let (b, sb) = fake_fude("b", 1);
+        // `a` is registered and would answer, but must not even be dialled:
+        // its listener is never accepted on.
+        let quiet = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let a = quiet.local_addr().unwrap().port();
+        let guis = [gui(a, "home-wsl"), gui(b, "gpdmd")];
+        let cands = [tcp(a), tcp(b)];
+        let got = reachable(&cands, &guis, Some("gpdmd"), plain_hello).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].name.as_deref(), Some("gpdmd"));
+        sb.join().unwrap();
+        quiet.set_nonblocking(true).unwrap();
+        assert!(quiet.accept().is_err(), "the other machine was contacted");
+        // An unknown name is an error, not a fallback to somebody's Fude.
+        let e = reachable(&cands, &guis, Some("laptop"), plain_hello).unwrap_err();
+        assert!(e.contains("known: home-wsl, gpdmd"), "{e}");
+    }
+
+    #[test]
+    fn without_registered_answers_the_older_routes_still_work() {
+        let (shared, ss) = fake_fude("shared", 1);
+        let dead = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let guis = [gui(dead, "gpdmd")];
+        let got = reachable(&[tcp(dead), tcp(shared)], &guis, None, plain_hello).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].name, None);
+        assert_eq!(
+            got[0].describe(),
+            format!("Fude shared via tcp://127.0.0.1:{}", shared)
+        );
+        ss.join().unwrap();
+        // Nothing anywhere: every candidate's reason is reported.
+        let e = reachable(&[tcp(dead)], &guis, None, plain_hello).unwrap_err();
+        assert!(
+            e.starts_with("no Fude GUI reachable:") && e.contains(&dead.to_string()),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn each_machine_is_shown_its_own_token() {
+        let guis = [crate::guis::Gui {
+            port: 47900,
+            token: "tok-home".into(),
+            name: "home".into(),
+        }];
+        let mine = Candidate::Tcp("127.0.0.1:47900".into());
+        let old = Candidate::Tcp("127.0.0.1:47821".into());
+        let shared = Some("tok-shared".to_string());
+        assert_eq!(
+            token_for(&mine, &guis, None, shared.clone()).as_deref(),
+            Some("tok-home")
+        );
+        // The shared port, and anything unregistered, keep the old token.
+        assert_eq!(
+            token_for(&old, &guis, None, shared.clone()).as_deref(),
+            Some("tok-shared")
+        );
+        assert_eq!(token_for(&old, &guis, None, None), None);
+        // An explicit token wins everywhere; a blank one is no token.
+        assert_eq!(
+            token_for(&mine, &guis, Some(" tok-env ".into()), shared.clone()).as_deref(),
+            Some("tok-env")
+        );
+        assert_eq!(
+            token_for(&mine, &guis, Some("  ".into()), shared).as_deref(),
+            Some("tok-home")
+        );
+    }
 
     #[test]
     fn host_name_prefers_the_override() {

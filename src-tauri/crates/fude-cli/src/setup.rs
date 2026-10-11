@@ -499,8 +499,66 @@ fn scp(src: &Path, host: &str, dest: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// What a host is asked to find out which Fude its `fude-cli` reaches.
-const REMOTE_CHECK: &str = "PATH=\"$HOME/.local/bin:$PATH\" fude-cli --check";
+/// What a host is asked to find out which Fude its `fude-cli` reaches:
+/// this machine's when its `port` is known, else whichever answers.
+pub fn remote_check(port: Option<u16>) -> String {
+    let pin = port
+        .map(|p| format!("FUDE_GUI_ADDR=127.0.0.1:{} ", p))
+        .unwrap_or_default();
+    format!("PATH=\"$HOME/.local/bin:$PATH\" {}fude-cli --check", pin)
+}
+
+/// The port this machine forwards for a host, read back from `ssh -G`: the
+/// `remoteforward` whose far end is this machine's Fude. With several (an
+/// old shared one and the machine's own), the last listed is the newest.
+pub fn forward_port(ssh_g: &str, target: &str) -> Option<u16> {
+    ssh_g
+        .lines()
+        .filter_map(|l| {
+            let mut parts = l.split_whitespace();
+            let key = parts.next()?;
+            let (port, dest) = (parts.next()?, parts.next()?);
+            (key.eq_ignore_ascii_case("remoteforward") && dest == target)
+                .then(|| port.rsplit(':').next()?.parse().ok())
+                .flatten()
+        })
+        .max_by_key(|p: &u16| *p != DEFAULT_PORT)
+}
+
+/// `config` without `line` in the blocks of `hosts`, and how many were
+/// dropped. Used to retire the shared-port forward setup itself wrote once
+/// the machine has a port of its own; other hosts' blocks are not touched,
+/// since their `fude-cli` may still be an old one.
+pub fn drop_block_line(config: &str, hosts: &[String], line: &str) -> (String, usize) {
+    let mut dropped = 0;
+    let mut in_block = false;
+    let mut out: Vec<&str> = Vec::new();
+    for l in config.lines() {
+        let t = l.trim_start();
+        let lower = t.to_ascii_lowercase();
+        if lower.starts_with("host ") {
+            in_block = t[5..]
+                .split_whitespace()
+                .any(|p| hosts.iter().any(|h| h == p));
+        } else if lower.starts_with("match ") {
+            in_block = false;
+        } else if in_block && t.trim_end() == line {
+            dropped += 1;
+            continue;
+        }
+        out.push(l);
+    }
+    let mut text = out.join("\n");
+    if config.ends_with('\n') {
+        text.push('\n');
+    }
+    (text, dropped)
+}
+
+/// The name this machine goes by on the hosts it sets up.
+fn machine_name() -> String {
+    crate::run::host_name()
+}
 
 /// `setup HOST --check`: change nothing, only report which Fude answers
 /// `fude-cli` on `host`. Returns the exit code.
@@ -509,7 +567,12 @@ pub fn check(host: &str) -> i32 {
         eprintln!("fude-cli setup: usage: fude-cli setup <ssh-host> --check");
         return 2;
     }
-    match ssh(host, REMOTE_CHECK) {
+    // Ask about this machine's own forward, not whichever Fude answers.
+    let port = fude_core::config_dir().ok().and_then(|d| {
+        let out = Command::new("ssh").args(["-G", host]).output().ok()?;
+        forward_port(&String::from_utf8_lossy(&out.stdout), &forward_target(&d))
+    });
+    match ssh(host, &remote_check(port)) {
         Ok(s) => {
             println!("{}", s);
             0
@@ -522,7 +585,7 @@ pub fn check(host: &str) -> i32 {
 }
 
 /// Run the whole setup. Returns the exit code.
-pub fn run(host: &str, port: u16, share: bool) -> i32 {
+pub fn run(host: &str, port: Option<u16>, share: bool) -> i32 {
     match run_inner(host, port, share) {
         Ok(()) => 0,
         Err(e) => {
@@ -532,7 +595,7 @@ pub fn run(host: &str, port: u16, share: bool) -> i32 {
     }
 }
 
-fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
+fn run_inner(host: &str, port: Option<u16>, share: bool) -> Result<(), String> {
     if host.is_empty() || host.starts_with('-') {
         return Err("usage: fude-cli setup <ssh-host>".into());
     }
@@ -541,8 +604,11 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
     // 1. token
     let config_dir = fude_core::config_dir()?;
     let token_path = config_dir.join(fude_core::token::TOKEN_FILE);
-    fude_core::token::load_or_create(&token_path)?;
+    let token = fude_core::token::load_or_create(&token_path)?;
     Step("token").ok(&token_path.display().to_string());
+    // A port of this machine's own, so that other machines using the same
+    // host neither take its forward nor lose theirs.
+    let port = port.unwrap_or_else(|| crate::guis::port_for(&token));
 
     // 2. ssh config
     let target = forward_target(&config_dir);
@@ -571,10 +637,19 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
         .map(|j| tailscale_names(&j, host))
         .unwrap_or_default();
     let (updated, ts_added, _) = ensure_alias_lines(&updated, &ts_names, &wants);
+    // The forward on the port every machine used to share is what made two
+    // machines collide on this host: retire the one setup wrote.
+    let mut blocks = vec![host.to_string()];
+    blocks.extend(ts_names.iter().cloned());
+    let (updated, retired) = if port == DEFAULT_PORT {
+        (updated, 0)
+    } else {
+        drop_block_line(&updated, &blocks, &forward_line(DEFAULT_PORT, &target))
+    };
     let ts_changed = !ts_added.is_empty();
     let ts_only = host_added.is_empty() && ts_changed;
     let added = if ts_only { ts_added } else { host_added };
-    if added.is_empty() {
+    if added.is_empty() && retired == 0 {
         Step("ssh config").ok("already set up");
     } else {
         std::fs::create_dir_all(&ssh_dir).map_err(|e| e.to_string())?;
@@ -586,7 +661,9 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
         let _ = fude_core::paths::set_file_permissions(&cfg_path);
         Step("ssh config").ok(&format!(
             "{} (backup: config.fude-bak)",
-            if ts_only {
+            if added.is_empty() {
+                format!("updated `Host {}`", host)
+            } else if ts_only {
                 format!("appended `Host {}` for `tailscale ssh`", ts_names.join(" "))
             } else if appended {
                 format!("appended `Host {}`", host)
@@ -604,6 +681,13 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
                 ts_names.join(" ")
             );
         }
+        if retired > 0 {
+            eprintln!(
+                "    removed the forward on port {} that every machine used to share; \
+                 this machine now has port {} to itself",
+                DEFAULT_PORT, port
+            );
+        }
         if added.iter().any(|l| l.starts_with("ControlMaster")) {
             eprintln!(
                 "    ssh sessions to {} now share one connection, so each of them reaches Fude \
@@ -611,6 +695,19 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
                 host, host, host
             );
         }
+    }
+
+    // Sessions already open ride a shared connection made before this run;
+    // give that connection the forward too, or they would have to be closed
+    // and reopened to reach Fude. Nothing to do (and no harm) without one.
+    let forward = format!("{}:{}", port, target);
+    for name in &blocks {
+        let _ = Command::new("ssh")
+            .args(["-O", "forward", "-R", &forward, name])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 
     // A tailnet machine ssh has not met: introduce it, as `tailscale ssh` would.
@@ -647,7 +744,7 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
     // 3. remote side
     let uname = ssh(
         host,
-        "mkdir -p ~/.config/fude ~/.local/bin && uname -sm && (echo $PATH | tr : '\\n' | grep -qx \"$HOME/.local/bin\" && echo PATH_OK || echo PATH_MISSING)",
+        "mkdir -p ~/.config/fude/guis ~/.local/bin && chmod 700 ~/.config/fude/guis && uname -sm && (echo $PATH | tr : '\\n' | grep -qx \"$HOME/.local/bin\" && echo PATH_OK || echo PATH_MISSING)",
     )
     .map_err(|e| match unresolved_hint(&e, host).or_else(|| host_key_hint(&e, host)) {
         Some(hint) => format!("{}\n  {}", e, hint),
@@ -658,9 +755,18 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
     let path_ok = lines.next() == Some("PATH_OK");
     Step("remote").ok(&format!("{} ({})", host, remote_uname));
 
-    scp(&token_path, host, "~/.config/fude/gui-token")?;
-    ssh(host, "chmod 600 ~/.config/fude/gui-token")?;
-    Step("token copied").ok("~/.config/fude/gui-token");
+    // This machine's own entry: the host's single `gui-token` was
+    // overwritten by whichever machine ran setup last.
+    let entry = format!("~/.config/fude/guis/{}", port);
+    let staged = config_dir.join(format!("guis-entry-{}.tmp", std::process::id()));
+    std::fs::write(&staged, crate::guis::entry_text(&token, &machine_name()))
+        .map_err(|e| format!("cannot write {}: {}", staged.display(), e))?;
+    let _ = fude_core::paths::set_file_permissions(&staged);
+    let copied = scp(&staged, host, &entry);
+    let _ = std::fs::remove_file(&staged);
+    copied?;
+    ssh(host, &format!("chmod 600 {}", entry))?;
+    Step("token copied").ok(&format!("{} (as {})", entry, machine_name()));
 
     let local = local_uname_sm();
     if remote_uname == local {
@@ -684,7 +790,7 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
     }
 
     // 4. verify through the forward (a fresh ssh picks up the new config)
-    let check = ssh(host, REMOTE_CHECK);
+    let check = ssh(host, &remote_check(Some(port)));
     match check {
         Ok(s) => Step("check").ok(&s),
         Err(e) => {
@@ -943,6 +1049,65 @@ mod tests {
             host_key_hint("ssh k16 failed: Permission denied", "k16"),
             None
         );
+    }
+
+    #[test]
+    fn the_check_asks_for_this_machine_when_its_port_is_known() {
+        assert_eq!(
+            remote_check(Some(47900)),
+            "PATH=\"$HOME/.local/bin:$PATH\" FUDE_GUI_ADDR=127.0.0.1:47900 fude-cli --check"
+        );
+        assert_eq!(
+            remote_check(None),
+            "PATH=\"$HOME/.local/bin:$PATH\" fude-cli --check"
+        );
+    }
+
+    #[test]
+    fn the_forwarded_port_is_read_back_from_ssh() {
+        let g = format!(
+            "user u\nremoteforward 47821 {SOCK}\nremoteforward 9000 /other.sock\n\
+             remoteforward 47900 {SOCK}\nremoteforward [127.0.0.1]:5 x\n"
+        );
+        // The machine's own port wins over the old shared one.
+        assert_eq!(forward_port(&g, SOCK), Some(47900));
+        assert_eq!(forward_port(&g, "/other.sock"), Some(9000));
+        assert_eq!(
+            forward_port(&format!("remoteforward 47821 {SOCK}\n"), SOCK),
+            Some(47821)
+        );
+        assert_eq!(
+            forward_port("remoteforward 127.0.0.1:47901 /s\n", "/s"),
+            Some(47901)
+        );
+        assert_eq!(forward_port("user u\n", SOCK), None);
+        assert_eq!(forward_port("remoteforward abc /s\n", "/s"), None);
+    }
+
+    #[test]
+    fn the_shared_forward_is_retired_only_in_this_hosts_blocks() {
+        let old = forward_line(47821, SOCK);
+        let cfg = format!(
+            "Host k16\n  {old}\n  User u\n\nHost other\n  {old}\n\n\
+             Host k16.ts.net k16.ts.net.\n    {old}\nMatch host k16\n  {old}\n"
+        );
+        let hosts = ["k16".to_string(), "k16.ts.net".to_string()];
+        let (out, n) = drop_block_line(&cfg, &hosts, &old);
+        assert_eq!(n, 2);
+        assert_eq!(
+            out,
+            format!(
+                "Host k16\n  User u\n\nHost other\n  {old}\n\n\
+                 Host k16.ts.net k16.ts.net.\nMatch host k16\n  {old}\n"
+            )
+        );
+        // A forward the user pointed elsewhere is not setup's to remove.
+        let theirs = "Host k16\n  RemoteForward 47821 /somewhere/else.sock\n";
+        assert_eq!(
+            drop_block_line(theirs, &hosts, &old),
+            (theirs.to_string(), 0)
+        );
+        assert_eq!(drop_block_line("", &hosts, &old), (String::new(), 0));
     }
 
     #[test]

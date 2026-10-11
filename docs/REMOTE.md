@@ -95,11 +95,16 @@ fude setup k16               # k16 は ~/.ssh/config のホスト名（無けれ
 
 これで次が終わる:
 
-1. `~/.ssh/config` の `Host k16` に `RemoteForward 47821 ~/.config/fude/gui.sock` を追記
-   （元のファイルは `~/.ssh/config.fude-bak` に退避）
-2. k16 に `~/.config/fude/gui-token`（手元の Fude が作った鍵）と `~/.local/bin/fude-cli` を配置
+1. `~/.ssh/config` の `Host k16` に `RemoteForward <ポート> ~/.config/fude/gui.sock` を追記
+   （元のファイルは `~/.ssh/config.fude-bak` に退避）。ポートは手元の PC ごとに決まる番号（47822〜48821 のどれか。
+   `--port N` で指定も可）
+2. k16 に `~/.config/fude/guis/<ポート>`（手元の Fude が作った鍵と、手元の PC の名前）と `~/.local/bin/fude-cli` を配置
    （手元と同じ OS/CPU なら手元のバイナリをコピー、違えば GitHub Releases から取得）
-3. ssh 越しに接続確認（`✓ check: Fude 0.8.0 answers via tcp://127.0.0.1:47821`）
+3. ssh 越しに接続確認（`✓ check: Fude 0.8.9 on home answers via tcp://127.0.0.1:47985`）
+
+ポートと鍵が PC ごとに分かれているので、複数の PC から同じホストをセットアップしても互いを壊さない
+（0.8.8 までは全 PC が 47821 番と 1 つの `gui-token` を共有していて、後からセットアップした PC が鍵を上書きし、
+先に ssh した PC がポートを占有していた。0.8.9 以降でセットアップし直すと、その PC の分は自分のポートへ移る）。
 
 あわせて、そのホストへの **ssh の接続共有**（`ControlMaster auto` / `ControlPath ~/.ssh/fude-%C` /
 `ControlPersist 10m`）を `Host k16` に足す。転送用のポートを持てる ssh 接続は 1 本だけなので、共有しないと
@@ -134,6 +139,29 @@ fude-cli --wait notes.md     # タブを閉じるまで待つ（k16 側の $EDIT
 fude-cli --check             # 手元の Fude にどの経路で届いているか確認
 ```
 
+開いた先は端末に出る（`fude-cli: opened in Fude 0.8.9 on home`）。Fude を開いたまま忘れていた別の PC に
+開いてしまっても、ここで気づける。
+
+#### 複数の PC の Fude が応答するとき
+
+同じホストをセットアップした PC が 2 台以上あり、そのどれもが Fude を起動して ssh で繋いでいる場合、
+`fude-cli` は一覧を出して番号を聞く。
+
+```
+fude-cli: Fude answers on 2 machines:
+  1) gpdmd
+  2) home
+Open on which? [1-2, Enter = 1] (skip this with --to NAME or FUDE_TO=NAME):
+```
+
+- `fude-cli --to gpdmd notes.md` … 聞かれずにその PC へ開く
+- `export FUDE_TO=gpdmd` … そのシェルではずっとその PC へ開く（`.bashrc` に書かず、セッションごとに決めるのが無難）
+- 端末が無いとき（スクリプトから `$EDITOR` として呼ばれた等）は聞けないので、最後にセットアップした PC へ開き、その旨を出す
+- 名前は各 PC のホスト名（セットアップ時に `as home` と表示される）。`fude-cli --check` で応答している PC を一覧できる
+
+応答するのが 1 台だけなら、何も聞かずにその PC へ開く。どの PC から ssh したセッションかは、ホスト側からは
+分からない（Tailscale SSH は接続元の情報をセッションに渡さない）ので、自動では選べない。
+
 コマンド名は `fude-cli`（ハイフン）。ssh 先にも Fude 本体（0.8.5 以降）を入れてある場合は、画面が無いことを検出して
 `fude notes.md` が `fude-cli notes.md` と同じ動きになる（`fude cli notes.md` と空白で打っても同じ）。
 古い Fude 本体が入っているホストで `fude FILE` と打つと、ウィンドウを開こうとして `Failed to initialize GTK` で落ちる。
@@ -144,9 +172,9 @@ fude-cli --check             # 手元の Fude にどの経路で届いている�
 
 ### 仕組み（知らなくても使える）
 
-ssh が k16 のループバック 47821 番ポートを手元の `~/.config/fude/gui.sock` へ転送する。
-k16 の `fude-cli` はそのポートに繋ぎ、鍵（`gui-token`）を見せてから「このファイルを開いて」と頼む。
-以後、手元の Fude からの読み書き要求に `fude-cli` が答える。47821 番は k16 上の他のユーザからも
+ssh が k16 のループバックのポート（PC ごとの番号）を手元の `~/.config/fude/gui.sock` へ転送する。
+k16 の `fude-cli` は `~/.config/fude/guis/` に登録された各 PC のポートに繋ぎ、その PC の鍵を見せてから
+「このファイルを開いて」と頼む。以後、手元の Fude からの読み書き要求に `fude-cli` が答える。このポートは k16 上の他のユーザからも
 繋げるので、鍵が合わない接続は GUI が拒否する。
 
 ## 3. ssh を使わない構成
@@ -247,7 +275,8 @@ PowerShell で `fude-cli.exe setup k16`（インストール先の `fude-cli.exe
 | `FUDE_CLI_EXE` | fude bridge | Windows 側の `fude-cli.exe` の場所 |
 | `FUDE_GUI_SOCK` | GUI / fude-cli | Unix ソケットの場所（既定 `~/.config/fude/gui.sock`） |
 | `FUDE_GUI_ADDR` | fude-cli | 繋ぎに行く TCP アドレス（指定すると他の候補は探さない） |
-| `FUDE_GUI_TOKEN` | fude-cli | 鍵（指定が無ければ `~/.config/fude/gui-token`） |
+| `FUDE_GUI_TOKEN` | fude-cli | 鍵（指定が無ければ `~/.config/fude/guis/<ポート>` のもの、それも無ければ `~/.config/fude/gui-token`） |
+| `FUDE_TO` | fude-cli | 複数の PC の Fude が応答するときに開く先の PC 名（`--to NAME` と同じ） |
 | `FUDE_HOST` | fude-cli | GUI に名乗るホスト名（既定はマシンのホスト名。タブに `host:/path` と出る） |
 
 `fude-cli` が GUI を探す順: `FUDE_GUI_SOCK` → `FUDE_GUI_ADDR` → `~/.cache/fude/gui/*.sock`（Unix ソケット転送）→
@@ -265,6 +294,7 @@ PowerShell で `fude-cli.exe setup k16`（インストール先の `fude-cli.exe
 | `tcp://127.0.0.1:47821: Connection refused` | ssh の転送が張られていない。`~/.ssh/config` の `RemoteForward` 行と、`ssh` でログインし直したか。`tailscale ssh <host>` で入っているなら `fude setup <host>` をやり直す（Tailscale の名前用の設定が追加される） |
 | セットアップで `Could not resolve hostname k16` | その PC の ssh が `k16` という名前を引けない（WSL が自前の DNS 設定を使っていて Tailscale の短い名前が通らない、など）。相手が Tailscale 上にいれば、Fude 0.8.8 以降の `fude setup` が `~/.ssh/config` の `Host k16` に `HostName`（Tailscale の名前、引けなければアドレス）を自動で足す。Tailscale 以外なら `Host k16` の下に `HostName <アドレス>` を自分で書く |
 | セットアップで `Host key verification failed` | その PC の ssh が相手にまだ一度も繋いだことがなく、「この鍵を信用するか」の質問にセットアップが答えられない（`tailscale ssh` でしか入ったことがない PC で起きる）。端末で一度 `ssh k16` を実行して `yes` と答えてから、セットアップをやり直す。相手が Tailscale SSH を動かしていれば、Fude 0.8.9 以降の `fude setup` は Tailscale が保証するホスト鍵を `~/.ssh/known_hosts` に自動で登録する |
+| 別の PC で開いてしまう／2 台目の PC から使うと TUI になる | 0.8.8 以前のセットアップは全 PC が同じポートと鍵を使う。使う PC すべてを 0.8.9 以降にして、それぞれでセットアップ（設定画面の「更新」）をやり直す。以後は `fude-cli` が開いた先を表示し、複数応答するときは選べる |
 | `remote port forwarding failed for listen port 47821` | 接続共有が無い状態で同じホストへ ssh を複数本張ると出る（転送を持てるのは最初の 1 本だけ）。`fude setup k16` をやり直すと接続共有が入り、解消する。共有を入れる前から開いていたセッションは閉じて入り直す。他人や別のソフトが 47821 を使っている場合は `fude setup k16 --port 47822` で別ポートに |
 | Fude 側に「k16 との接続が切れました」 | ssh を閉じた／`fude-cli` を止めた。タブは残り、未保存分は暫定保存にある。繋ぎ直してもう一度開く |
 | ssh 先で `Failed to initialize gtk backend` | `fude`（GUI 本体）を画面の無いホストで起動した。`fude-cli FILE` を使う（Fude 0.8.5 以降の `fude FILE` は自動で `fude-cli` に切り替わる） |

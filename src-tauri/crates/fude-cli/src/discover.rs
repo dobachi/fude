@@ -4,8 +4,10 @@
 //! ssh `RemoteForward` created under `~/.cache/fude/gui/` (newest first — a
 //! stale one from a dead connection is unlinked when it refuses); the TCP
 //! port an ssh `RemoteForward 47821 …` listens on (sshd creates Unix
-//! sockets as root on some systems, which makes TCP the portable choice);
-//! finally the local GUI's own socket.
+//! sockets as root on some systems, which makes TCP the portable choice) —
+//! first the port of each machine registered in `guis/` (see `guis.rs`),
+//! then the one port every machine shared before that; finally the local
+//! GUI's own socket.
 
 use fude_core::ipc::{self, socket_name, Message, SOCKET_ENV};
 use interprocess::local_socket::{prelude::*, Stream};
@@ -46,8 +48,9 @@ pub fn forward_dir(cache_dir: &Path) -> PathBuf {
     cache_dir.join("fude").join("gui")
 }
 
-/// Candidates in the order to try them.
-pub fn candidates(forward_dir: &Path, local_socket: &Path) -> Vec<Candidate> {
+/// Candidates in the order to try them. `registered` are the ports of the
+/// machines set up against this host, in the order to prefer them.
+pub fn candidates(forward_dir: &Path, local_socket: &Path, registered: &[u16]) -> Vec<Candidate> {
     if let Some(p) = std::env::var_os(SOCKET_ENV).filter(|p| !p.is_empty()) {
         return vec![Candidate::Socket(PathBuf::from(p))];
     }
@@ -75,6 +78,11 @@ pub fn candidates(forward_dir: &Path, local_socket: &Path) -> Vec<Candidate> {
         .into_iter()
         .map(|(_, p)| Candidate::Socket(p))
         .collect();
+    out.extend(
+        registered
+            .iter()
+            .map(|port| Candidate::Tcp(format!("127.0.0.1:{}", port))),
+    );
     out.push(Candidate::Tcp(DEFAULT_TCP_ADDR.to_string()));
     out.push(Candidate::Socket(local_socket.to_path_buf()));
     out
@@ -96,10 +104,20 @@ impl std::fmt::Debug for Connected {
 
 /// Connect to the first candidate that answers `hello` with `welcome`.
 /// Returns the reasons each candidate was rejected on failure.
+#[cfg(test)]
 pub fn connect_any(cands: &[Candidate], hello: &Message) -> Result<Connected, Vec<String>> {
+    connect_with(cands, |_| hello.clone())
+}
+
+/// Like [`connect_any`], with the `hello` chosen per candidate: each
+/// machine expects its own token.
+pub fn connect_with(
+    cands: &[Candidate],
+    hello_for: impl Fn(&Candidate) -> Message,
+) -> Result<Connected, Vec<String>> {
     let mut reasons = Vec::new();
     for cand in cands {
-        match try_one(cand, hello) {
+        match try_one(cand, &hello_for(cand)) {
             Ok(c) => return Ok(c),
             Err(e) => {
                 let refused = e.kind() == io::ErrorKind::ConnectionRefused;
@@ -271,7 +289,7 @@ mod tests {
 
         std::env::remove_var(SOCKET_ENV);
         std::env::remove_var(ADDR_ENV);
-        let c = candidates(&fwd, &local);
+        let c = candidates(&fwd, &local, &[]);
         assert_eq!(
             c,
             vec![
@@ -284,12 +302,12 @@ mod tests {
 
         std::env::set_var(ADDR_ENV, "10.0.0.1:1234");
         assert_eq!(
-            candidates(&fwd, &local),
+            candidates(&fwd, &local, &[]),
             vec![Candidate::Tcp("10.0.0.1:1234".into())]
         );
         std::env::set_var(SOCKET_ENV, "/x/override.sock");
         assert_eq!(
-            candidates(&fwd, &local),
+            candidates(&fwd, &local, &[]),
             vec![Candidate::Socket(PathBuf::from("/x/override.sock"))]
         );
         std::env::remove_var(SOCKET_ENV);
@@ -301,7 +319,7 @@ mod tests {
         let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var(SOCKET_ENV);
         std::env::remove_var(ADDR_ENV);
-        let c = candidates(Path::new("/nonexistent/dir"), Path::new("/l.sock"));
+        let c = candidates(Path::new("/nonexistent/dir"), Path::new("/l.sock"), &[]);
         assert_eq!(
             c,
             vec![
@@ -391,6 +409,84 @@ mod tests {
         assert_eq!(c.gui_version.as_deref(), Some("t"));
         assert_eq!(c.via, Candidate::Tcp(addr.to_string()));
         server.join().unwrap();
+    }
+
+    #[test]
+    fn registered_machines_come_before_the_shared_port() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var(SOCKET_ENV);
+        std::env::remove_var(ADDR_ENV);
+        let local = Path::new("/l.sock");
+        assert_eq!(
+            candidates(Path::new("/nonexistent/dir"), local, &[48000, 47900]),
+            vec![
+                Candidate::Tcp("127.0.0.1:48000".into()),
+                Candidate::Tcp("127.0.0.1:47900".into()),
+                Candidate::Tcp(DEFAULT_TCP_ADDR.into()),
+                Candidate::Socket(local.to_path_buf()),
+            ]
+        );
+        // An explicit address still stands alone.
+        std::env::set_var(ADDR_ENV, "127.0.0.1:47900");
+        assert_eq!(
+            candidates(Path::new("/nonexistent/dir"), local, &[48000, 47900]),
+            vec![Candidate::Tcp("127.0.0.1:47900".into())]
+        );
+        std::env::remove_var(ADDR_ENV);
+    }
+
+    /// A GUI that welcomes only the token it was given.
+    fn picky_gui(token: &'static str) -> (String, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut r = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            r.read_line(&mut line).unwrap();
+            let reply = if line.contains(&format!("\"token\":\"{}\"", token)) {
+                Message::Welcome {
+                    protocol: ipc::PROTOCOL_VERSION,
+                    gui_version: Some(token.into()),
+                }
+            } else {
+                Message::Error {
+                    path: None,
+                    message: "bad token".into(),
+                }
+            };
+            let mut w = stream;
+            w.write_all(ipc::encode(&reply).as_bytes()).unwrap();
+        });
+        (addr, server)
+    }
+
+    #[test]
+    fn each_candidate_is_greeted_with_its_own_token() {
+        let (a, sa) = picky_gui("tok-a");
+        let (b, sb) = picky_gui("tok-b");
+        let cands = vec![Candidate::Tcp(a.clone()), Candidate::Tcp(b.clone())];
+        let with = |token: &str| {
+            let mut h = hello();
+            if let Message::Hello { token: t, .. } = &mut h {
+                *t = Some(token.to_string());
+            }
+            h
+        };
+        // The first machine gets a token that is not its own and refuses;
+        // the second gets its own and answers.
+        let c = connect_with(&cands, |cand| {
+            with(if *cand == Candidate::Tcp(b.clone()) {
+                "tok-b"
+            } else {
+                "tok-x"
+            })
+        })
+        .unwrap();
+        assert_eq!(c.via, Candidate::Tcp(b));
+        assert_eq!(c.gui_version.as_deref(), Some("tok-b"));
+        sa.join().unwrap();
+        sb.join().unwrap();
     }
 
     #[test]
