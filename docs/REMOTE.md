@@ -145,6 +145,11 @@ ssh は「k16 から手元の GUI に届く経路」を作るためだけに使�
 TCP の `RemoteForward` と `scp` はそのまま通る。Unix ソケットの転送だけは Tailscale SSH（root 動作）が
 ソケットを root 所有で作るため使えず、それが TCP を既定にした理由でもある。
 
+**`tailscale ssh k16` で入る場合**も同じように使える。`tailscale ssh` は ssh に `k16` ではなく
+MagicDNS 名（`k16.<tailnet>.`）を渡すので、`Host k16` の設定だけでは転送が効かない。
+`fude setup k16` は Tailscale が動いていればその名前を調べ、同じ設定の `Host` ブロックをもう 1 つ書く。
+以前の版でセットアップした場合は、`fude setup k16` をもう一度実行すれば追加される。
+
 - **同じマシン**: `fude-cli notes.md` はローカルの `~/.config/fude/gui.sock` にも繋ぐ（ssh 不要）
 - **Tailscale / VPN / LAN で直接届く場合**: GUI 側を外から繋げる口で起動し、相手側は宛先を指定する
 
@@ -222,7 +227,7 @@ PowerShell で `fude-cli.exe setup k16`（インストール先の `fude-cli.exe
 | `fude bridge`: `gui.sock is in use` | WSL の Fude（または別の bridge）が動いている。どちらか一方にする |
 | `fude bridge` 経由で `no Fude GUI on Windows answers` | Windows の Fude が起動していない |
 | `remote agents must present the GUI token` | 鍵が違う。`fude setup <host>` をやり直すか `~/.config/fude/gui-token` を手元のものと揃える |
-| `tcp://127.0.0.1:47821: Connection refused` | ssh の転送が張られていない。`~/.ssh/config` の `RemoteForward` 行と、`ssh` でログインし直したか |
+| `tcp://127.0.0.1:47821: Connection refused` | ssh の転送が張られていない。`~/.ssh/config` の `RemoteForward` 行と、`ssh` でログインし直したか。`tailscale ssh <host>` で入っているなら `fude setup <host>` をやり直す（Tailscale の名前用の設定が追加される） |
 | `remote port forwarding failed for listen port 47821` | 接続共有が無い状態で同じホストへ ssh を複数本張ると出る（転送を持てるのは最初の 1 本だけ）。`fude setup k16` をやり直すと接続共有が入り、解消する。共有を入れる前から開いていたセッションは閉じて入り直す。他人や別のソフトが 47821 を使っている場合は `fude setup k16 --port 47822` で別ポートに |
 | Fude 側に「k16 との接続が切れました」 | ssh を閉じた／`fude-cli` を止めた。タブは残り、未保存分は暫定保存にある。繋ぎ直してもう一度開く |
 | ssh 先で `Failed to initialize gtk backend` | `fude`（GUI 本体）を画面の無いホストで起動した。`fude-cli FILE` を使う（Fude 0.8.5 以降の `fude FILE` は自動で `fude-cli` に切り替わる） |

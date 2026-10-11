@@ -142,6 +142,79 @@ pub fn ensure_host_lines(config: &str, host: &str, wants: &[Want]) -> (String, V
     (text, added, false)
 }
 
+/// The names `tailscale ssh <host>` hands to ssh for `host`, from
+/// `tailscale status --json`.
+///
+/// `tailscale ssh k16` runs `ssh … user@k16.<tailnet>.` — the MagicDNS name,
+/// trailing dot included — so a `Host k16` block does not apply to it and the
+/// session would come up without the forward. Both spellings are returned;
+/// `host` itself never is.
+pub fn tailscale_names(status_json: &str, host: &str) -> Vec<String> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(status_json) else {
+        return Vec::new();
+    };
+    let Some(peers) = v.get("Peer").and_then(|p| p.as_object()) else {
+        return Vec::new();
+    };
+    let want = host.trim_end_matches('.').to_ascii_lowercase();
+    for peer in peers.values() {
+        let dns = peer.get("DNSName").and_then(|d| d.as_str()).unwrap_or("");
+        let fqdn = dns.trim_end_matches('.');
+        if fqdn.is_empty() {
+            continue;
+        }
+        let short = fqdn.split('.').next().unwrap_or("").to_ascii_lowercase();
+        let name = peer.get("HostName").and_then(|d| d.as_str()).unwrap_or("");
+        if short == want || fqdn.eq_ignore_ascii_case(&want) || name.eq_ignore_ascii_case(&want) {
+            return [fqdn.to_string(), format!("{}.", fqdn)]
+                .into_iter()
+                .filter(|n| n != host)
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
+/// Like [`ensure_host_lines`], for a set of names that mean one machine: an
+/// existing block for the first name is completed; otherwise one block
+/// listing all of them is appended.
+pub fn ensure_alias_lines(
+    config: &str,
+    aliases: &[String],
+    wants: &[Want],
+) -> (String, Vec<String>, bool) {
+    let Some(first) = aliases.first() else {
+        return (config.to_string(), Vec::new(), false);
+    };
+    let (text, added, appended) = ensure_host_lines(config, first, wants);
+    if !appended || aliases.len() == 1 {
+        return (text, added, appended);
+    }
+    // The block was just appended, so its header is the last such line.
+    let header = format!("\nHost {}\n", first);
+    let text = match text.rfind(&header) {
+        Some(i) => format!(
+            "{}\nHost {}\n{}",
+            &text[..i],
+            aliases.join(" "),
+            &text[i + header.len()..]
+        ),
+        None => text,
+    };
+    (text, added, appended)
+}
+
+fn tailscale_status() -> Option<String> {
+    let out = Command::new("tailscale")
+        .args(["status", "--json"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).to_string())
+}
+
 /// Return `config` with the forward for `host` in place. An existing
 /// `RemoteForward <port> …` in that block is left alone, whatever it points
 /// at, since the user may have moved the socket on purpose.
@@ -290,7 +363,15 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
     if share && !cfg!(windows) {
         wants.push(sharing_want());
     }
-    let (updated, added, appended) = ensure_host_lines(&existing, host, &wants);
+    let (updated, host_added, appended) = ensure_host_lines(&existing, host, &wants);
+    // `tailscale ssh <host>` reaches the same machine under another name.
+    let ts_names = tailscale_status()
+        .map(|j| tailscale_names(&j, host))
+        .unwrap_or_default();
+    let (updated, ts_added, _) = ensure_alias_lines(&updated, &ts_names, &wants);
+    let ts_changed = !ts_added.is_empty();
+    let ts_only = host_added.is_empty() && ts_changed;
+    let added = if ts_only { ts_added } else { host_added };
     if added.is_empty() {
         Step("ssh config").ok("already set up");
     } else {
@@ -303,7 +384,9 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
         let _ = fude_core::paths::set_file_permissions(&cfg_path);
         Step("ssh config").ok(&format!(
             "{} (backup: config.fude-bak)",
-            if appended {
+            if ts_only {
+                format!("appended `Host {}` for `tailscale ssh`", ts_names.join(" "))
+            } else if appended {
                 format!("appended `Host {}`", host)
             } else {
                 format!("added to `Host {}`", host)
@@ -311,6 +394,13 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
         ));
         for l in &added {
             eprintln!("      {}", l);
+        }
+        if ts_changed && !ts_only {
+            eprintln!(
+                "    also for `tailscale ssh {}` (Host {})",
+                host,
+                ts_names.join(" ")
+            );
         }
         if added.iter().any(|l| l.starts_with("ControlMaster")) {
             eprintln!(
@@ -479,6 +569,56 @@ mod tests {
         let cfg = "host k16\n  User u\n";
         let (_, c) = with_forward(cfg, "k16", 47821, SOCK);
         assert_eq!(c, ConfigChange::AddedToBlock);
+    }
+
+    const TS: &str = r#"{"Self":{"HostName":"me","DNSName":"me.tail.example.net."},
+        "Peer":{"nodekey:a":{"HostName":"K16","DNSName":"k16.tail.example.net."},
+                "nodekey:b":{"HostName":"other","DNSName":"k16x.tail.example.net."},
+                "nodekey:c":{"HostName":"nodns","DNSName":""}}}"#;
+
+    #[test]
+    fn tailscale_names_are_the_magicdns_name_with_and_without_the_dot() {
+        let both = vec![
+            "k16.tail.example.net".to_string(),
+            "k16.tail.example.net.".to_string(),
+        ];
+        assert_eq!(tailscale_names(TS, "k16"), both);
+        assert_eq!(tailscale_names(TS, "K16"), both);
+        // Asked by the full name: only the other spelling is new.
+        assert_eq!(
+            tailscale_names(TS, "k16.tail.example.net"),
+            vec!["k16.tail.example.net.".to_string()]
+        );
+        // A prefix is not a match, nor is a peer without a name.
+        assert_eq!(tailscale_names(TS, "k1"), Vec::<String>::new());
+        assert_eq!(tailscale_names(TS, "nodns"), Vec::<String>::new());
+        assert_eq!(tailscale_names(TS, "unknown"), Vec::<String>::new());
+        assert_eq!(tailscale_names("not json", "k16"), Vec::<String>::new());
+        assert_eq!(tailscale_names("{}", "k16"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn tailscale_names_get_one_block_and_are_not_added_twice() {
+        let wants = [forward_want(47821, SOCK), sharing_want()];
+        let names = tailscale_names(TS, "k16");
+        let base = "Host k16\n  RemoteForward 47821 /home/u/.config/fude/gui.sock\n";
+        let (out, added, appended) = ensure_alias_lines(base, &names, &wants);
+        assert!(appended);
+        assert_eq!(added.len(), 4);
+        assert!(out.starts_with(base));
+        assert!(out.contains(
+            "\nHost k16.tail.example.net k16.tail.example.net.\n  RemoteForward 47821 /home/u/.config/fude/gui.sock\n  ControlMaster auto\n"
+        ));
+        assert_eq!(out.matches("Host k16.tail").count(), 1);
+
+        let (again, added, appended) = ensure_alias_lines(&out, &names, &wants);
+        assert_eq!(again, out);
+        assert!(added.is_empty() && !appended);
+
+        // No tailscale: nothing happens.
+        let (same, added, appended) = ensure_alias_lines(base, &[], &wants);
+        assert_eq!(same, base);
+        assert!(added.is_empty() && !appended);
     }
 
     #[test]
