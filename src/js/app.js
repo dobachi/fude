@@ -168,6 +168,7 @@ import {
   applyKeymode,
 } from './core/keymode.js';
 import { openSettings } from './settings.js';
+import { openRemoteView } from './features/remote/remote-view.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
 import { isOpenFileShortcut, isGoToPathShortcut, isPrintShortcut } from './core/open-shortcuts.js';
@@ -2435,6 +2436,7 @@ function buildMenuDefinition() {
                 shortcut: 'Ctrl+Shift+U',
                 action: handleRevealActiveFileDir,
               },
+              { label: 'リモート接続…', action: openRemoteView },
             ]
           : []),
         { separator: true },

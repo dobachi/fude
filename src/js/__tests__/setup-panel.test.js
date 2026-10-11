@@ -5,6 +5,7 @@ import {
   initRemoteSection,
   initWslSection,
   wslStatusText,
+  createRecentStore,
 } from '../features/remote/setup-panel.js';
 
 function mount(initialHosts, results = {}) {
@@ -152,6 +153,174 @@ describe('remote hosts section', () => {
     expect(root.querySelector('.remote-host-name').textContent).toBe(
       '<img src=x onerror=alert(1)>',
     );
+  });
+});
+
+describe('opening a place on a host', () => {
+  function mountOpen(result, recent = ['k16\t~/notes', 'k16\t/srv', 'box\t/b']) {
+    document.body.innerHTML = `<div id="root">${remoteSectionHtml()}</div>`;
+    const root = document.getElementById('root');
+    const saved = [];
+    const backend = {
+      remoteSetup: vi.fn(async () => ({ ok: true, log: '' })),
+      remoteOpen: vi.fn(async () => {
+        if (result instanceof Error) throw result;
+        return result ?? { ok: true, log: 'fude-cli: opened in Fude 0.8.9 on home' };
+      }),
+      sshHostCandidates: vi.fn(async () => ['k16', 'dev', 'me@box']),
+      getConfig: vi.fn(async () => ({ theme: 'dark', remote_recent: ['stale\t/x'] })),
+      saveConfig: vi.fn(async (c) => {
+        saved.push(c);
+      }),
+    };
+    const store = createRecentStore(backend, recent);
+    const onOpened = vi.fn();
+    initRemoteSection(root, backend, ['k16'], { recent: store, onOpened });
+    const $ = (sel) => root.querySelector(sel);
+    return { root, backend, saved, onOpened, $ };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('offers the places opened there before, the last one filled in', () => {
+    const { $ } = mountOpen();
+    const input = $('.remote-open-row[data-host="k16"] .remote-path');
+    expect(input.value).toBe('~/notes');
+    const list = $(`#${input.getAttribute('list')}`);
+    expect([...list.options].map((o) => o.value)).toEqual(['~/notes', '/srv']);
+  });
+
+  it('opens the typed path, remembers it first, and tells the view', async () => {
+    const { backend, saved, onOpened, $ } = mountOpen();
+    $('.remote-open-row .remote-path').value = ' /srv ';
+    $('.remote-open-row .remote-open').click();
+    expect($('#remote-status').textContent).toMatch(/\/srv を開いています/);
+    await flush();
+    expect(backend.remoteOpen).toHaveBeenCalledWith('k16', '/srv');
+    expect($('#remote-status').dataset.kind).toBe('ok');
+    expect(saved).toEqual([
+      { theme: 'dark', remote_recent: ['k16\t/srv', 'k16\t~/notes', 'box\t/b'] },
+    ]);
+    expect(onOpened).toHaveBeenCalledTimes(1);
+  });
+
+  it('an empty path means the home directory', async () => {
+    const { backend, $ } = mountOpen(undefined, []);
+    $('.remote-open-row .remote-open').click();
+    await flush();
+    expect(backend.remoteOpen).toHaveBeenCalledWith('k16', '~');
+  });
+
+  it('Enter in the path field opens too', async () => {
+    const { backend, $ } = mountOpen();
+    const input = $('.remote-open-row .remote-path');
+    input.value = '~/x';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await flush();
+    expect(backend.remoteOpen).toHaveBeenCalledWith('k16', '~/x');
+  });
+
+  it('a failure shows what the host said, keeps the path, and stays open', async () => {
+    const { saved, onOpened, $ } = mountOpen({ ok: false, log: 'fude-cli: no Fude GUI reachable' });
+    $('.remote-open-row .remote-path').value = '/nope';
+    $('.remote-open-row .remote-open').click();
+    await flush();
+    expect($('#remote-status').dataset.kind).toBe('error');
+    expect($('#remote-log').textContent).toMatch(/no Fude GUI reachable/);
+    expect($('.remote-open-row .remote-path').value).toBe('/nope');
+    expect(saved).toEqual([]);
+    expect(onOpened).not.toHaveBeenCalled();
+  });
+
+  it('a backend error is reported and the controls come back', async () => {
+    const { onOpened, $ } = mountOpen(new Error('boom'));
+    $('.remote-open-row .remote-open').click();
+    await flush();
+    expect($('#remote-status').textContent).toMatch(/boom/);
+    expect($('.remote-open-row .remote-open').disabled).toBe(false);
+    expect(onOpened).not.toHaveBeenCalled();
+  });
+
+  it('the host field offers the ssh config names not yet set up', async () => {
+    const { $ } = mountOpen();
+    await flush();
+    const names = [...$('#remote-host-candidates').options].map((o) => o.value);
+    expect(names).toEqual(['dev', 'me@box']);
+  });
+
+  it('forgetting a host forgets its places', async () => {
+    const { saved, $ } = mountOpen();
+    $('.remote-forget').click();
+    await flush();
+    expect($('.remote-open-row[data-host]')).toBeNull();
+    expect(saved[saved.length - 1].remote_recent).toEqual(['box\t/b']);
+  });
+
+  it('without remoteOpen there is no open row', () => {
+    document.body.innerHTML = `<div id="root">${remoteSectionHtml()}</div>`;
+    const root = document.getElementById('root');
+    initRemoteSection(root, { remoteSetup: vi.fn(), getConfig: vi.fn(), saveConfig: vi.fn() }, [
+      'k16',
+    ]);
+    expect(root.querySelector('.remote-open-row[data-host]')).toBeNull();
+  });
+});
+
+describe('opening a place inside WSL', () => {
+  async function mountWslOpen(status, result) {
+    document.body.innerHTML = `<div id="root">${remoteSectionHtml()}</div>`;
+    const root = document.getElementById('root');
+    const saved = [];
+    const backend = {
+      wslBridgeStatus: vi.fn(async () => status),
+      wslBridgeSet: vi.fn(),
+      wslOpen: vi.fn(async () => result ?? { ok: true, log: '' }),
+      getConfig: vi.fn(async () => ({})),
+      saveConfig: vi.fn(async (c) => {
+        saved.push(c);
+      }),
+    };
+    const onOpened = vi.fn();
+    const recent = createRecentStore(backend, ['wsl\t~/Sources']);
+    await initWslSection(root, backend, [], { recent, onOpened });
+    return { backend, saved, onOpened, $: (sel) => root.querySelector(sel) };
+  }
+  const on = { supported: true, distros: ['Ubuntu'], distro: 'Ubuntu', running: true, log: '' };
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('is offered only while the bridge runs', async () => {
+    let m = await mountWslOpen(on);
+    expect(m.$('#remote-wsl-open').style.display).toBe('');
+    expect(m.$('#remote-wsl-open .remote-path').value).toBe('~/Sources');
+    m = await mountWslOpen({ ...on, running: false });
+    expect(m.$('#remote-wsl-open').style.display).toBe('none');
+    m = await mountWslOpen({ ...on, distro: null, running: false });
+    expect(m.$('#remote-wsl-open').style.display).toBe('none');
+  });
+
+  it('opens the path, remembers it under wsl, and tells the view', async () => {
+    const { backend, saved, onOpened, $ } = await mountWslOpen(on);
+    $('#remote-wsl-open .remote-path').value = '/srv/docs';
+    $('#remote-wsl-open .remote-open').click();
+    await flush();
+    expect(backend.wslOpen).toHaveBeenCalledWith('/srv/docs');
+    expect(saved).toEqual([{ remote_recent: ['wsl\t/srv/docs', 'wsl\t~/Sources'] }]);
+    expect($('#remote-status').dataset.kind).toBe('ok');
+    expect(onOpened).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failure shows the reason and stays', async () => {
+    const { onOpened, $ } = await mountWslOpen(on, { ok: false, log: 'no such file' });
+    $('#remote-wsl-open .remote-open').click();
+    await flush();
+    expect($('#remote-status').dataset.kind).toBe('error');
+    expect($('#remote-log').textContent).toBe('no such file');
+    expect(onOpened).not.toHaveBeenCalled();
   });
 });
 

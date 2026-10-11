@@ -17,7 +17,7 @@ export function hostError(host) {
 
 /** The notice shown when `host`'s fude-cli is older than this Fude. */
 export function outdatedCliMessage(host, cli, gui) {
-  return `${host} の fude-cli（${cli}）はこの Fude（${gui}）より古い版です。設定の「リモート接続」で「更新」できます`;
+  return `${host} の fude-cli（${cli}）はこの Fude（${gui}）より古い版です。メニュー「ファイル」→「リモート接続」で「更新」できます`;
 }
 
 function clean(list) {
@@ -36,4 +36,38 @@ export function addHost(list, host) {
 export function removeHost(list, host) {
   const h = String(host ?? '').trim();
   return clean(list).filter((x) => x !== h);
+}
+
+/** The pseudo-host under which places opened inside WSL are remembered. */
+export const WSL_HOST = 'wsl';
+
+/** How many remembered places are kept, over all hosts. */
+export const RECENT_MAX = 40;
+
+const SEP = '\t';
+
+/**
+ * `list` (entries `host<TAB>path`, newest first) with this place put first.
+ * An empty path is the home directory, remembered as `~`.
+ */
+export function addRecent(list, host, path) {
+  const h = String(host ?? '').trim();
+  if (!h) return clean(list);
+  const p = String(path ?? '').trim() || '~';
+  const entry = `${h}${SEP}${p}`;
+  return [entry, ...clean(list).filter((e) => e !== entry)].slice(0, RECENT_MAX);
+}
+
+/** The paths remembered for `host`, newest first. */
+export function recentPaths(list, host) {
+  const prefix = `${String(host ?? '').trim()}${SEP}`;
+  return clean(list)
+    .filter((e) => e.startsWith(prefix))
+    .map((e) => e.slice(prefix.length));
+}
+
+/** `list` without anything remembered for `host`. */
+export function forgetRecent(list, host) {
+  const prefix = `${String(host ?? '').trim()}${SEP}`;
+  return clean(list).filter((e) => !e.startsWith(prefix));
 }

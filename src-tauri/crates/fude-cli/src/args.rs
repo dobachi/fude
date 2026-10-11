@@ -18,6 +18,14 @@ pub struct Args {
     /// `setup <ssh-host>`: configure a remote machine (see setup.rs).
     pub setup: Option<String>,
     pub port: Option<u16>,
+    /// `remote <ssh-host> [PATH]`: open PATH on that host in this machine's
+    /// Fude (the path is the one operand in `paths`).
+    pub remote: Option<String>,
+    /// `here [PATH]`: open PATH on this machine, read from the home
+    /// directory (for callers without a shell or a working directory).
+    pub here: bool,
+    /// `hosts`: list the ssh hosts this machine knows.
+    pub hosts: bool,
     /// `--to NAME`: the machine whose Fude gets the files, when several do.
     pub to: Option<String>,
     /// `bridge`: relay this machine's GUI socket to the Fude on Windows.
@@ -63,6 +71,14 @@ Commands:
                  to it reaches Fude, not just the first (--no-share skips).
                  --check changes nothing: it only asks HOST which Fude its
                  fude-cli reaches.
+  remote HOST [PATH]
+                 Open PATH on ssh host HOST (default: the home directory
+                 there) in this machine's Fude, without logging in first.
+                 HOST must have been set up.
+  here [PATH]    Open PATH on this machine in the Fude that answers, with
+                 `~` and relative paths read from the home directory and no
+                 terminal fallback (what the app runs inside WSL).
+  hosts          List the ssh hosts in ~/.ssh/config, one per line.
   bridge         (WSL) Make the Fude running on Windows receive everything
                  opened from WSL — `fude-cli FILE` here and in ssh sessions
                  started from here — by relaying ~/.config/fude/gui.sock to
@@ -84,14 +100,17 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
     let mut operands_only = false;
     let mut want_port = false;
     let mut want_setup_host = argv.get(1).map(|s| s == "setup").unwrap_or(false);
+    let mut want_remote_host = argv.get(1).map(|s| s == "remote").unwrap_or(false);
     let mut want_exe = false;
     let mut want_to = false;
     match argv.get(1).map(String::as_str) {
         Some("bridge") => a.bridge = true,
         Some("pipe") => a.pipe = true,
+        Some("hosts") => a.hosts = true,
+        Some("here") => a.here = true,
         _ => {}
     }
-    let skip = if want_setup_host || a.bridge || a.pipe {
+    let skip = if want_setup_host || want_remote_host || a.bridge || a.pipe || a.hosts || a.here {
         2
     } else {
         1
@@ -115,6 +134,11 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
         if want_setup_host && !arg.starts_with('-') {
             a.setup = Some(arg.clone());
             want_setup_host = false;
+            continue;
+        }
+        if want_remote_host && !arg.starts_with('-') {
+            a.remote = Some(arg.clone());
+            want_remote_host = false;
             continue;
         }
         if operands_only {
@@ -156,6 +180,14 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
     if argv.get(1).map(|s| s == "setup").unwrap_or(false) && a.setup.is_none() && !a.help {
         return Err("setup needs an ssh host".into());
     }
+    if argv.get(1).map(|s| s == "remote").unwrap_or(false) && !a.help {
+        if a.remote.is_none() {
+            return Err("remote needs an ssh host".into());
+        }
+        if a.paths.len() > 1 {
+            return Err("remote opens one path at a time".into());
+        }
+    }
     Ok(a)
 }
 
@@ -195,6 +227,25 @@ mod tests {
         assert_eq!(a.port, None);
         let a = parse(&argv(&["fude-cli", "setup", "k16", "--port", "5000"])).unwrap();
         assert_eq!(a.port, Some(5000));
+        let a = parse(&argv(&["fude-cli", "remote", "k16", "--", "~/notes"])).unwrap();
+        assert_eq!(a.remote.as_deref(), Some("k16"));
+        assert_eq!(a.paths, ["~/notes"]);
+        let a = parse(&argv(&["fude-cli", "remote", "k16"])).unwrap();
+        assert!(a.paths.is_empty());
+        assert!(parse(&argv(&["fude-cli", "remote"])).is_err());
+        assert!(parse(&argv(&["fude-cli", "remote", "k16", "a", "b"])).is_err());
+        assert!(parse(&argv(&["fude-cli", "hosts"])).unwrap().hosts);
+        let a = parse(&argv(&["fude-cli", "here", "--", "~/notes"])).unwrap();
+        assert!(a.here);
+        assert_eq!(a.paths, ["~/notes"]);
+        assert!(parse(&argv(&["fude-cli", "here"]))
+            .unwrap()
+            .paths
+            .is_empty());
+        // A file that happens to be called `hosts` is still openable.
+        let a = parse(&argv(&["fude-cli", "./hosts"])).unwrap();
+        assert!(!a.hosts);
+        assert_eq!(a.paths, ["./hosts"]);
         let a = parse(&argv(&["fude-cli", "--to", "gpdmd", "x.md"])).unwrap();
         assert_eq!(a.to.as_deref(), Some("gpdmd"));
         assert_eq!(a.paths, ["x.md"]);

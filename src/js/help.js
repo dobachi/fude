@@ -115,14 +115,21 @@ const sections = [
       ['fude --wait FILE', 'タブを閉じるまで待つ（git / Claude Code の $EDITOR 用）'],
       [
         'fude setup HOST',
-        'ssh 先 HOST を準備（転送・鍵・fude-cli の配置、1 回だけ）。設定画面の「リモート接続」からも実行できる',
+        'ssh 先 HOST を準備（転送・鍵・fude-cli の配置、1 回だけ）。メニュー「ファイル」→「リモート接続」からも実行できる',
       ],
-      ['fude-cli FILE（ssh 先・WSL で）', '手元の Fude にタブを開く。--wait で閉じるまで待つ'],
+      [
+        'fude-cli FILE（ssh 先・WSL で）',
+        '手元の Fude にタブを開き、開いた先を表示する。--wait で閉じるまで待つ。複数の PC の Fude が応答するときは一覧から選ぶ（--to PC名 で指定）',
+      ],
+      [
+        'fude-cli remote HOST PATH',
+        'ssh でログインせずに、HOST のフォルダ / ファイルを手元の Fude に開く（「リモート接続」画面の「開く」と同じ）',
+      ],
       ['fude tui FILE / DIR', '端末内で編集（Ctrl+S 保存、Alt+Q 終了、F1 キー一覧）'],
       ['fude check', '起動中の Fude に届くか・どの経路かを表示'],
       [
         'fude bridge（WSL で）',
-        'WSL から開くものを Windows の Fude に出す。Windows 版は設定画面の「WSL 連携」で自動起動にできる',
+        'WSL から開くものを Windows の Fude に出す。Windows 版は「リモート接続」画面の「WSL 連携」で自動起動にできる',
       ],
     ],
   },

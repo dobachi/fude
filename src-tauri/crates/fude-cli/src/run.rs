@@ -67,6 +67,20 @@ pub fn token_for(
         .or(shared)
 }
 
+/// `path` as `fude-cli here` reads it: `~` is the home directory, and so is
+/// the place relative paths start from — its callers have no shell to
+/// expand the one nor a working directory that means anything for the other.
+pub fn home_path(home: &Path, path: &str) -> PathBuf {
+    let p = path.trim();
+    match p {
+        "" | "~" => home.to_path_buf(),
+        _ => match p.strip_prefix("~/") {
+            Some(rest) => home.join(rest),
+            None => home.join(p), // an absolute `p` replaces `home`
+        },
+    }
+}
+
 /// Environment variable naming the machine whose Fude to use (`--to`).
 pub const TO_ENV: &str = "FUDE_TO";
 
@@ -460,6 +474,22 @@ mod tests {
             token: format!("tok-{}", port),
             name: name.into(),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn here_reads_paths_from_the_home_directory() {
+        let home = Path::new("/home/u");
+        assert_eq!(home_path(home, "~"), PathBuf::from("/home/u"));
+        assert_eq!(home_path(home, " "), PathBuf::from("/home/u"));
+        assert_eq!(
+            home_path(home, "~/notes/a.md"),
+            PathBuf::from("/home/u/notes/a.md")
+        );
+        assert_eq!(home_path(home, "notes"), PathBuf::from("/home/u/notes"));
+        assert_eq!(home_path(home, "/srv/docs"), PathBuf::from("/srv/docs"));
+        // `~user` is not expanded: it is a name under home, as typed.
+        assert_eq!(home_path(home, "~root"), PathBuf::from("/home/u/~root"));
     }
 
     #[test]

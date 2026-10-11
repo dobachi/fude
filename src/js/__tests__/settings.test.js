@@ -15,6 +15,9 @@ vi.mock('../backend.js', () => ({
   remoteSetup: vi.fn().mockResolvedValue({ ok: true, log: '' }),
   wslBridgeStatus: vi.fn().mockResolvedValue({ supported: false, distros: [] }),
   wslBridgeSet: vi.fn(),
+  remoteOpen: vi.fn(),
+  sshHostCandidates: vi.fn().mockResolvedValue([]),
+  wslOpen: vi.fn(),
 }));
 
 vi.mock('../core/theme.js', () => ({
@@ -53,10 +56,10 @@ describe('settings module', () => {
     expect(overlay.querySelector('.settings-panel')).not.toBeNull();
   });
 
-  it('offers remote host setup in the desktop app only', async () => {
+  it('points to the remote view in the desktop app only', async () => {
     const backend = await import('../backend.js');
     await mod.openSettings();
-    expect(document.querySelector('.setting-remote')).toBeNull();
+    expect(document.querySelector('#open-remote-view')).toBeNull();
     mod.closeSettings();
 
     backend.isLocalTauri.mockReturnValue(true);
@@ -66,12 +69,17 @@ describe('settings module', () => {
       font_size: 14,
       has_api_key: false,
       api_key_storage: 'config_file',
-      setup_hosts: ['k16'],
     });
     await mod.openSettings();
-    expect(document.querySelector('.setting-remote #remote-host')).not.toBeNull();
-    const rows = [...document.querySelectorAll('.remote-host-row')].map((r) => r.dataset.host);
-    expect(rows).toEqual(['k16']);
+    // The controls themselves no longer live in the settings.
+    expect(document.querySelector('#remote-host')).toBeNull();
+    document.querySelector('#open-remote-view').click();
+    // The settings step aside for the view (its contents: remote-view.test.js).
+    expect(document.querySelector('.settings-panel:not(.remote-panel)')).toBeNull();
+    await vi.waitFor(() => expect(document.querySelector('.remote-panel')).not.toBeNull());
+    expect(document.querySelector('.remote-panel #remote-host')).not.toBeNull();
+    const { closeRemoteView } = await import('../features/remote/remote-view.js');
+    closeRemoteView();
     backend.isLocalTauri.mockReturnValue(false);
   });
 

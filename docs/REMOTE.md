@@ -113,9 +113,9 @@ fude setup k16               # k16 は ~/.ssh/config のホスト名（無けれ
 すでに `ControlMaster` などを自分で設定している場合は触らない。不要なら `fude setup k16 --no-share`、
 共有中の接続を切るには `ssh -O exit k16`。Windows の OpenSSH は接続共有に対応していないので Windows では足さない。
 
-### コマンドを打たずに設定する（設定画面）
+### コマンドを打たずに設定する（「リモート接続」画面）
 
-同じことはアプリからもできる。**設定（`Ctrl+,`、またはメニュー「ヘルプ」→「設定」）→「リモート接続 / Remote hosts」** にホスト名を入れて
+同じことはアプリからもできる。**メニュー「ファイル」→「リモート接続…」**（0.8.9 までは設定画面の中にあった）を開き、ホスト名を入れて
 「セットアップ」を押すと、`fude setup HOST` が裏で実行され、結果がその場に表示される。
 成功したホストは一覧に残り、あとから次ができる。
 
@@ -129,6 +129,19 @@ Fude より古い `fude-cli` を使っているホストが繋いでくると、
 知らせる（ホストごとに起動中 1 回）。そのときに「更新」を押せばよい。
 
 パスワード入力なしで `ssh HOST` できること（鍵認証・Tailscale SSH など）が前提。画面からパスワードは聞けない。
+
+ホスト名の欄では、`~/.ssh/config` に書いてあるホスト名を候補から選べる（まだ登録していないもの）。
+
+#### 手元からホストのフォルダを開く
+
+登録したホストの行には入力欄と「開く」がある。パス（例: `~/notes`、`/srv/docs/a.md`。空欄はホーム）を入れて
+「開く」を押すと、ssh でログインしなくてもそのフォルダやファイルがこの Fude に開く。
+一度開いた場所はホストごとに覚えていて、次からは候補から選べる（最後に開いた場所は最初から入っている）。
+
+- 裏では `fude-cli remote HOST PATH` が走り、ホスト側の `fude-cli` を ssh で起動している。端末からも同じコマンドが使える
+- 存在しないパスは開かずにエラーになる
+- 開いたタブは ssh の接続共有の上で動く。Fude を終了すると、ホスト側の `fude-cli` も終わる
+- 「WSL 連携」をオンにしている Windows 版では、WSL の中のフォルダも同じ画面から開ける（「WSL 連携」の行の入力欄）
 
 ### 毎回
 
@@ -244,10 +257,10 @@ fude bridge            # WSL で実行（fude-cli bridge でも同じ）。起�
 - WSL のローカルな `fude --wait` は使えない（Windows の Fude は WSL のパスを直接読めない）。`fude-cli --wait` を使う。
   `$EDITOR` には `fude-cli --wait` を設定しておけば、WSL の Fude でも Windows の Fude でも動く
 
-### `fude bridge` を打たずに済ませる（設定画面の「WSL 連携」）
+### `fude bridge` を打たずに済ませる（「リモート接続」画面の「WSL 連携」）
 
 Windows 版の Fude に、この中継を任せることもできる（オプション、既定はオフ）。
-**設定（`Ctrl+,`）→「リモート接続 / Remote hosts」→「WSL 連携」** でディストリビューションを選ぶ。
+**メニュー「ファイル」→「リモート接続…」→「WSL 連携」** でディストリビューションを選ぶ。
 
 - 選んだ時点と、以後 Fude を起動するたびに、Fude がその WSL の中で `fude bridge` を起動する。Fude を終了すると止まる。
   `fude bridge` を自分で打つ必要はなく、WSL を再起動したあとも Fude を起動し直せば戻る
@@ -287,14 +300,14 @@ PowerShell で `fude-cli.exe setup k16`（インストール先の `fude-cli.exe
 | 症状 | 見るところ |
 | --- | --- |
 | `fude-cli` が端末内エディタになってしまう | 手元で Fude が起動しているか（Windows の Fude で受けるなら WSL で `fude bridge` が動いているか）。`fude-cli --check` で経路を確認 |
-| `fude bridge`: `gui.sock is in use` | WSL の Fude（または別の bridge）が動いている。どちらか一方にする。設定画面の「WSL 連携」をオンにしているなら、手動の `fude bridge` は不要 |
+| `fude bridge`: `gui.sock is in use` | WSL の Fude（または別の bridge）が動いている。どちらか一方にする。「リモート接続」画面の「WSL 連携」をオンにしているなら、手動の `fude bridge` は不要 |
 | 「WSL 連携」が「停止中: curl: …」 | WSL から GitHub Releases を取得できない。ネットワークを確認するか、WSL に Fude を入れて `fude bridge` を使う |
 | `fude bridge` 経由で `no Fude GUI on Windows answers` | Windows の Fude が起動していない |
 | `remote agents must present the GUI token` | 鍵が違う。`fude setup <host>` をやり直すか `~/.config/fude/gui-token` を手元のものと揃える |
 | `tcp://127.0.0.1:47821: Connection refused` | ssh の転送が張られていない。`~/.ssh/config` の `RemoteForward` 行と、`ssh` でログインし直したか。`tailscale ssh <host>` で入っているなら `fude setup <host>` をやり直す（Tailscale の名前用の設定が追加される） |
 | セットアップで `Could not resolve hostname k16` | その PC の ssh が `k16` という名前を引けない（WSL が自前の DNS 設定を使っていて Tailscale の短い名前が通らない、など）。相手が Tailscale 上にいれば、Fude 0.8.8 以降の `fude setup` が `~/.ssh/config` の `Host k16` に `HostName`（Tailscale の名前、引けなければアドレス）を自動で足す。Tailscale 以外なら `Host k16` の下に `HostName <アドレス>` を自分で書く |
 | セットアップで `Host key verification failed` | その PC の ssh が相手にまだ一度も繋いだことがなく、「この鍵を信用するか」の質問にセットアップが答えられない（`tailscale ssh` でしか入ったことがない PC で起きる）。端末で一度 `ssh k16` を実行して `yes` と答えてから、セットアップをやり直す。相手が Tailscale SSH を動かしていれば、Fude 0.8.9 以降の `fude setup` は Tailscale が保証するホスト鍵を `~/.ssh/known_hosts` に自動で登録する |
-| 別の PC で開いてしまう／2 台目の PC から使うと TUI になる | 0.8.8 以前のセットアップは全 PC が同じポートと鍵を使う。使う PC すべてを 0.8.9 以降にして、それぞれでセットアップ（設定画面の「更新」）をやり直す。以後は `fude-cli` が開いた先を表示し、複数応答するときは選べる |
+| 別の PC で開いてしまう／2 台目の PC から使うと TUI になる | 0.8.8 以前のセットアップは全 PC が同じポートと鍵を使う。使う PC すべてを 0.8.9 以降にして、それぞれでセットアップ（「リモート接続」画面の「更新」）をやり直す。以後は `fude-cli` が開いた先を表示し、複数応答するときは選べる |
 | `remote port forwarding failed for listen port 47821` | 接続共有が無い状態で同じホストへ ssh を複数本張ると出る（転送を持てるのは最初の 1 本だけ）。`fude setup k16` をやり直すと接続共有が入り、解消する。共有を入れる前から開いていたセッションは閉じて入り直す。他人や別のソフトが 47821 を使っている場合は `fude setup k16 --port 47822` で別ポートに |
 | Fude 側に「k16 との接続が切れました」 | ssh を閉じた／`fude-cli` を止めた。タブは残り、未保存分は暫定保存にある。繋ぎ直してもう一度開く |
 | ssh 先で `Failed to initialize gtk backend` | `fude`（GUI 本体）を画面の無いホストで起動した。`fude-cli FILE` を使う（Fude 0.8.5 以降の `fude FILE` は自動で `fude-cli` に切り替わる） |

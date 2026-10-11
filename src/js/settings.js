@@ -7,11 +7,7 @@ import * as backend from './backend.js';
 import { openModelPicker } from './features/ai/model-picker-modal.js';
 import { loadCatalogue, findModelById, persistModelChoice } from './features/ai/model-store.js';
 import { DEFAULT_MODEL } from './features/ai/openrouter-client.js';
-import {
-  remoteSectionHtml,
-  initRemoteSection,
-  initWslSection,
-} from './features/remote/setup-panel.js';
+import { openRemoteView } from './features/remote/remote-view.js';
 
 let settingsPanel = null;
 
@@ -123,7 +119,15 @@ export async function openSettings() {
           </div>
           <small class="setting-hint">PlantUML: 有効化すると初回のみ描画エンジン（約十数MB）をダウンロード。 ArchiMate: <code>!include &lt;archimate/Archimate&gt;</code> をローカルで解決（PlantUML本体が前提・自動導入）。 Mermaid: 有効化すると初回のみ描画エンジン（約数MB）をダウンロード。<code>.mmd</code> ファイルと <code>\`\`\`mermaid</code> フェンスを描画。</small>
         </div>
-        ${backend.isLocalTauri() ? remoteSectionHtml() : ''}
+        ${
+          backend.isLocalTauri()
+            ? `<div class="setting-group setting-remote-link">
+          <label>リモート接続 / Remote hosts</label>
+          <button type="button" id="open-remote-view">リモート接続を開く…</button>
+          <small class="setting-hint">ssh ホストの登録・WSL 連携・リモートのフォルダを開く操作は、専用の画面に移りました（メニュー「ファイル」→「リモート接続」）。</small>
+        </div>`
+            : ''
+        }
       </div>
       <div class="settings-footer">
         <button class="btn-save-settings">Save</button>
@@ -166,9 +170,11 @@ export async function openSettings() {
   // unset per-task rows) and opens the picker on click.
   setupModelRows(config).catch((e) => console.error('Model rows setup failed:', e));
 
-  // Remote hosts: run `fude-cli setup` from here (desktop only).
-  initRemoteSection(settingsPanel, backend, config.setup_hosts);
-  initWslSection(settingsPanel, backend).catch((e) => console.error('WSL section failed:', e));
+  // Remote hosts moved to a view of their own; this is the way there.
+  settingsPanel.querySelector('#open-remote-view')?.addEventListener('click', () => {
+    closeSettings();
+    openRemoteView();
+  });
 
   // Extensions: show install state and handle on-demand download.
   setupExtensions().catch((e) => console.error('Extensions setup failed:', e));

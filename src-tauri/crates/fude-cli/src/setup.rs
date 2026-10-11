@@ -555,6 +555,121 @@ pub fn drop_block_line(config: &str, hosts: &[String], line: &str) -> (String, u
     (text, dropped)
 }
 
+/// `path` as one word for the host's shell. A leading `~` is left for that
+/// shell to expand: it is the host's home that is meant, not this machine's.
+pub fn remote_path_word(path: &str) -> String {
+    let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+    match path {
+        "" | "~" => "\"$HOME\"".to_string(),
+        p => match p.strip_prefix("~/") {
+            Some("") => "\"$HOME\"".to_string(),
+            Some(rest) => format!("\"$HOME\"/{}", quote(rest)),
+            None => quote(p),
+        },
+    }
+}
+
+/// What a host runs to open `path` in this machine's Fude: its `fude-cli`,
+/// pointed at this machine's forward when the port is known, and told not
+/// to fall back to a terminal viewer nobody would see.
+pub fn remote_open_command(port: Option<u16>, path: &str) -> String {
+    let pin = port
+        .map(|p| format!("FUDE_GUI_ADDR=127.0.0.1:{} ", p))
+        .unwrap_or_default();
+    // A mistyped path must not become an empty tab for a file that is not
+    // there: say so instead.
+    format!(
+        "p={}; [ -e \"$p\" ] || {{ echo \"fude-cli: $p: no such file or directory\" >&2; exit 2; }}; \
+         PATH=\"$HOME/.local/bin:$PATH\" {}fude-cli --gui -- \"$p\"",
+        remote_path_word(path.trim()),
+        pin
+    )
+}
+
+/// The port this machine forwards for `host`, per the ssh config.
+fn configured_port(host: &str) -> Option<u16> {
+    let dir = fude_core::config_dir().ok()?;
+    let out = Command::new("ssh").args(["-G", host]).output().ok()?;
+    forward_port(&String::from_utf8_lossy(&out.stdout), &forward_target(&dir))
+}
+
+/// `remote HOST [PATH]`: open PATH (default: the home directory) on `host`
+/// in this machine's Fude. Returns the exit code.
+pub fn open_on(host: &str, path: Option<&str>) -> i32 {
+    if host.is_empty() || host.starts_with('-') {
+        eprintln!("fude-cli remote: usage: fude-cli remote <ssh-host> [PATH]");
+        return 2;
+    }
+    let command = remote_open_command(configured_port(host), path.unwrap_or("~"));
+    let out = match Command::new("ssh")
+        .args(["-o", "BatchMode=yes", host, &command])
+        .stdin(std::process::Stdio::null())
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("fude-cli remote: cannot run ssh: {}", e);
+            return 2;
+        }
+    };
+    // The host's fude-cli says where it opened, or why it could not.
+    let said = String::from_utf8_lossy(&out.stderr);
+    let said = said.trim();
+    if !said.is_empty() {
+        eprintln!("{}", said);
+    }
+    if out.status.success() {
+        return 0;
+    }
+    if let Some(hint) = unresolved_hint(said, host).or_else(|| host_key_hint(said, host)) {
+        eprintln!("  {}", hint);
+    } else if said.contains("fude-cli: command not found") || said.contains("fude-cli: not found") {
+        eprintln!(
+            "  {} has no fude-cli yet: run `fude setup {}` first.",
+            host, host
+        );
+    }
+    2
+}
+
+/// The hosts a user can name to ssh, from `~/.ssh/config`: every `Host`
+/// pattern that is a plain name. Wildcards and negations are rules, not
+/// machines; the trailing-dot names are the `tailscale ssh` aliases setup
+/// adds, which nobody types.
+pub fn ssh_config_hosts(config: &str) -> Vec<String> {
+    let mut hosts: Vec<String> = Vec::new();
+    for line in config.lines() {
+        let t = line.trim_start();
+        if !t.get(..5).is_some_and(|h| h.eq_ignore_ascii_case("host ")) {
+            continue;
+        }
+        let names: Vec<&str> = t[5..].split_whitespace().collect();
+        // `Host x x.` is setup's own alias block for `tailscale ssh`.
+        if names.iter().any(|n| n.ends_with('.')) {
+            continue;
+        }
+        for name in names {
+            if name.contains(['*', '?', '!']) || hosts.iter().any(|h| h == name) {
+                continue;
+            }
+            hosts.push(name.to_string());
+        }
+    }
+    hosts
+}
+
+/// `hosts`: print the ssh hosts this machine's config names.
+pub fn hosts() -> i32 {
+    let config = dirs::home_dir()
+        .map(|h| h.join(".ssh").join("config"))
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default();
+    for host in ssh_config_hosts(&config) {
+        println!("{}", host);
+    }
+    0
+}
+
 /// The name this machine goes by on the hosts it sets up.
 fn machine_name() -> String {
     crate::run::host_name()
@@ -568,11 +683,7 @@ pub fn check(host: &str) -> i32 {
         return 2;
     }
     // Ask about this machine's own forward, not whichever Fude answers.
-    let port = fude_core::config_dir().ok().and_then(|d| {
-        let out = Command::new("ssh").args(["-G", host]).output().ok()?;
-        forward_port(&String::from_utf8_lossy(&out.stdout), &forward_target(&d))
-    });
-    match ssh(host, &remote_check(port)) {
+    match ssh(host, &remote_check(configured_port(host))) {
         Ok(s) => {
             println!("{}", s);
             0
@@ -1108,6 +1219,94 @@ mod tests {
             (theirs.to_string(), 0)
         );
         assert_eq!(drop_block_line("", &hosts, &old), (String::new(), 0));
+    }
+
+    #[test]
+    fn a_remote_path_is_one_word_and_tilde_means_the_hosts_home() {
+        assert_eq!(remote_path_word("~"), "\"$HOME\"");
+        assert_eq!(remote_path_word(""), "\"$HOME\"");
+        assert_eq!(remote_path_word("~/"), "\"$HOME\"");
+        assert_eq!(
+            remote_path_word("~/my notes/a.md"),
+            "\"$HOME\"/'my notes/a.md'"
+        );
+        assert_eq!(remote_path_word("/srv/docs"), "'/srv/docs'");
+        assert_eq!(remote_path_word("notes"), "'notes'");
+        // Nothing in a path runs: quotes, substitutions and `~user` stay text.
+        assert_eq!(
+            remote_path_word("a'b; rm -rf $(x)"),
+            r"'a'\''b; rm -rf $(x)'"
+        );
+        assert_eq!(remote_path_word("~root/x"), "'~root/x'");
+        assert_eq!(remote_path_word("-n"), "'-n'");
+    }
+
+    #[test]
+    fn the_host_is_told_to_open_in_this_machines_fude_or_fail() {
+        assert_eq!(
+            remote_open_command(Some(47985), " ~/notes "),
+            "p=\"$HOME\"/'notes'; [ -e \"$p\" ] || { echo \"fude-cli: $p: no such file or directory\" >&2; exit 2; }; \
+             PATH=\"$HOME/.local/bin:$PATH\" FUDE_GUI_ADDR=127.0.0.1:47985 fude-cli --gui -- \"$p\""
+        );
+        let plain = remote_open_command(None, "/a b");
+        assert!(plain.starts_with("p='/a b'; "), "{plain}");
+        assert!(
+            plain.ends_with("PATH=\"$HOME/.local/bin:$PATH\" fude-cli --gui -- \"$p\""),
+            "{plain}"
+        );
+    }
+
+    /// The command really runs in sh: a missing path is refused before
+    /// fude-cli is reached, and a present one reaches it as one argument.
+    #[cfg(unix)]
+    #[test]
+    fn the_open_command_checks_the_path_in_a_real_shell() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let bin = tmp.path().join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let stub = bin.join("fude-cli");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\nprintf 'ARGS:%s|' \"$@\"\nprintf 'ADDR:%s' \"$FUDE_GUI_ADDR\"\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::create_dir_all(tmp.path().join("my notes")).unwrap();
+        let run = |path: &str| {
+            Command::new("sh")
+                .arg("-c")
+                .arg(remote_open_command(Some(47985), path))
+                .env("HOME", tmp.path())
+                .output()
+                .unwrap()
+        };
+        let ok = run("~/my notes");
+        assert!(ok.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&ok.stdout),
+            format!(
+                "ARGS:--gui|ARGS:--|ARGS:{}/my notes|ADDR:127.0.0.1:47985",
+                tmp.path().display()
+            )
+        );
+        let missing = run("~/nope; touch pwned");
+        assert_eq!(missing.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&missing.stderr).contains("no such file or directory"));
+        assert!(missing.stdout.is_empty(), "fude-cli must not have run");
+        assert!(!tmp.path().join("pwned").exists());
+    }
+
+    #[test]
+    fn ssh_hosts_are_the_plain_names_in_the_config() {
+        let cfg = "# c\nHost k16 k16b\n  User u\nhost  dev\nHost *.corp !bad\n  X y\n\
+                   Host k16.ts.net k16.ts.net.\n  A b\nHost k16\nMatch host zz\nHost *\n";
+        assert_eq!(ssh_config_hosts(cfg), ["k16", "k16b", "dev"]);
+        assert_eq!(ssh_config_hosts(""), Vec::<String>::new());
+        assert_eq!(
+            ssh_config_hosts("Hostname x\nHostKeyAlias y\n"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

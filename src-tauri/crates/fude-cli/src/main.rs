@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
-    let args = match args::parse(&argv) {
+    let mut args = match args::parse(&argv) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("fude-cli: {}\n\n{}", e, args::USAGE);
@@ -39,6 +39,12 @@ fn main() {
             std::process::exit(setup::check(host));
         }
         std::process::exit(setup::run(host, args.port, !args.no_share));
+    }
+    if let Some(host) = &args.remote {
+        std::process::exit(setup::open_on(host, args.paths.first().map(String::as_str)));
+    }
+    if args.hosts {
+        std::process::exit(setup::hosts());
     }
     if args.bridge {
         std::process::exit(bridge::run_bridge(args.exe.as_deref()));
@@ -74,6 +80,20 @@ fn main() {
                 std::process::exit(2);
             }
         }
+    }
+    if args.here {
+        let Some(home) = dirs::home_dir() else {
+            eprintln!("fude-cli: cannot find the home directory");
+            std::process::exit(2);
+        };
+        let wanted = args.paths.first().map(String::as_str).unwrap_or("~");
+        let path = run::home_path(&home, wanted);
+        if !path.exists() {
+            eprintln!("fude-cli: {}: no such file or directory", path.display());
+            std::process::exit(2);
+        }
+        args.paths = vec![path.to_string_lossy().to_string()];
+        args.gui = true;
     }
     if args.paths.is_empty() {
         eprintln!("fude-cli: nothing to open\n\n{}", args::USAGE);

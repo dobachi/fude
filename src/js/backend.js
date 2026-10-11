@@ -310,6 +310,28 @@ export async function remoteSetup(host, checkOnly = false) {
 }
 
 /**
+ * Open `path` on ssh host `host` in this window, without logging in there
+ * first (desktop only; the host must have been set up). Resolves to
+ * `{ ok, log }`.
+ */
+export async function remoteOpen(host, path) {
+  if (!isTauriWebview()) throw new Error('デスクトップ版でのみ使えます');
+  return doInvoke('remote_open', { host, path });
+}
+
+/** The host names in the ssh config of the machine that runs ssh for this app. */
+export async function sshHostCandidates() {
+  if (!isTauriWebview()) return [];
+  return doInvoke('ssh_host_candidates');
+}
+
+/** Open `path` inside the WSL distro of WSL integration. Resolves to `{ ok, log }`. */
+export async function wslOpen(path) {
+  if (!isTauriWebview()) throw new Error('デスクトップ版でのみ使えます');
+  return doInvoke('wsl_open', { path });
+}
+
+/**
  * WSL integration (Windows desktop only): the app keeps `fude-cli bridge`
  * running in a WSL distro so files opened there, and in ssh sessions started
  * there, appear in this window. Resolves to

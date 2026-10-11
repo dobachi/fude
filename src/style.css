@@ -3257,3 +3257,35 @@ body:has(#app.ai-panel-open) #mode-indicator {
   outline: 1px dashed var(--fg-secondary);
   color: var(--fg-secondary);
 }
+
+/* Remote view (features/remote/remote-view.js) */
+.remote-panel {
+  width: 600px;
+  max-width: calc(100vw - 32px);
+}
+
+.setting-remote .remote-open-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+
+.setting-remote .remote-wsl .remote-open-row {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.setting-remote .remote-open-row .remote-path {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.setting-remote-link button {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--fg-primary);
+  cursor: pointer;
+}
