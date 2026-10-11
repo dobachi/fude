@@ -31,6 +31,22 @@ pub trait OpenSink: Send + Sync + 'static {
     fn file_changed(&self, _path: &str) {}
     /// The agent for `host` went away.
     fn disconnected(&self, _host: &str) {}
+    /// The agent for `host` runs fude-cli `cli_version`, older than this GUI.
+    fn cli_outdated(&self, _host: &str, _cli_version: &str) {}
+}
+
+fn version_triple(v: &str) -> Option<(u64, u64, u64)> {
+    let mut it = v.trim().split('.').map(|p| p.parse::<u64>().ok());
+    let triple = (it.next()??, it.next()??, it.next()??);
+    it.next().is_none().then_some(triple)
+}
+
+/// `cli` when it is a version older than `gui`. A version that cannot be
+/// read, an equal one and a newer one (the GUI is what is behind then) all
+/// give None.
+pub fn older_cli<'a>(cli: Option<&'a str>, gui: &str) -> Option<&'a str> {
+    let cli = cli?;
+    (version_triple(cli)? < version_triple(gui)?).then_some(cli)
 }
 
 /// Everything that can happen to one connection, in arrival order.
@@ -331,7 +347,7 @@ impl ConnState {
                 cwd,
                 host,
                 token,
-                ..
+                cli_version,
             } => {
                 if protocol != PROTOCOL_VERSION {
                     return (
@@ -371,6 +387,12 @@ impl ConnState {
                 }
                 self.greeted = true;
                 self.cwd = cwd;
+                if let (Some(h), Some(v)) = (
+                    host.as_deref(),
+                    older_cli(cli_version.as_deref(), env!("CARGO_PKG_VERSION")),
+                ) {
+                    sink.cli_outdated(h, v);
+                }
                 self.host = host;
                 (
                     vec![Message::Welcome {
@@ -720,6 +742,7 @@ mod tests {
     struct Recorder {
         calls: Mutex<Vec<(String, bool)>>,
         changed: Mutex<Vec<String>>,
+        outdated: Mutex<Vec<(String, String)>>,
         fail_on: Option<String>,
     }
 
@@ -733,6 +756,12 @@ mod tests {
         }
         fn file_changed(&self, path: &str) {
             self.changed.lock().unwrap().push(path.to_string());
+        }
+        fn cli_outdated(&self, host: &str, cli_version: &str) {
+            self.outdated
+                .lock()
+                .unwrap()
+                .push((host.to_string(), cli_version.to_string()));
         }
     }
 
@@ -945,6 +974,53 @@ mod tests {
             &sink,
         );
         assert!(matches!(replies[0], Message::Welcome { .. }));
+    }
+
+    #[test]
+    fn only_a_readable_older_version_counts_as_outdated() {
+        assert_eq!(older_cli(Some("0.8.5"), "0.8.6"), Some("0.8.5"));
+        assert_eq!(older_cli(Some("0.1.0"), "0.8.6"), Some("0.1.0"));
+        // Numeric, not textual: 0.10.0 is newer than 0.9.0.
+        assert_eq!(older_cli(Some("0.9.0"), "0.10.0"), Some("0.9.0"));
+        assert_eq!(older_cli(Some("0.10.0"), "0.9.0"), None);
+        assert_eq!(older_cli(Some("0.8.6"), "0.8.6"), None);
+        assert_eq!(older_cli(Some("0.8.7"), "0.8.6"), None);
+        assert_eq!(older_cli(None, "0.8.6"), None);
+        for odd in ["", "x", "0.8", "0.8.6.1", "0.8.x", "v0.8.5"] {
+            assert_eq!(older_cli(Some(odd), "0.8.6"), None, "{:?}", odd);
+        }
+        assert_eq!(older_cli(Some("0.8.5"), "dev"), None);
+    }
+
+    #[test]
+    fn an_older_remote_agent_is_reported_once_it_is_let_in() {
+        let agent_hello = |version: Option<&str>, host: Option<&str>, token: &str| Message::Hello {
+            protocol: PROTOCOL_VERSION,
+            cwd: None,
+            cli_version: version.map(str::to_string),
+            host: host.map(str::to_string),
+            token: Some(token.into()),
+        };
+        let sink = Recorder::default();
+        // Older and admitted: reported, with its host.
+        let mut st = ConnState::with_token(Some("secret".into()));
+        st.handle(agent_hello(Some("0.0.1"), Some("box"), "secret"), &sink);
+        assert_eq!(
+            *sink.outdated.lock().unwrap(),
+            vec![("box".to_string(), "0.0.1".to_string())]
+        );
+        // Same version, no version, a local client, a refused agent: silent.
+        let current = env!("CARGO_PKG_VERSION");
+        for (version, host, token) in [
+            (Some(current), Some("box"), "secret"),
+            (None, Some("box"), "secret"),
+            (Some("0.0.1"), None, "secret"),
+            (Some("0.0.1"), Some("box"), "wrong"),
+        ] {
+            let mut st = ConnState::with_token(Some("secret".into()));
+            st.handle(agent_hello(version, host, token), &sink);
+        }
+        assert_eq!(sink.outdated.lock().unwrap().len(), 1);
     }
 
     #[test]

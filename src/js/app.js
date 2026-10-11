@@ -36,6 +36,7 @@ import { isImagePath, mimeToExt, insertImageMarkdown } from './core/image-insert
 import { attachPanZoom } from './core/svg-panzoom.js';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
+import { outdatedCliMessage } from './core/setup-hosts.js';
 import { createStatusBar } from './core/statusbar.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
@@ -1066,6 +1067,11 @@ async function init() {
         showToast(`${host} との接続が切れました（再接続するまで保存できません）`, {
           type: 'error',
         });
+    });
+    // A host connected with a fude-cli older than this app (told once per host).
+    listen('remote-cli-outdated', (event) => {
+      const { host, cli, gui } = event.payload || {};
+      if (host && cli && gui) showToast(outdatedCliMessage(host, cli, gui), { duration: 10000 });
     });
     // Only now can a `fude --wait` request be acted on, so only now does the
     // host start accepting them (the listener above must exist first).

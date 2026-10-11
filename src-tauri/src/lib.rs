@@ -1212,6 +1212,37 @@ impl gui_server::OpenSink for WindowSink {
             let _ = window.emit("remote-disconnected", serde_json::json!({ "host": host }));
         }
     }
+
+    fn cli_outdated(&self, host: &str, cli_version: &str) {
+        // Every `fude FILE` there is a new connection; say it once per run.
+        if !first_time(&OUTDATED_TOLD, host) {
+            return;
+        }
+        if let Some(window) = self.0.get_webview_window("main") {
+            let _ = window.emit(
+                "remote-cli-outdated",
+                serde_json::json!({
+                    "host": host,
+                    "cli": cli_version,
+                    "gui": env!("CARGO_PKG_VERSION"),
+                }),
+            );
+        }
+    }
+}
+
+static OUTDATED_TOLD: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// True the first time `key` is seen in `seen`, false ever after.
+fn first_time(seen: &Mutex<Vec<String>>, key: &str) -> bool {
+    let Ok(mut seen) = seen.lock() else {
+        return false;
+    };
+    if seen.iter().any(|k| k == key) {
+        return false;
+    }
+    seen.push(key.to_string());
+    true
 }
 
 static GUI_SOCKET_STARTED: OnceLock<Result<String, String>> = OnceLock::new();
@@ -2127,6 +2158,16 @@ mod tests {
         // A damaged config value never reaches wsl.exe.
         assert_eq!(wsl_route(true, Some("-e sh")), None);
         assert_eq!(wsl_route(true, Some("")), None);
+    }
+
+    #[test]
+    fn first_time_is_true_once_per_key() {
+        let seen = Mutex::new(Vec::new());
+        assert!(first_time(&seen, "k16"));
+        assert!(!first_time(&seen, "k16"));
+        assert!(first_time(&seen, "box"));
+        assert!(!first_time(&seen, "box"));
+        assert!(!first_time(&seen, "k16"));
     }
 
     #[test]

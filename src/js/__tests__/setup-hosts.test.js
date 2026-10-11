@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hostError, addHost, removeHost } from '../core/setup-hosts.js';
+import { hostError, addHost, removeHost, outdatedCliMessage } from '../core/setup-hosts.js';
 
 describe('hostError', () => {
   it('accepts ssh destinations', () => {
@@ -53,5 +53,15 @@ describe('addHost / removeHost', () => {
   it('removes only the named host', () => {
     expect(removeHost(['a', 'b', 'ab'], 'a')).toEqual(['b', 'ab']);
     expect(removeHost(['a'], 'x')).toEqual(['a']);
+  });
+});
+
+describe('outdatedCliMessage', () => {
+  it('names the host, both versions and where to update', () => {
+    const m = outdatedCliMessage('k16', '0.8.5', '0.8.6');
+    expect(m).toContain('k16');
+    expect(m).toContain('0.8.5');
+    expect(m).toContain('0.8.6');
+    expect(m).toContain('リモート接続');
   });
 });

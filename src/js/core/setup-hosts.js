@@ -15,6 +15,11 @@ export function hostError(host) {
   return null;
 }
 
+/** The notice shown when `host`'s fude-cli is older than this Fude. */
+export function outdatedCliMessage(host, cli, gui) {
+  return `${host} の fude-cli（${cli}）はこの Fude（${gui}）より古い版です。設定の「リモート接続」で「更新」できます`;
+}
+
 function clean(list) {
   return (Array.isArray(list) ? list : []).filter((h) => typeof h === 'string' && h.trim());
 }
