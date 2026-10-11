@@ -1543,7 +1543,7 @@ dependencies = [
 
 [[package]]
 name = "fude"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "dirs 5.0.1",
  "fude-core",
@@ -1570,7 +1570,7 @@ dependencies = [
 
 [[package]]
 name = "fude-cli"
-version = "0.8.11"
+version = "0.8.12"
 dependencies = [
  "comrak",
  "dirs 5.0.1",
