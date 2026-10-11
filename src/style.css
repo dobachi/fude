@@ -2446,6 +2446,86 @@ body {
   transition: width 0.15s ease;
 }
 
+/* Remote hosts settings (features/remote/setup-panel.js) */
+.setting-remote .remote-add,
+.setting-remote .remote-host-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.setting-remote .remote-host-row {
+  margin-top: 6px;
+}
+
+.setting-remote input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-primary);
+  font-size: 0.929rem;
+}
+
+.setting-remote button {
+  padding: 4px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-primary);
+  font-size: 0.929rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.setting-remote button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.setting-remote button:disabled,
+.setting-remote input:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.setting-remote .remote-host-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+}
+
+.setting-remote .remote-status {
+  margin-top: 6px;
+  font-size: calc(var(--ui-font-size) - 2px);
+  color: var(--fg-secondary);
+}
+
+.setting-remote .remote-status[data-kind='error'] {
+  color: #f44336;
+}
+
+.setting-remote .remote-status[data-kind='ok'] {
+  color: var(--fg-accent);
+}
+
+.setting-remote .remote-log {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  max-height: 160px;
+  overflow: auto;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: calc(var(--ui-font-size) - 3px);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 /* Rendered PlantUML diagrams in preview */
 .puml-diagram {
   margin: 8px 0;

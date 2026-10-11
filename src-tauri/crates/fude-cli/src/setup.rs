@@ -327,6 +327,28 @@ fn scp(src: &Path, host: &str, dest: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// What a host is asked to find out which Fude its `fude-cli` reaches.
+const REMOTE_CHECK: &str = "PATH=\"$HOME/.local/bin:$PATH\" fude-cli --check";
+
+/// `setup HOST --check`: change nothing, only report which Fude answers
+/// `fude-cli` on `host`. Returns the exit code.
+pub fn check(host: &str) -> i32 {
+    if host.is_empty() || host.starts_with('-') {
+        eprintln!("fude-cli setup: usage: fude-cli setup <ssh-host> --check");
+        return 2;
+    }
+    match ssh(host, REMOTE_CHECK) {
+        Ok(s) => {
+            println!("{}", s);
+            0
+        }
+        Err(e) => {
+            eprintln!("fude-cli setup: {}", e);
+            2
+        }
+    }
+}
+
 /// Run the whole setup. Returns the exit code.
 pub fn run(host: &str, port: u16, share: bool) -> i32 {
     match run_inner(host, port, share) {
@@ -447,7 +469,7 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
     }
 
     // 4. verify through the forward (a fresh ssh picks up the new config)
-    let check = ssh(host, "PATH=\"$HOME/.local/bin:$PATH\" fude-cli --check");
+    let check = ssh(host, REMOTE_CHECK);
     match check {
         Ok(s) => Step("check").ok(&s),
         Err(e) => {

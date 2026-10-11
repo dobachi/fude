@@ -11,6 +11,8 @@ vi.mock('../backend.js', () => ({
   saveConfig: vi.fn().mockResolvedValue(undefined),
   setApiKey: vi.fn().mockResolvedValue('config_file'),
   deleteApiKey: vi.fn().mockResolvedValue(undefined),
+  isLocalTauri: vi.fn(() => false),
+  remoteSetup: vi.fn().mockResolvedValue({ ok: true, log: '' }),
 }));
 
 vi.mock('../core/theme.js', () => ({
@@ -47,6 +49,28 @@ describe('settings module', () => {
     const overlay = document.querySelector('.settings-overlay');
     expect(overlay).not.toBeNull();
     expect(overlay.querySelector('.settings-panel')).not.toBeNull();
+  });
+
+  it('offers remote host setup in the desktop app only', async () => {
+    const backend = await import('../backend.js');
+    await mod.openSettings();
+    expect(document.querySelector('.setting-remote')).toBeNull();
+    mod.closeSettings();
+
+    backend.isLocalTauri.mockReturnValue(true);
+    backend.getConfig.mockResolvedValueOnce({
+      theme: 'dark',
+      features: {},
+      font_size: 14,
+      has_api_key: false,
+      api_key_storage: 'config_file',
+      setup_hosts: ['k16'],
+    });
+    await mod.openSettings();
+    expect(document.querySelector('.setting-remote #remote-host')).not.toBeNull();
+    const rows = [...document.querySelectorAll('.remote-host-row')].map((r) => r.dataset.host);
+    expect(rows).toEqual(['k16']);
+    backend.isLocalTauri.mockReturnValue(false);
   });
 
   it('openSettings does not create duplicates', async () => {

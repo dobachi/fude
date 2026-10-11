@@ -30,7 +30,7 @@ pub struct Args {
 
 pub const USAGE: &str = "\
 Usage: fude-cli [OPTIONS] [--] <PATH>...
-       fude-cli setup <SSH-HOST> [--port N] [--no-share]
+       fude-cli setup <SSH-HOST> [--port N] [--no-share] [--check]
        fude-cli bridge [--exe PATH]
        fude-cli --check
 
@@ -55,6 +55,8 @@ Commands:
                  --port N uses a loopback port other than 47821. Also turns
                  on ssh connection sharing for HOST, so that every session
                  to it reaches Fude, not just the first (--no-share skips).
+                 --check changes nothing: it only asks HOST which Fude its
+                 fude-cli reaches.
   bridge         (WSL) Make the Fude running on Windows receive everything
                  opened from WSL — `fude-cli FILE` here and in ssh sessions
                  started from here — by relaying ~/.config/fude/gui.sock to
@@ -182,6 +184,9 @@ mod tests {
                 .unwrap()
                 .no_share
         );
+        let a = parse(&argv(&["fude-cli", "setup", "k16", "--check"])).unwrap();
+        assert_eq!(a.setup.as_deref(), Some("k16"));
+        assert!(a.check);
         assert!(parse(&argv(&["fude-cli", "setup", "k16", "--port"])).is_err());
         assert!(parse(&argv(&["fude-cli", "setup", "k16", "--port", "x"])).is_err());
         // A file literally named "setup" is still a path when not first.

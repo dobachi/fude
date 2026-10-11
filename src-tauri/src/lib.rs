@@ -768,15 +768,91 @@ fn fude_cli_candidates(exe_dir: &Path) -> Vec<PathBuf> {
     vec![exe_dir.join(name), exe_dir.join("../lib/fude").join(name)]
 }
 
-/// Run `fude-cli` with `args` and return the process exit code. Falls back to
-/// a `fude-cli` on PATH when none is bundled next to this binary.
-fn run_cli_subcommand(args: &[String]) -> i32 {
-    let bundled = std::env::current_exe()
+/// The `fude-cli` to run: the one bundled next to this binary, else whatever
+/// `fude-cli` is on PATH.
+fn fude_cli_program() -> PathBuf {
+    std::env::current_exe()
         .and_then(|p| p.canonicalize())
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf))
-        .and_then(|dir| fude_cli_candidates(&dir).into_iter().find(|c| c.is_file()));
-    let program = bundled.unwrap_or_else(|| PathBuf::from("fude-cli"));
+        .and_then(|dir| fude_cli_candidates(&dir).into_iter().find(|c| c.is_file()))
+        .unwrap_or_else(|| PathBuf::from("fude-cli"))
+}
+
+/// An ssh destination as the settings panel may pass it to `fude-cli setup`:
+/// `host`, `user@host`, a name from ~/.ssh/config. Anything that could be
+/// read as an option or carry shell syntax is refused.
+fn valid_ssh_host(host: &str) -> Result<String, String> {
+    let h = host.trim();
+    if h.is_empty() {
+        return Err("ホスト名を入力してください".into());
+    }
+    if h.len() > 255
+        || h.starts_with('-')
+        || !h
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '@' | ':'))
+    {
+        return Err(format!("ホスト名として使えません: {}", h));
+    }
+    Ok(h.to_string())
+}
+
+/// `fude-cli` arguments for the settings panel's setup / check buttons.
+fn remote_setup_args(host: &str, check_only: bool) -> Result<Vec<String>, String> {
+    let host = valid_ssh_host(host)?;
+    let mut args = vec!["setup".to_string(), host];
+    if check_only {
+        args.push("--check".to_string());
+    }
+    Ok(args)
+}
+
+/// What a `fude-cli` run from the settings panel produced.
+#[derive(Debug, Clone, Serialize)]
+pub struct CliOutcome {
+    pub ok: bool,
+    /// What it printed (progress goes to stderr, results to stdout).
+    pub log: String,
+}
+
+fn cli_outcome(success: bool, stdout: &[u8], stderr: &[u8]) -> CliOutcome {
+    let mut log = String::from_utf8_lossy(stderr).trim_end().to_string();
+    let out = String::from_utf8_lossy(stdout);
+    let out = out.trim_end();
+    if !out.is_empty() {
+        if !log.is_empty() {
+            log.push('\n');
+        }
+        log.push_str(out);
+    }
+    CliOutcome { ok: success, log }
+}
+
+/// Run `fude-cli setup HOST` (or only its check) for the settings panel and
+/// return what it printed. ssh runs in batch mode there, so this never waits
+/// on a password prompt nobody can see.
+#[tauri::command(async)]
+fn remote_setup(host: String, check_only: bool) -> Result<CliOutcome, String> {
+    let args = remote_setup_args(&host, check_only)?;
+    let program = fude_cli_program();
+    let mut cmd = std::process::Command::new(&program);
+    cmd.args(&args).stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: no console flash
+    }
+    let out = cmd
+        .output()
+        .map_err(|e| format!("fude-cli を実行できません ({}): {}", program.display(), e))?;
+    Ok(cli_outcome(out.status.success(), &out.stdout, &out.stderr))
+}
+
+/// Run `fude-cli` with `args` and return the process exit code. Falls back to
+/// a `fude-cli` on PATH when none is bundled next to this binary.
+fn run_cli_subcommand(args: &[String]) -> i32 {
+    let program = fude_cli_program();
     let mut cmd = std::process::Command::new(&program);
     cmd.args(args);
 
@@ -1647,6 +1723,7 @@ pub fn run() {
             remote_watch_file,
             remote_unwatch_file,
             remote_hosts,
+            remote_setup,
             read_file,
             write_file,
             rename_path,
@@ -1880,6 +1957,49 @@ mod tests {
             gui_tcp_addr(Some("0.0.0.0:5000"), false).as_deref(),
             Some("0.0.0.0:5000")
         );
+    }
+
+    #[test]
+    fn settings_panel_setup_only_passes_plain_ssh_destinations() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(remote_setup_args("k16", false), Ok(a(&["setup", "k16"])));
+        assert_eq!(
+            remote_setup_args("  me@box.example.net ", true),
+            Ok(a(&["setup", "me@box.example.net", "--check"]))
+        );
+        assert!(valid_ssh_host("k16.tail-net.ts.net.").is_ok());
+        assert!(valid_ssh_host("fe80::1").is_ok());
+        // Nothing that ssh or a shell could read as more than a host.
+        for bad in [
+            "",
+            "   ",
+            "-oProxyCommand=x",
+            "--port",
+            "a b",
+            "a;b",
+            "$(x)",
+            "a`b`",
+            "a|b",
+            "a'b",
+            "a\"b",
+            "a/b",
+            "ホスト",
+        ] {
+            assert!(remote_setup_args(bad, false).is_err(), "{:?}", bad);
+        }
+        assert!(valid_ssh_host(&"a".repeat(256)).is_err());
+    }
+
+    #[test]
+    fn cli_outcome_joins_progress_and_result() {
+        let o = cli_outcome(true, b"Fude 0.8.6 answers\n", b"  ok: token\n");
+        assert!(o.ok);
+        assert_eq!(o.log, "  ok: token\nFude 0.8.6 answers");
+        let o = cli_outcome(false, b"", b"fude-cli setup: ssh k16 failed\n");
+        assert!(!o.ok);
+        assert_eq!(o.log, "fude-cli setup: ssh k16 failed");
+        assert_eq!(cli_outcome(true, b"only out\n", b"").log, "only out");
+        assert_eq!(cli_outcome(true, b"", b"").log, "");
     }
 
     #[test]

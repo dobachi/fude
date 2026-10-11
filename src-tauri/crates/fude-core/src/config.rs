@@ -41,6 +41,9 @@ pub struct Config {
     pub ai_model_inline: Option<String>,
     pub sidebar_sort: Option<String>,
     pub sidebar_show_all_files: Option<bool>,
+    /// ssh hosts set up from the settings panel (`fude-cli setup`), so they
+    /// can be listed, re-checked and updated there.
+    pub setup_hosts: Vec<String>,
 }
 
 /// What the front end receives: `Config` with defaults applied and the API
@@ -60,6 +63,8 @@ pub struct ConfigResponse {
     pub ai_model_inline: Option<String>,
     pub sidebar_sort: String,
     pub sidebar_show_all_files: bool,
+    #[serde(default)]
+    pub setup_hosts: Vec<String>,
 }
 
 impl Default for Config {
@@ -78,6 +83,7 @@ impl Default for Config {
             ai_model_inline: None,
             sidebar_sort: None,
             sidebar_show_all_files: None,
+            setup_hosts: Vec::new(),
         }
     }
 }
@@ -140,6 +146,7 @@ pub fn config_response(config: Config, has_api_key: bool, storage_type: &str) ->
             .sidebar_sort
             .unwrap_or_else(|| "name_asc".to_string()),
         sidebar_show_all_files: config.sidebar_show_all_files.unwrap_or(false),
+        setup_hosts: config.setup_hosts,
     }
 }
 
@@ -212,6 +219,7 @@ mod tests {
             ai_model_inline: Some("google/gemini-2.5-flash".to_string()),
             sidebar_sort: Some("modified_desc".to_string()),
             sidebar_show_all_files: Some(true),
+            setup_hosts: vec!["k16".to_string()],
         };
 
         let json = serde_json::to_string(&config).unwrap();
@@ -251,6 +259,26 @@ mod tests {
         assert!(config.ai_model.is_none()); // default
         assert!(config.sidebar_sort.is_none()); // default
         assert!(config.sidebar_show_all_files.is_none()); // default
+    }
+
+    #[test]
+    fn setup_hosts_default_to_none_and_survive_the_round_trip() {
+        let old: Config = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert!(old.setup_hosts.is_empty());
+        let c = Config {
+            setup_hosts: vec!["k16".into(), "me@box".into()],
+            ..Default::default()
+        };
+        let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.setup_hosts, c.setup_hosts);
+        // The front end gets them, and what it sends back parses as a Config.
+        let resp = config_response(back, false, "none");
+        assert_eq!(
+            resp.setup_hosts,
+            vec!["k16".to_string(), "me@box".to_string()]
+        );
+        let again: Config = serde_json::from_str(&serde_json::to_string(&resp).unwrap()).unwrap();
+        assert_eq!(again.setup_hosts, resp.setup_hosts);
     }
 
     #[test]

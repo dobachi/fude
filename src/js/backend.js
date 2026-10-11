@@ -281,6 +281,16 @@ export async function remoteHosts() {
   return doInvoke('remote_hosts');
 }
 
+/**
+ * Run `fude-cli setup HOST` from the app (desktop only): prepare an ssh host
+ * so `fude FILE` there opens here. `checkOnly` changes nothing and only asks
+ * the host whether it reaches this Fude. Resolves to `{ ok, log }`.
+ */
+export async function remoteSetup(host, checkOnly = false) {
+  if (!isTauriWebview()) throw new Error('デスクトップ版でのみ使えます');
+  return doInvoke('remote_setup', { host, checkOnly });
+}
+
 export async function watchDirectory(path) {
   return doInvoke('watch_directory', { path });
 }

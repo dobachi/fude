@@ -7,6 +7,7 @@ import * as backend from './backend.js';
 import { openModelPicker } from './features/ai/model-picker-modal.js';
 import { loadCatalogue, findModelById, persistModelChoice } from './features/ai/model-store.js';
 import { DEFAULT_MODEL } from './features/ai/openrouter-client.js';
+import { remoteSectionHtml, initRemoteSection } from './features/remote/setup-panel.js';
 
 let settingsPanel = null;
 
@@ -118,6 +119,7 @@ export async function openSettings() {
           </div>
           <small class="setting-hint">PlantUML: 有効化すると初回のみ描画エンジン（約十数MB）をダウンロード。 ArchiMate: <code>!include &lt;archimate/Archimate&gt;</code> をローカルで解決（PlantUML本体が前提・自動導入）。 Mermaid: 有効化すると初回のみ描画エンジン（約数MB）をダウンロード。<code>.mmd</code> ファイルと <code>\`\`\`mermaid</code> フェンスを描画。</small>
         </div>
+        ${backend.isLocalTauri() ? remoteSectionHtml() : ''}
       </div>
       <div class="settings-footer">
         <button class="btn-save-settings">Save</button>
@@ -159,6 +161,9 @@ export async function openSettings() {
   // Model rows: each row shows the current selection (or "Use default" for
   // unset per-task rows) and opens the picker on click.
   setupModelRows(config).catch((e) => console.error('Model rows setup failed:', e));
+
+  // Remote hosts: run `fude-cli setup` from here (desktop only).
+  initRemoteSection(settingsPanel, backend, config.setup_hosts);
 
   // Extensions: show install state and handle on-demand download.
   setupExtensions().catch((e) => console.error('Extensions setup failed:', e));
