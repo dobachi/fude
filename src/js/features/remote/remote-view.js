@@ -85,6 +85,15 @@ export function mountRemoteView(api, config, onClose, preset = null) {
   return { el, conns };
 }
 
+/** The shortcut's action: open the view, or close it when it is open. */
+export function toggleRemoteView() {
+  if (view) {
+    closeRemoteView();
+    return Promise.resolve();
+  }
+  return openRemoteView();
+}
+
 /**
  * Open the view (desktop app only; elsewhere there is nothing to run).
  * `preset` (`{ kind: 'ssh', host } | { kind: 'wsl' }`, plus `path`) starts

@@ -92,6 +92,22 @@ export function initOpenSection(root, backend, opts = {}) {
   // used last" until the user picks another.
   let preset = opts.preset && (opts.preset.kind === 'wsl' || opts.preset.host) ? opts.preset : null;
 
+  /**
+   * Put `value` in the path field with its end in view: the end is what
+   * was just completed, and what is typed next. (A field filled from
+   * script otherwise shows the start of a long path and hides the rest.)
+   */
+  const setPath = (value) => {
+    pathEl.value = value;
+    const end = value.length;
+    try {
+      pathEl.setSelectionRange(end, end);
+    } catch {
+      /* not focusable yet: the scroll below still applies */
+    }
+    pathEl.scrollLeft = pathEl.scrollWidth;
+  };
+
   const setStatus = (text, kind, log) => {
     statusEl.textContent = text;
     statusEl.dataset.kind = kind || '';
@@ -127,7 +143,7 @@ export function initOpenSection(root, backend, opts = {}) {
     const asked = preset ? (preset.kind === 'wsl' ? WSL : sshValue(preset.host)) : null;
     if (asked && values.includes(asked)) {
       targetEl.value = asked;
-      if (typeof preset.path === 'string' && !pathEl.value) pathEl.value = preset.path;
+      if (typeof preset.path === 'string' && !pathEl.value) setPath(preset.path);
     } else if (values.includes(before)) {
       targetEl.value = before;
     } else {
@@ -144,9 +160,9 @@ export function initOpenSection(root, backend, opts = {}) {
   function onTargetChange(clearPath) {
     hostEl.style.display = targetEl.value === OTHER ? '' : 'none';
     const dest = destination();
-    if (clearPath) pathEl.value = '';
+    if (clearPath) setPath('');
     // The place opened there last is the likeliest to be wanted again.
-    if (!pathEl.value && !dest.error && recent) pathEl.value = recent.paths(dest.key)[0] || '';
+    if (!pathEl.value && !dest.error && recent) setPath(recent.paths(dest.key)[0] || '');
     closeSuggest();
   }
 
@@ -168,7 +184,21 @@ export function initOpenSection(root, backend, opts = {}) {
     suggestEl.textContent = '';
     items.forEach((text, i) => {
       const li = document.createElement('li');
-      li.textContent = text;
+      // The folder part is the same for most candidates; what tells them
+      // apart is the name, so that is what stands out. Long paths wrap
+      // (see style.css) instead of being cut off.
+      const { dir, name } = splitForDisplay(text);
+      if (dir) {
+        const d = document.createElement('span');
+        d.className = 'remote-suggest-dir';
+        d.textContent = dir;
+        li.appendChild(d);
+      }
+      const n = document.createElement('span');
+      n.className = 'remote-suggest-name';
+      n.textContent = name;
+      li.appendChild(n);
+      li.title = text;
       li.setAttribute('role', 'option');
       li.dataset.index = String(i);
       if (i === active) li.className = 'active';
@@ -219,7 +249,7 @@ export function initOpenSection(root, backend, opts = {}) {
   function accept(i) {
     const text = items[i];
     if (text == null) return;
-    pathEl.value = text;
+    setPath(text);
     closeSuggest();
     pathEl.focus();
     // A directory invites the next level.
@@ -252,7 +282,7 @@ export function initOpenSection(root, backend, opts = {}) {
       // Like a shell: as far as the candidates agree, else the first.
       const prefix = commonPrefix(items);
       if (prefix.length > pathEl.value.length) {
-        pathEl.value = prefix;
+        setPath(prefix);
         scheduleSuggest();
       } else {
         accept(0);
@@ -343,6 +373,17 @@ export function initOpenSection(root, backend, opts = {}) {
       renderTargets();
     },
   };
+}
+
+/**
+ * A path as its folder part and its last name (which keeps a directory's
+ * trailing slash): `~/a/b/` is `~/a/` + `b/`.
+ */
+export function splitForDisplay(path) {
+  const p = String(path ?? '');
+  const body = p.endsWith('/') ? p.slice(0, -1) : p;
+  const cut = body.lastIndexOf('/');
+  return cut < 0 ? { dir: '', name: p } : { dir: p.slice(0, cut + 1), name: p.slice(cut + 1) };
 }
 
 /** `roots` of a connection as one readable line. */

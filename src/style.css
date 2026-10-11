@@ -3260,7 +3260,7 @@ body:has(#app.ai-panel-open) #mode-indicator {
 
 /* Remote view (features/remote/remote-view.js) */
 .remote-panel {
-  width: 600px;
+  width: 680px;
   max-width: calc(100vw - 32px);
 }
 
@@ -3291,6 +3291,8 @@ body:has(#app.ai-panel-open) #mode-indicator {
 }
 
 .setting-remote .remote-open-form {
+  /* The suggestion list hangs below the whole row, at its full width. */
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 6px;
@@ -3308,7 +3310,6 @@ body:has(#app.ai-panel-open) #mode-indicator {
 }
 
 .setting-remote .remote-path-wrap {
-  position: relative;
   flex: 2 1 220px;
   min-width: 0;
 }
@@ -3337,12 +3338,21 @@ body:has(#app.ai-panel-open) #mode-indicator {
 
 .setting-remote .remote-suggest li {
   padding: 3px 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* A long path wraps rather than losing its end, which is the part that
+     tells the candidates apart. */
+  white-space: normal;
+  overflow-wrap: anywhere;
   font-family: var(--font-mono, monospace);
   font-size: calc(var(--ui-font-size) - 1px);
   cursor: pointer;
+}
+
+.setting-remote .remote-suggest .remote-suggest-dir {
+  opacity: 0.65;
+}
+
+.setting-remote .remote-suggest .remote-suggest-name {
+  font-weight: 600;
 }
 
 .setting-remote .remote-suggest li.active,

@@ -168,7 +168,7 @@ import {
   applyKeymode,
 } from './core/keymode.js';
 import { openSettings } from './settings.js';
-import { openRemoteView } from './features/remote/remote-view.js';
+import { openRemoteView, toggleRemoteView } from './features/remote/remote-view.js';
 import { openFolderPicker } from './folder-picker.js';
 import { openSavePicker } from './file-save-picker.js';
 import { isOpenFileShortcut, isGoToPathShortcut, isPrintShortcut } from './core/open-shortcuts.js';
@@ -2507,7 +2507,7 @@ function buildMenuDefinition() {
                 shortcut: 'Ctrl+Shift+U',
                 action: handleRevealActiveFileDir,
               },
-              { label: 'リモート接続…', action: openRemoteView },
+              { label: 'リモート接続…', shortcut: 'Ctrl+Shift+X', action: () => openRemoteView() },
             ]
           : []),
         { separator: true },
@@ -3169,6 +3169,13 @@ function handleGlobalKeys(e) {
       e.preventDefault();
       e.stopPropagation();
       handleOpenFolder();
+      return;
+    case 'X':
+      // Ctrl+Shift+X: the remote view, open or shut ("eXternal"; R is
+      // reload). Desktop app only; a no-op elsewhere.
+      e.preventDefault();
+      e.stopPropagation();
+      toggleRemoteView();
       return;
     case 'E':
       e.preventDefault();

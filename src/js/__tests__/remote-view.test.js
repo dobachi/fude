@@ -71,6 +71,15 @@ describe('remote view', () => {
     expect(names).toContain('box');
   });
 
+  it('the shortcut opens it, and shuts it when it is open', async () => {
+    await view.toggleRemoteView();
+    expect(document.querySelector('.remote-panel')).not.toBeNull();
+    await view.toggleRemoteView();
+    expect(document.querySelector('.remote-panel')).toBeNull();
+    await view.toggleRemoteView();
+    expect(document.querySelectorAll('.remote-panel').length).toBe(1);
+  });
+
   it('opens once however often it is asked', async () => {
     await Promise.all([view.openRemoteView(), view.openRemoteView()]);
     await view.openRemoteView();

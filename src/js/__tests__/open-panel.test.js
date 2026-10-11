@@ -7,6 +7,7 @@ import {
   initConnections,
   createRecentStore,
   rootsText,
+  splitForDisplay,
 } from '../features/remote/open-panel.js';
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -367,6 +368,31 @@ describe('open section: path completion', () => {
     backend.remoteComplete.mockRejectedValueOnce(new Error('no route'));
     await type('~/n');
     expect(suggestions()).toEqual(['~/notes']);
+  });
+
+  it('shows a long path whole, its name set apart from its folder', async () => {
+    const long = '~/Sources/DevMarkdownEditor/projects/fude/src-tauri/crates/fude-cli/src/tui/';
+    const { root, type } = mount({ completions: { 'k16|x': [long, 'plain.md'] } });
+    await type('x');
+    const [first, second] = root.querySelectorAll('#remote-suggest li');
+    // Nothing is dropped: the parts read back as the path, and hovering shows it.
+    expect(first.textContent).toBe(long);
+    expect(first.title).toBe(long);
+    expect(first.querySelector('.remote-suggest-dir').textContent).toBe(
+      '~/Sources/DevMarkdownEditor/projects/fude/src-tauri/crates/fude-cli/src/',
+    );
+    expect(first.querySelector('.remote-suggest-name').textContent).toBe('tui/');
+    expect(second.querySelector('.remote-suggest-dir')).toBeNull();
+    expect(second.querySelector('.remote-suggest-name').textContent).toBe('plain.md');
+  });
+
+  it('splits a path into folder and name for display', () => {
+    expect(splitForDisplay('~/a/b/')).toEqual({ dir: '~/a/', name: 'b/' });
+    expect(splitForDisplay('~/a/b.md')).toEqual({ dir: '~/a/', name: 'b.md' });
+    expect(splitForDisplay('/x')).toEqual({ dir: '/', name: 'x' });
+    expect(splitForDisplay('notes/')).toEqual({ dir: '', name: 'notes/' });
+    expect(splitForDisplay('/')).toEqual({ dir: '', name: '/' });
+    expect(splitForDisplay('')).toEqual({ dir: '', name: '' });
   });
 
   it('paths are shown as text, never as markup', async () => {

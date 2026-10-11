@@ -38,6 +38,7 @@ const sections = [
       ['Ctrl+S', '保存（Emacsモードは C-x C-s）'],
       ['Ctrl+Shift+S', '名前を付けて保存'],
       ['Ctrl+Shift+O', 'フォルダを開く'],
+      ['Ctrl+Shift+X', 'リモート接続（ssh 先・WSL のフォルダを開く／接続の一覧と切断）'],
       ['Ctrl+Shift+U', 'ファイラでこのファイルの場所を表示（ツリー外ならそのフォルダを開く）'],
       ['Ctrl+Shift+R', 'ファイルをディスクから再読込（外部変更を検知すると自動）'],
     ],
