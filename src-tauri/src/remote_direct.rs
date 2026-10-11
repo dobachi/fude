@@ -646,7 +646,7 @@ sleep 30"#,
         );
         let listed = sessions.list();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].2, [dir.clone()]);
+        assert_eq!(listed[0].2, std::slice::from_ref(&dir));
         // The agent answers for its files over the same pipe.
         let (session, path) = sessions
             .lookup(&format!("remote://farbox{}/a.md", dir))
