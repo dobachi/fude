@@ -152,6 +152,7 @@ Press `Ctrl+,` to open settings:
 - Font size
 - Key mode (Normal / Vim)
 - Feature toggles (AI Copilot, Diff Highlight)
+- Scroll Past End: blank space below the end of the document (half the pane), so the last lines can be scrolled up from the bottom edge; a dashed rule marks the real end. On by default
 - OpenRouter API key
 
 Settings are stored in `~/.config/fude/config.json`.

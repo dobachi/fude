@@ -343,6 +343,18 @@ describe('preview double-click', () => {
     fakeMount.last.ta.dispatchEvent(ev);
     expect(ev.defaultPrevented).toBe(false);
   });
+
+  it.each(['G', 'End'])('%s goes to the end of the document, not into the space below', (key) => {
+    initPreview(container, {});
+    // jsdom has no layout: 1200px of content (space included) in a 400px pane.
+    Object.defineProperty(container, 'clientHeight', { get: () => 400, configurable: true });
+    Object.defineProperty(container, 'scrollHeight', { get: () => 1200, configurable: true });
+    const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    container.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    // 1200 - 400 - 200 (half the pane): the last line sits at the bottom edge.
+    expect(container.scrollTop).toBe(600);
+  });
 });
 
 describe('createInlineEditor', () => {

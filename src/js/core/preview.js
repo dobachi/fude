@@ -23,6 +23,7 @@ import {
   tableCellOf,
 } from './preview-edit.js';
 import { attachInsertButton } from './preview-insert.js';
+import { attachScrollPastEnd, scrollToDocumentEnd } from './scroll-past-end.js';
 import {
   isQuartoFile,
   applyQuartoExtensions,
@@ -241,7 +242,9 @@ function handlePreviewKeys(e) {
       }
       break;
     case 'G':
-      container.scrollTop = container.scrollHeight;
+    case 'End':
+      // The end of the document, not the bottom of the space below it.
+      scrollToDocumentEnd(container);
       e.preventDefault();
       break;
   }
@@ -313,6 +316,7 @@ export function initPreview(container, opts = {}) {
   ensureMd();
   container.setAttribute('tabindex', '0');
   container.addEventListener('keydown', handlePreviewKeys);
+  attachScrollPastEnd(container);
 
   // "+" in the left margin = write a new block here (see preview-insert.js).
   if (opts.onBlockInsert) attachInsertButton(container, opts.onBlockInsert);

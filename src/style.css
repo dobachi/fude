@@ -1279,6 +1279,26 @@ body {
   }
 }
 
+/* Space below the end of the document (scroll-past-end.js), with a rule that
+   marks the real end while the view is scrolled into it. Not for print: the
+   printed document reuses .preview-pane but never gets the class. */
+.preview-pane.scroll-past-end::after {
+  content: '';
+  display: block;
+  height: var(--past-end-space, 0px);
+  border-top: 1px dashed transparent;
+}
+
+.preview-pane.scroll-past-end.is-past-end::after {
+  border-top-color: var(--fg-muted);
+}
+
+@media print {
+  .preview-pane.scroll-past-end::after {
+    display: none;
+  }
+}
+
 /* Task list items: the checkbox replaces the bullet, and clicking it edits the
    source ([ ] ⇄ [x]). */
 .preview-pane li.task-list-item {

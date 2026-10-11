@@ -24,6 +24,7 @@ import {
   setSourceCodeMode,
   convertSelectionToTable,
 } from './core/editor.js';
+import { setScrollPastEndEnabled } from './core/scroll-past-end.js';
 import { shouldOpenAsCode } from './core/file-lang.js';
 import {
   initOutline,
@@ -709,6 +710,8 @@ async function init() {
   setCodeHighlightEnabled(config.features?.code_highlight);
   sourceCodeModeEnabled = !!config.features?.source_code_mode;
   setSourceCodeMode(sourceCodeModeEnabled);
+  // On unless switched off: configs written before the setting existed lack it.
+  setScrollPastEndEnabled(config.features?.scroll_past_end !== false);
 
   // Live-apply config changes saved from the Settings panel.
   window.addEventListener('fude:config-saved', (e) => {
@@ -719,6 +722,7 @@ async function init() {
     setCodeHighlightEnabled(saved.features?.code_highlight);
     sourceCodeModeEnabled = !!saved.features?.source_code_mode;
     setSourceCodeMode(sourceCodeModeEnabled);
+    setScrollPastEndEnabled(saved.features?.scroll_past_end !== false);
     if (saved.ui_font_size) setUiFontSize(saved.ui_font_size);
     rerenderPreviews();
   });

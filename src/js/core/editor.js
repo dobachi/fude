@@ -54,6 +54,7 @@ import {
   textToTableModel,
 } from './table.js';
 import { shouldOpenAsCode, languageDescForPath } from './file-lang.js';
+import { scrollPastEnd } from './editor-past-end.js';
 
 let currentFontSize = 14;
 
@@ -640,6 +641,7 @@ export function createEditor(
     baseTheme,
     themeCompartment.of(themeExtensionFor(document.documentElement.getAttribute('data-theme'))),
     EditorView.lineWrapping,
+    scrollPastEnd(),
     EditorView.domEventHandlers({
       paste(event, view) {
         const items = event.clipboardData?.items;
