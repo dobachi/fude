@@ -166,6 +166,9 @@ pub struct TsPeer {
     pub fqdn: String,
     /// Tailnet addresses, as listed (IPv4 first in practice).
     pub ips: Vec<String>,
+    /// The machine's ssh host keys as the tailnet vouches for them
+    /// (`type base64`); empty unless it runs Tailscale SSH.
+    pub host_keys: Vec<String>,
 }
 
 /// The tailnet peer that `host` names: by short name, MagicDNS name or
@@ -183,18 +186,20 @@ pub fn tailscale_peer(status_json: &str, host: &str) -> Option<TsPeer> {
         let short = fqdn.split('.').next().unwrap_or("").to_ascii_lowercase();
         let name = peer.get("HostName").and_then(|d| d.as_str()).unwrap_or("");
         if short == want || fqdn.eq_ignore_ascii_case(&want) || name.eq_ignore_ascii_case(&want) {
-            let ips = peer
-                .get("TailscaleIPs")
-                .and_then(|i| i.as_array())
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|ip| ip.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default();
+            let strings = |key: &str| -> Vec<String> {
+                peer.get(key)
+                    .and_then(|i| i.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|s| s.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
             return Some(TsPeer {
                 fqdn: fqdn.to_string(),
-                ips,
+                ips: strings("TailscaleIPs"),
+                host_keys: strings("sshHostKeys"),
             });
         }
     }
@@ -242,6 +247,59 @@ pub fn effective_hostname(ssh_g: &str) -> Option<String> {
         (key.eq_ignore_ascii_case("hostname") && !value.trim().is_empty())
             .then(|| value.trim().to_string())
     })
+}
+
+/// The `known_hosts` lines that introduce a tailnet machine to ssh: one per
+/// key, for the names ssh has no entry for yet.
+///
+/// A first plain `ssh` to a machine asks whether to trust its key, and
+/// setup — run from a button, without a terminal — cannot answer. The
+/// tailnet already vouches for these keys (`tailscale ssh` trusts the same
+/// ones), so no question is needed. Names ssh already knows are left out:
+/// an entry that disagrees must keep failing.
+pub fn known_hosts_lines(peer: &TsPeer, unknown_names: &[String]) -> Vec<String> {
+    let plain = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+/=-_.:@".contains(c))
+    };
+    let names: Vec<&str> = unknown_names
+        .iter()
+        .map(String::as_str)
+        .filter(|n| plain(n))
+        .collect();
+    if names.is_empty() {
+        return Vec::new();
+    }
+    peer.host_keys
+        .iter()
+        .filter_map(|key| {
+            let mut parts = key.split_whitespace();
+            let (kind, blob) = (parts.next()?, parts.next()?);
+            (plain(kind) && plain(blob)).then(|| format!("{} {} {}", names.join(","), kind, blob))
+        })
+        .collect()
+}
+
+/// The names ssh may look `host` up under in `known_hosts`.
+pub fn known_hosts_names(host: &str, peer: &TsPeer) -> Vec<String> {
+    let mut names = vec![host.to_string(), peer.fqdn.clone()];
+    names.extend(peer.ips.iter().cloned());
+    names.dedup();
+    names
+}
+
+/// What to tell the user when ssh refuses a machine it has not met.
+pub fn host_key_hint(error: &str, host: &str) -> Option<String> {
+    error
+        .to_ascii_lowercase()
+        .contains("host key verification failed")
+        .then(|| {
+            format!(
+                "ssh has not met `{host}` yet and setup cannot answer its question. Run \
+                 `ssh {host}` once in a terminal, answer `yes`, then run setup again."
+            )
+        })
 }
 
 /// What to tell the user when ssh's own error says the name is unknown.
@@ -306,6 +364,17 @@ fn resolves(name: &str) -> bool {
     (name, 22)
         .to_socket_addrs()
         .is_ok_and(|mut a| a.next().is_some())
+}
+
+/// Whether `known_hosts` has any entry for `name`; `None` without ssh-keygen.
+fn known_to_ssh(name: &str) -> Option<bool> {
+    Command::new("ssh-keygen")
+        .args(["-F", name])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()
+        .map(|s| s.success())
 }
 
 /// Where ssh would connect for `host`, per the config as it stands.
@@ -544,12 +613,43 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
         }
     }
 
+    // A tailnet machine ssh has not met: introduce it, as `tailscale ssh` would.
+    if let Some(peer) = &peer {
+        let unknown: Vec<String> = known_hosts_names(host, peer)
+            .into_iter()
+            .filter(|n| known_to_ssh(n) == Some(false))
+            .collect();
+        let lines = known_hosts_lines(peer, &unknown);
+        if !lines.is_empty() {
+            use std::io::Write;
+            std::fs::create_dir_all(&ssh_dir).map_err(|e| e.to_string())?;
+            let path = ssh_dir.join("known_hosts");
+            let needs_newline =
+                std::fs::read(&path).is_ok_and(|b| b.last().is_some_and(|c| *c != b'\n'));
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .map_err(|e| format!("cannot write {}: {}", path.display(), e))?;
+            let text = format!(
+                "{}{}\n",
+                if needs_newline { "\n" } else { "" },
+                lines.join("\n")
+            );
+            file.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+            Step("known_hosts").ok(&format!(
+                "added the host keys Tailscale has for {}",
+                unknown.join(", ")
+            ));
+        }
+    }
+
     // 3. remote side
     let uname = ssh(
         host,
         "mkdir -p ~/.config/fude ~/.local/bin && uname -sm && (echo $PATH | tr : '\\n' | grep -qx \"$HOME/.local/bin\" && echo PATH_OK || echo PATH_MISSING)",
     )
-    .map_err(|e| match unresolved_hint(&e, host) {
+    .map_err(|e| match unresolved_hint(&e, host).or_else(|| host_key_hint(&e, host)) {
         Some(hint) => format!("{}\n  {}", e, hint),
         None => e,
     })?;
@@ -799,6 +899,50 @@ mod tests {
         let (out, added, _) = ensure_host_lines(cfg, "k16", &wants);
         assert_eq!(added, [forward_line(47821, SOCK)]);
         assert!(!out.contains("100.64.0.1"));
+    }
+
+    #[test]
+    fn a_tailnet_machine_is_introduced_with_the_keys_tailscale_has() {
+        let json = r#"{"Peer":{"a":{"HostName":"k16","DNSName":"k16.tail.example.net.",
+            "TailscaleIPs":["100.64.0.1","fd7a::1"],
+            "sshHostKeys":["ssh-ed25519 AAAAC3Nz+a/b=","ssh-rsa AAAAB3Nz","broken","ssh-rsa AAAA\nevil ssh-rsa BBBB"]}}}"#;
+        let peer = tailscale_peer(json, "k16").unwrap();
+        let names = known_hosts_names("k16", &peer);
+        assert_eq!(
+            names,
+            ["k16", "k16.tail.example.net", "100.64.0.1", "fd7a::1"]
+        );
+        assert_eq!(
+            known_hosts_lines(&peer, &names),
+            [
+                "k16,k16.tail.example.net,100.64.0.1,fd7a::1 ssh-ed25519 AAAAC3Nz+a/b=",
+                "k16,k16.tail.example.net,100.64.0.1,fd7a::1 ssh-rsa AAAAB3Nz",
+                // A key with a line break in it is cut at the break, never
+                // allowed to start a line of its own.
+                "k16,k16.tail.example.net,100.64.0.1,fd7a::1 ssh-rsa AAAA",
+            ]
+        );
+        // Only the names ssh has no entry for.
+        assert_eq!(
+            known_hosts_lines(&peer, &["100.64.0.1".to_string()])[0],
+            "100.64.0.1 ssh-ed25519 AAAAC3Nz+a/b="
+        );
+        // Everything known already, or an odd name: nothing is written.
+        assert!(known_hosts_lines(&peer, &[]).is_empty());
+        assert!(known_hosts_lines(&peer, &["a b".to_string(), "x\ny".to_string()]).is_empty());
+        // A machine without Tailscale SSH has no keys to offer.
+        let bare = tailscale_peer(TS_IPS, "k16").unwrap();
+        assert!(known_hosts_lines(&bare, &names).is_empty());
+    }
+
+    #[test]
+    fn an_unmet_host_is_explained() {
+        let hint = host_key_hint("ssh k16 failed: Host key verification failed.", "k16").unwrap();
+        assert!(hint.contains("`ssh k16` once") && !hint.contains("  "));
+        assert_eq!(
+            host_key_hint("ssh k16 failed: Permission denied", "k16"),
+            None
+        );
     }
 
     #[test]

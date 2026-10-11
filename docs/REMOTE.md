@@ -264,6 +264,7 @@ PowerShell で `fude-cli.exe setup k16`（インストール先の `fude-cli.exe
 | `remote agents must present the GUI token` | 鍵が違う。`fude setup <host>` をやり直すか `~/.config/fude/gui-token` を手元のものと揃える |
 | `tcp://127.0.0.1:47821: Connection refused` | ssh の転送が張られていない。`~/.ssh/config` の `RemoteForward` 行と、`ssh` でログインし直したか。`tailscale ssh <host>` で入っているなら `fude setup <host>` をやり直す（Tailscale の名前用の設定が追加される） |
 | セットアップで `Could not resolve hostname k16` | その PC の ssh が `k16` という名前を引けない（WSL が自前の DNS 設定を使っていて Tailscale の短い名前が通らない、など）。相手が Tailscale 上にいれば、Fude 0.8.8 以降の `fude setup` が `~/.ssh/config` の `Host k16` に `HostName`（Tailscale の名前、引けなければアドレス）を自動で足す。Tailscale 以外なら `Host k16` の下に `HostName <アドレス>` を自分で書く |
+| セットアップで `Host key verification failed` | その PC の ssh が相手にまだ一度も繋いだことがなく、「この鍵を信用するか」の質問にセットアップが答えられない（`tailscale ssh` でしか入ったことがない PC で起きる）。端末で一度 `ssh k16` を実行して `yes` と答えてから、セットアップをやり直す。相手が Tailscale SSH を動かしていれば、Fude 0.8.9 以降の `fude setup` は Tailscale が保証するホスト鍵を `~/.ssh/known_hosts` に自動で登録する |
 | `remote port forwarding failed for listen port 47821` | 接続共有が無い状態で同じホストへ ssh を複数本張ると出る（転送を持てるのは最初の 1 本だけ）。`fude setup k16` をやり直すと接続共有が入り、解消する。共有を入れる前から開いていたセッションは閉じて入り直す。他人や別のソフトが 47821 を使っている場合は `fude setup k16 --port 47822` で別ポートに |
 | Fude 側に「k16 との接続が切れました」 | ssh を閉じた／`fude-cli` を止めた。タブは残り、未保存分は暫定保存にある。繋ぎ直してもう一度開く |
 | ssh 先で `Failed to initialize gtk backend` | `fude`（GUI 本体）を画面の無いホストで起動した。`fude-cli FILE` を使う（Fude 0.8.5 以降の `fude FILE` は自動で `fude-cli` に切り替わる） |
