@@ -3,6 +3,7 @@ mod gui_server;
 mod key_storage;
 mod updater_env;
 mod wait_client;
+mod wsl_bridge;
 
 use fude_core::{
     config_dir, ensure_config_dir, resolve_cli_path, set_dir_permissions, set_file_permissions,
@@ -835,18 +836,123 @@ fn cli_outcome(success: bool, stdout: &[u8], stderr: &[u8]) -> CliOutcome {
 #[tauri::command(async)]
 fn remote_setup(host: String, check_only: bool) -> Result<CliOutcome, String> {
     let args = remote_setup_args(&host, check_only)?;
+    // With WSL integration on, ssh sessions start from WSL, so it is WSL's
+    // ~/.ssh/config and WSL's ssh that have to be set up.
+    let distro = fude_core::load_config().ok().and_then(|c| c.wsl_distro);
+    if let Some(distro) = wsl_route(cfg!(windows), distro.as_deref()) {
+        let (ok, out, err) = wsl_bridge::run_script(
+            WSL_EXE,
+            &wsl_bridge::wsl_args(&distro),
+            &wsl_bridge::cli_script(env!("CARGO_PKG_VERSION"), &args),
+        )?;
+        return Ok(cli_outcome(ok, &out, &err));
+    }
     let program = fude_cli_program();
     let mut cmd = std::process::Command::new(&program);
     cmd.args(&args).stdin(std::process::Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: no console flash
-    }
+    wsl_bridge::no_window(&mut cmd);
     let out = cmd
         .output()
         .map_err(|e| format!("fude-cli を実行できません ({}): {}", program.display(), e))?;
     Ok(cli_outcome(out.status.success(), &out.stdout, &out.stderr))
+}
+
+// ─── WSL integration (Windows, optional) ───────────────────
+
+const WSL_EXE: &str = "wsl.exe";
+
+/// The distro whose ssh and fude-cli act for this app, when there is one:
+/// only on Windows, and only with WSL integration switched on.
+fn wsl_route(windows: bool, distro: Option<&str>) -> Option<String> {
+    if !windows {
+        return None;
+    }
+    distro.and_then(|d| wsl_bridge::valid_distro(d).ok())
+}
+
+/// What the settings panel shows about WSL integration.
+#[derive(Debug, Clone, Serialize)]
+pub struct WslStatus {
+    /// False off Windows: the panel hides the whole control.
+    pub supported: bool,
+    pub distros: Vec<String>,
+    /// The distro chosen in the settings (None = off).
+    pub distro: Option<String>,
+    pub running: bool,
+    pub log: String,
+}
+
+fn list_wsl_distros() -> Vec<String> {
+    let mut cmd = std::process::Command::new(WSL_EXE);
+    cmd.args(["-l", "-q"]).stdin(std::process::Stdio::null());
+    wsl_bridge::no_window(&mut cmd);
+    cmd.output()
+        .map(|o| wsl_bridge::parse_distros(&o.stdout))
+        .unwrap_or_default()
+}
+
+fn start_wsl_bridge(manager: &wsl_bridge::Manager, distro: &str) -> Result<(), String> {
+    let distro = wsl_bridge::valid_distro(distro)?;
+    let exe = fude_cli_program();
+    manager.start(
+        WSL_EXE,
+        &wsl_bridge::wsl_args(&distro),
+        &wsl_bridge::bridge_script(
+            env!("CARGO_PKG_VERSION"),
+            wsl_bridge::RELEASE_BASE,
+            &exe.to_string_lossy(),
+        ),
+        &distro,
+    )
+}
+
+fn wsl_status(manager: &wsl_bridge::Manager, with_distros: bool) -> WslStatus {
+    let supported = cfg!(windows);
+    let (_, running, log) = manager.status();
+    WslStatus {
+        supported,
+        distros: if supported && with_distros {
+            list_wsl_distros()
+        } else {
+            Vec::new()
+        },
+        distro: fude_core::load_config().ok().and_then(|c| c.wsl_distro),
+        running,
+        log,
+    }
+}
+
+/// `with_distros` also lists the installed distros (slower: asks wsl.exe).
+#[tauri::command(async)]
+fn wsl_bridge_status(
+    manager: State<'_, Arc<wsl_bridge::Manager>>,
+    with_distros: bool,
+) -> WslStatus {
+    wsl_status(&manager, with_distros)
+}
+
+/// Switch WSL integration to `distro` (None = off): remember the choice and
+/// start or stop the bridge now.
+#[tauri::command(async)]
+fn wsl_bridge_set(
+    manager: State<'_, Arc<wsl_bridge::Manager>>,
+    distro: Option<String>,
+) -> Result<WslStatus, String> {
+    if !cfg!(windows) {
+        return Err("WSL 連携は Windows 版でのみ使えます".into());
+    }
+    let distro = match distro.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(d) => Some(wsl_bridge::valid_distro(d)?),
+    };
+    let mut config = fude_core::load_config()?;
+    config.wsl_distro = distro.clone();
+    fude_core::save_config(config)?;
+    manager.stop();
+    if let Some(d) = &distro {
+        start_wsl_bridge(&manager, d)?;
+    }
+    Ok(wsl_status(&manager, false))
 }
 
 /// Run `fude-cli` with `args` and return the process exit code. Falls back to
@@ -1132,9 +1238,11 @@ fn gui_ready(
     app: tauri::AppHandle,
     registry: State<'_, Arc<gui_server::WaitRegistry>>,
     sessions: State<'_, Arc<gui_server::RemoteSessions>>,
+    wsl: State<'_, Arc<wsl_bridge::Manager>>,
 ) -> Result<String, String> {
     let registry = Arc::clone(&registry);
     let sessions = Arc::clone(&sessions);
+    let wsl = Arc::clone(&wsl);
     GUI_SOCKET_STARTED
         .get_or_init(|| {
             let dir = ensure_config_dir()?;
@@ -1170,6 +1278,13 @@ fn gui_ready(
             {
                 use std::os::unix::fs::PermissionsExt;
                 let _ = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600));
+            }
+            // WSL integration: now that the GUI answers, bring up the bridge.
+            let distro = fude_core::load_config().ok().and_then(|c| c.wsl_distro);
+            if let Some(distro) = wsl_route(cfg!(windows), distro.as_deref()) {
+                if let Err(e) = start_wsl_bridge(&wsl, &distro) {
+                    eprintln!("fude: WSL integration not started: {}", e);
+                }
             }
             Ok(socket.to_string_lossy().to_string())
         })
@@ -1712,6 +1827,7 @@ pub fn run() {
         .manage(PendingOpens::default())
         .manage(Arc::new(gui_server::WaitRegistry::default()))
         .manage(Arc::new(gui_server::RemoteSessions::default()))
+        .manage(Arc::new(wsl_bridge::Manager::default()))
         .invoke_handler(tauri::generate_handler![
             new_window,
             take_open_request,
@@ -1724,6 +1840,8 @@ pub fn run() {
             remote_unwatch_file,
             remote_hosts,
             remote_setup,
+            wsl_bridge_status,
+            wsl_bridge_set,
             read_file,
             write_file,
             rename_path,
@@ -1830,8 +1948,16 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // The bridge child does not end with this process by itself.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(wsl) = app.try_state::<Arc<wsl_bridge::Manager>>() {
+                    wsl.stop();
+                }
+            }
+        });
 }
 
 // ─── Tests ────────────────────────────────────────────────
@@ -1988,6 +2114,19 @@ mod tests {
             assert!(remote_setup_args(bad, false).is_err(), "{:?}", bad);
         }
         assert!(valid_ssh_host(&"a".repeat(256)).is_err());
+    }
+
+    #[test]
+    fn wsl_is_used_only_on_windows_with_a_distro_chosen() {
+        assert_eq!(
+            wsl_route(true, Some("Ubuntu-22.04")),
+            Some("Ubuntu-22.04".into())
+        );
+        assert_eq!(wsl_route(true, None), None);
+        assert_eq!(wsl_route(false, Some("Ubuntu-22.04")), None);
+        // A damaged config value never reaches wsl.exe.
+        assert_eq!(wsl_route(true, Some("-e sh")), None);
+        assert_eq!(wsl_route(true, Some("")), None);
     }
 
     #[test]

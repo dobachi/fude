@@ -213,6 +213,23 @@ fude bridge            # WSL で実行（fude-cli bridge でも同じ）。起�
 - WSL のローカルな `fude --wait` は使えない（Windows の Fude は WSL のパスを直接読めない）。`fude-cli --wait` を使う。
   `$EDITOR` には `fude-cli --wait` を設定しておけば、WSL の Fude でも Windows の Fude でも動く
 
+### `fude bridge` を打たずに済ませる（設定画面の「WSL 連携」）
+
+Windows 版の Fude に、この中継を任せることもできる（オプション、既定はオフ）。
+**Settings（歯車）→「リモート接続 / Remote hosts」→「WSL 連携」** でディストリビューションを選ぶ。
+
+- 選んだ時点と、以後 Fude を起動するたびに、Fude がその WSL の中で `fude bridge` を起動する。Fude を終了すると止まる。
+  `fude bridge` を自分で打つ必要はなく、WSL を再起動したあとも Fude を起動し直せば戻る
+- WSL に Fude をインストールしておく必要もない。Fude が自分と同じ版の `fude-cli` を GitHub Releases から
+  `~/.cache/fude/fude-cli-<版>` に取得する（初回だけ。WSL から GitHub に出られることが前提）。
+  WSL に `fude-cli` コマンドが無ければ `~/.local/bin/fude-cli` にリンクも張るので、WSL で `fude-cli FILE` と打てる
+- オンの間は、同じ画面の「セットアップ」「接続確認」「更新」が **WSL の ssh**（WSL の `~/.ssh/config`）で実行される。
+  ssh は WSL から張るものなので、設定もそちらに入る必要があるため
+- 状態は選択欄の横に出る。「動作中」「準備中（取得中）」のほか、止まっている場合はその理由
+  （例: `gui.sock is in use` = WSL の Fude か手動の `fude bridge` が動いている）
+- 既定のディストリビューションとは限らないので、ふだん作業しているものを選ぶ（`wsl -l -v` で確認できる）
+- Fude を起動すると WSL も起動する。WSL を使わないときにそれが困るならオフのままにして、必要なときに `fude bridge` を打つ
+
 ### Windows だけで完結させる場合（PowerShell から ssh する）
 
 Windows の Fude は名前付きパイプに加えて `127.0.0.1:47821` の TCP でも待ち受ける（ssh はパイプへ転送できないため）。
@@ -238,7 +255,8 @@ PowerShell で `fude-cli.exe setup k16`（インストール先の `fude-cli.exe
 | 症状 | 見るところ |
 | --- | --- |
 | `fude-cli` が端末内エディタになってしまう | 手元で Fude が起動しているか（Windows の Fude で受けるなら WSL で `fude bridge` が動いているか）。`fude-cli --check` で経路を確認 |
-| `fude bridge`: `gui.sock is in use` | WSL の Fude（または別の bridge）が動いている。どちらか一方にする |
+| `fude bridge`: `gui.sock is in use` | WSL の Fude（または別の bridge）が動いている。どちらか一方にする。設定画面の「WSL 連携」をオンにしているなら、手動の `fude bridge` は不要 |
+| 「WSL 連携」が「停止中: curl: …」 | WSL から GitHub Releases を取得できない。ネットワークを確認するか、WSL に Fude を入れて `fude bridge` を使う |
 | `fude bridge` 経由で `no Fude GUI on Windows answers` | Windows の Fude が起動していない |
 | `remote agents must present the GUI token` | 鍵が違う。`fude setup <host>` をやり直すか `~/.config/fude/gui-token` を手元のものと揃える |
 | `tcp://127.0.0.1:47821: Connection refused` | ssh の転送が張られていない。`~/.ssh/config` の `RemoteForward` 行と、`ssh` でログインし直したか。`tailscale ssh <host>` で入っているなら `fude setup <host>` をやり直す（Tailscale の名前用の設定が追加される） |

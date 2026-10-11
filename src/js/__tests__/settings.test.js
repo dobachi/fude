@@ -13,6 +13,8 @@ vi.mock('../backend.js', () => ({
   deleteApiKey: vi.fn().mockResolvedValue(undefined),
   isLocalTauri: vi.fn(() => false),
   remoteSetup: vi.fn().mockResolvedValue({ ok: true, log: '' }),
+  wslBridgeStatus: vi.fn().mockResolvedValue({ supported: false, distros: [] }),
+  wslBridgeSet: vi.fn(),
 }));
 
 vi.mock('../core/theme.js', () => ({

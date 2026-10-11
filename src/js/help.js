@@ -120,7 +120,10 @@ const sections = [
       ['fude-cli FILE（ssh 先・WSL で）', '手元の Fude にタブを開く。--wait で閉じるまで待つ'],
       ['fude tui FILE / DIR', '端末内で編集（Ctrl+S 保存、Alt+Q 終了、F1 キー一覧）'],
       ['fude check', '起動中の Fude に届くか・どの経路かを表示'],
-      ['fude bridge（WSL で）', 'WSL から開くものを Windows の Fude に出す'],
+      [
+        'fude bridge（WSL で）',
+        'WSL から開くものを Windows の Fude に出す。Windows 版は設定画面の「WSL 連携」で自動起動にできる',
+      ],
     ],
   },
   {

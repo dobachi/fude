@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { remoteSectionHtml, initRemoteSection } from '../features/remote/setup-panel.js';
+import {
+  remoteSectionHtml,
+  initRemoteSection,
+  initWslSection,
+  wslStatusText,
+} from '../features/remote/setup-panel.js';
 
 function mount(initialHosts, results = {}) {
   document.body.innerHTML = `<div id="root">${remoteSectionHtml()}</div>`;
@@ -147,5 +152,167 @@ describe('remote hosts section', () => {
     expect(root.querySelector('.remote-host-name').textContent).toBe(
       '<img src=x onerror=alert(1)>',
     );
+  });
+});
+
+describe('wslStatusText', () => {
+  it('is empty when integration is off', () => {
+    expect(wslStatusText({ distro: null, running: false, log: 'x' })).toBe('');
+    expect(wslStatusText(undefined)).toBe('');
+  });
+
+  it('describes a running bridge', () => {
+    expect(wslStatusText({ distro: 'U', running: true, log: 'fude-cli bridge: a → b' })).toBe(
+      '動作中',
+    );
+    expect(wslStatusText({ distro: 'U', running: true, log: '' })).toBe('動作中');
+    expect(
+      wslStatusText({
+        distro: 'U',
+        running: true,
+        log: 'fude: downloading fude-cli 0.8.7 into WSL',
+      }),
+    ).toMatch(/準備中/);
+    expect(
+      wslStatusText({
+        distro: 'U',
+        running: true,
+        log: 'fude-cli bridge: wrote the GUI token to X — restart Fude on Windows once\nfude-cli bridge: a → b',
+      }),
+    ).toMatch(/再起動/);
+  });
+
+  it('shows why a bridge is not running', () => {
+    expect(
+      wslStatusText({
+        distro: 'U',
+        running: false,
+        log: 'first\n\nfude-cli bridge: gui.sock is in use\n',
+      }),
+    ).toBe('停止中: fude-cli bridge: gui.sock is in use');
+    expect(wslStatusText({ distro: 'U', running: false, log: '' })).toBe('停止中');
+  });
+});
+
+describe('WSL integration row', () => {
+  function mountWsl(status, setResult) {
+    document.body.innerHTML = `<div id="root">${remoteSectionHtml()}</div>`;
+    const root = document.getElementById('root');
+    const backend = {
+      wslBridgeStatus: vi.fn(async () => status),
+      wslBridgeSet: vi.fn(async (distro) => {
+        if (setResult instanceof Error) throw setResult;
+        return setResult ?? { supported: true, distro, running: true, log: '' };
+      }),
+    };
+    return { root, backend, $: (sel) => root.querySelector(sel) };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('stays hidden where it is not supported', async () => {
+    const { root, backend, $ } = mountWsl({ supported: false, distros: [] });
+    await initWslSection(root, backend, []);
+    expect($('#remote-wsl').style.display).toBe('none');
+    expect(backend.wslBridgeStatus).toHaveBeenCalledWith(true);
+  });
+
+  it('stays hidden when the backend cannot be asked', async () => {
+    const { root, $ } = mountWsl();
+    await initWslSection(root, { wslBridgeStatus: vi.fn().mockRejectedValue(new Error('x')) }, []);
+    expect($('#remote-wsl').style.display).toBe('none');
+  });
+
+  it('lists the distros with the current one selected', async () => {
+    const { root, backend, $ } = mountWsl({
+      supported: true,
+      distros: ['CentOS7', 'Ubuntu-22.04-k'],
+      distro: 'Ubuntu-22.04-k',
+      running: true,
+      log: '',
+    });
+    await initWslSection(root, backend, []);
+    expect($('#remote-wsl').style.display).toBe('');
+    expect([...$('#remote-wsl-distro').options].map((o) => o.value)).toEqual([
+      '',
+      'CentOS7',
+      'Ubuntu-22.04-k',
+    ]);
+    expect($('#remote-wsl-distro').value).toBe('Ubuntu-22.04-k');
+    expect($('#remote-wsl-status').textContent).toBe('動作中');
+  });
+
+  it('keeps a configured distro selectable even if wsl no longer lists it', async () => {
+    const { root, backend, $ } = mountWsl({
+      supported: true,
+      distros: ['CentOS7'],
+      distro: 'Gone',
+      running: false,
+      log: 'There is no distribution with the supplied name.',
+    });
+    await initWslSection(root, backend, []);
+    expect($('#remote-wsl-distro').value).toBe('Gone');
+    expect($('#remote-wsl-status').textContent).toMatch(/^停止中: There is no/);
+    expect($('#remote-wsl-status').dataset.kind).toBe('error');
+  });
+
+  it('choosing a distro switches it on and follows up on the start', async () => {
+    const { root, backend, $ } = mountWsl({
+      supported: true,
+      distros: ['U'],
+      distro: null,
+      running: false,
+    });
+    await initWslSection(root, backend, [0]);
+    backend.wslBridgeStatus.mockResolvedValue({
+      supported: true,
+      distro: 'U',
+      running: false,
+      log: 'fude-cli bridge: gui.sock is in use',
+    });
+    const select = $('#remote-wsl-distro');
+    select.value = 'U';
+    select.dispatchEvent(new Event('change'));
+    expect($('#remote-wsl-status').textContent).toBe('起動しています…');
+    await flush();
+    expect(backend.wslBridgeSet).toHaveBeenCalledWith('U');
+    await flush();
+    await flush();
+    // The follow-up found that it did not stay up, and says why.
+    expect(backend.wslBridgeStatus).toHaveBeenLastCalledWith(false);
+    expect($('#remote-wsl-status').textContent).toBe('停止中: fude-cli bridge: gui.sock is in use');
+    expect(select.disabled).toBe(false);
+  });
+
+  it('choosing off switches it off without a follow-up', async () => {
+    const { root, backend, $ } = mountWsl(
+      { supported: true, distros: ['U'], distro: 'U', running: true },
+      { supported: true, distro: null, running: false, log: '' },
+    );
+    await initWslSection(root, backend, [0]);
+    const select = $('#remote-wsl-distro');
+    select.value = '';
+    select.dispatchEvent(new Event('change'));
+    await flush();
+    await flush();
+    expect(backend.wslBridgeSet).toHaveBeenCalledWith(null);
+    expect($('#remote-wsl-status').textContent).toBe('');
+    expect(backend.wslBridgeStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failure to switch is shown and the control comes back', async () => {
+    const { root, backend, $ } = mountWsl(
+      { supported: true, distros: ['U'], distro: null, running: false },
+      new Error('wsl.exe を実行できません'),
+    );
+    await initWslSection(root, backend, [0]);
+    const select = $('#remote-wsl-distro');
+    select.value = 'U';
+    select.dispatchEvent(new Event('change'));
+    await flush();
+    expect($('#remote-wsl-status').textContent).toMatch(/失敗: wsl.exe/);
+    expect(select.disabled).toBe(false);
   });
 });

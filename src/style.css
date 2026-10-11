@@ -2499,6 +2499,32 @@ body {
   font-family: var(--font-mono, monospace);
 }
 
+.setting-remote .remote-wsl {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.setting-remote .remote-wsl select {
+  width: auto;
+  flex: 0 1 auto;
+}
+
+.setting-remote .remote-wsl-status {
+  font-size: calc(var(--ui-font-size) - 2px);
+  color: var(--fg-secondary);
+}
+
+.setting-remote .remote-wsl-status[data-kind='error'] {
+  color: #f44336;
+}
+
+.setting-remote .remote-wsl .setting-hint {
+  flex: 1 1 100%;
+}
+
 .setting-remote .remote-status {
   margin-top: 6px;
   font-size: calc(var(--ui-font-size) - 2px);

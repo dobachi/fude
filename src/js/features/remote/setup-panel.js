@@ -11,11 +11,101 @@ export function remoteSectionHtml() {
         <input type="text" id="remote-host" placeholder="ssh のホスト名（例: k16, user@host）" spellcheck="false" autocomplete="off" />
         <button type="button" id="remote-setup-btn">セットアップ</button>
       </div>
+      <div class="remote-wsl" id="remote-wsl" style="display:none">
+        <span class="remote-wsl-label">WSL 連携</span>
+        <select id="remote-wsl-distro"><option value="">オフ</option></select>
+        <span class="remote-wsl-status" id="remote-wsl-status" role="status"></span>
+        <small class="setting-hint">WSL のディストリビューションを選ぶと、Fude の起動中はその中で中継（<code>fude bridge</code>）を自動で動かします。WSL やそこから ssh した先で開いたファイルがこの Fude に出るようになり、上の「セットアップ」も WSL の ssh で実行されます。</small>
+      </div>
       <div class="remote-hosts" id="remote-hosts"></div>
       <div class="remote-status" id="remote-status" role="status"></div>
       <pre class="remote-log" id="remote-log" style="display:none"></pre>
       <small class="setting-hint">ssh で入れるホストを登録すると、そのホストで <code>fude FILE</code> と打つだけでこの Fude に開けます（<code>fude setup HOST</code> と同じ処理）。パスワード入力なしで <code>ssh HOST</code> できることが前提です。</small>
     </div>`;
+}
+
+/** One line describing a `wslBridgeStatus()` result. */
+export function wslStatusText(status) {
+  if (!status?.distro) return '';
+  const lines = String(status.log || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const last = lines[lines.length - 1] || '';
+  if (status.running) {
+    if (lines.some((l) => l.includes('restart Fude'))) {
+      return '動作中（鍵を WSL のものに揃えました。Fude を一度再起動してください）';
+    }
+    if (last.includes('downloading')) return '準備中（fude-cli を WSL に入れています…）';
+    return '動作中';
+  }
+  return last ? `停止中: ${last}` : '停止中';
+}
+
+/**
+ * Wire the WSL integration row inside `root`. It stays hidden unless the
+ * backend says it is supported (Windows). `backend` needs wslBridgeStatus()
+ * and wslBridgeSet(); `delays` are the re-checks after a change, in ms (the
+ * bridge starts in the background and may first have to download).
+ */
+export async function initWslSection(root, backend, delays = [2000, 6000, 15000]) {
+  const box = root.querySelector('#remote-wsl');
+  const select = root.querySelector('#remote-wsl-distro');
+  const statusEl = root.querySelector('#remote-wsl-status');
+  if (!box || !select || !statusEl) return;
+
+  let status;
+  try {
+    status = await backend.wslBridgeStatus(true);
+  } catch {
+    return;
+  }
+  if (!status?.supported) return;
+
+  const names = [...(status.distros || [])];
+  if (status.distro && !names.includes(status.distro)) names.push(status.distro);
+  for (const name of names) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    select.appendChild(opt);
+  }
+  const show = (st) => {
+    select.value = st?.distro || '';
+    statusEl.textContent = wslStatusText(st);
+    statusEl.dataset.kind = st?.distro ? (st.running ? 'ok' : 'error') : '';
+  };
+  show(status);
+  box.style.display = '';
+
+  let generation = 0;
+  select.addEventListener('change', async () => {
+    const mine = ++generation;
+    const distro = select.value || null;
+    select.disabled = true;
+    statusEl.textContent = distro ? '起動しています…' : '';
+    statusEl.dataset.kind = '';
+    try {
+      show(await backend.wslBridgeSet(distro));
+    } catch (e) {
+      statusEl.textContent = `失敗: ${e?.message || e}`;
+      statusEl.dataset.kind = 'error';
+      select.disabled = false;
+      return;
+    }
+    select.disabled = false;
+    if (!distro) return;
+    for (const ms of delays) {
+      await new Promise((r) => setTimeout(r, ms));
+      // A newer choice, or a closed panel, makes this follow-up moot.
+      if (mine !== generation || !select.isConnected) return;
+      try {
+        show(await backend.wslBridgeStatus(false));
+      } catch {
+        return;
+      }
+    }
+  });
 }
 
 /**

@@ -291,6 +291,25 @@ export async function remoteSetup(host, checkOnly = false) {
   return doInvoke('remote_setup', { host, checkOnly });
 }
 
+/**
+ * WSL integration (Windows desktop only): the app keeps `fude-cli bridge`
+ * running in a WSL distro so files opened there, and in ssh sessions started
+ * there, appear in this window. Resolves to
+ * `{ supported, distros, distro, running, log }`; `supported` is false
+ * everywhere but Windows.
+ */
+export async function wslBridgeStatus(withDistros = false) {
+  if (!isTauriWebview())
+    return { supported: false, distros: [], distro: null, running: false, log: '' };
+  return doInvoke('wsl_bridge_status', { withDistros });
+}
+
+/** Switch WSL integration to `distro` (null = off). Resolves to the new status. */
+export async function wslBridgeSet(distro) {
+  if (!isTauriWebview()) throw new Error('デスクトップ版でのみ使えます');
+  return doInvoke('wsl_bridge_set', { distro: distro || null });
+}
+
 export async function watchDirectory(path) {
   return doInvoke('watch_directory', { path });
 }

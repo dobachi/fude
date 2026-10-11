@@ -7,7 +7,11 @@ import * as backend from './backend.js';
 import { openModelPicker } from './features/ai/model-picker-modal.js';
 import { loadCatalogue, findModelById, persistModelChoice } from './features/ai/model-store.js';
 import { DEFAULT_MODEL } from './features/ai/openrouter-client.js';
-import { remoteSectionHtml, initRemoteSection } from './features/remote/setup-panel.js';
+import {
+  remoteSectionHtml,
+  initRemoteSection,
+  initWslSection,
+} from './features/remote/setup-panel.js';
 
 let settingsPanel = null;
 
@@ -164,6 +168,7 @@ export async function openSettings() {
 
   // Remote hosts: run `fude-cli setup` from here (desktop only).
   initRemoteSection(settingsPanel, backend, config.setup_hosts);
+  initWslSection(settingsPanel, backend).catch((e) => console.error('WSL section failed:', e));
 
   // Extensions: show install state and handle on-demand download.
   setupExtensions().catch((e) => console.error('Extensions setup failed:', e));

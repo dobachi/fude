@@ -44,6 +44,9 @@ pub struct Config {
     /// ssh hosts set up from the settings panel (`fude-cli setup`), so they
     /// can be listed, re-checked and updated there.
     pub setup_hosts: Vec<String>,
+    /// Windows: the WSL distro in which the app keeps `fude-cli bridge`
+    /// running (None = off). See src-tauri/src/wsl_bridge.rs.
+    pub wsl_distro: Option<String>,
 }
 
 /// What the front end receives: `Config` with defaults applied and the API
@@ -65,6 +68,8 @@ pub struct ConfigResponse {
     pub sidebar_show_all_files: bool,
     #[serde(default)]
     pub setup_hosts: Vec<String>,
+    #[serde(default)]
+    pub wsl_distro: Option<String>,
 }
 
 impl Default for Config {
@@ -84,6 +89,7 @@ impl Default for Config {
             sidebar_sort: None,
             sidebar_show_all_files: None,
             setup_hosts: Vec::new(),
+            wsl_distro: None,
         }
     }
 }
@@ -147,6 +153,7 @@ pub fn config_response(config: Config, has_api_key: bool, storage_type: &str) ->
             .unwrap_or_else(|| "name_asc".to_string()),
         sidebar_show_all_files: config.sidebar_show_all_files.unwrap_or(false),
         setup_hosts: config.setup_hosts,
+        wsl_distro: config.wsl_distro,
     }
 }
 
@@ -220,6 +227,7 @@ mod tests {
             sidebar_sort: Some("modified_desc".to_string()),
             sidebar_show_all_files: Some(true),
             setup_hosts: vec!["k16".to_string()],
+            wsl_distro: Some("Ubuntu".to_string()),
         };
 
         let json = serde_json::to_string(&config).unwrap();
@@ -265,6 +273,7 @@ mod tests {
     fn setup_hosts_default_to_none_and_survive_the_round_trip() {
         let old: Config = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
         assert!(old.setup_hosts.is_empty());
+        assert_eq!(old.wsl_distro, None);
         let c = Config {
             setup_hosts: vec!["k16".into(), "me@box".into()],
             ..Default::default()
