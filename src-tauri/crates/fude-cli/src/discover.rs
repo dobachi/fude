@@ -233,6 +233,11 @@ fn await_welcome(reader: &mut dyn BufRead) -> io::Result<Option<String>> {
     }
 }
 
+/// Tests that set or clear the discovery environment variables hold this:
+/// the environment is one per process, and tests run in parallel.
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,6 +256,7 @@ mod tests {
 
     #[test]
     fn candidates_prefer_newest_forward_then_tcp_then_local() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = TempDir::new().unwrap();
         let fwd = forward_dir(tmp.path());
         fs::create_dir_all(&fwd).unwrap();
@@ -292,6 +298,7 @@ mod tests {
 
     #[test]
     fn missing_forward_dir_still_yields_tcp_and_the_local_socket() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var(SOCKET_ENV);
         std::env::remove_var(ADDR_ENV);
         let c = candidates(Path::new("/nonexistent/dir"), Path::new("/l.sock"));

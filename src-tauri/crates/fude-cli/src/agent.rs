@@ -85,6 +85,10 @@ impl Agent {
             ));
         }
         let result = match msg {
+            Message::ReadFile { base64: true, .. } => {
+                fude_core::read_file_base64(path, fude_core::MAX_BASE64_FILE_BYTES)
+                    .map(|b| serde_json::json!({ "base64": b }))
+            }
             Message::ReadFile { .. } => fude_core::read_file(path).map(serde_json::Value::String),
             Message::WriteFile { content, .. } => {
                 side.before_write(Path::new(path));
@@ -166,13 +170,71 @@ mod tests {
         let mut side = Rec::default();
 
         let r = ag
-            .handle(&Message::ReadFile { id: 1, path: s(&f) }, &mut side)
+            .handle(
+                &Message::ReadFile {
+                    id: 1,
+                    path: s(&f),
+                    base64: false,
+                },
+                &mut side,
+            )
             .unwrap();
         assert_eq!(r, Message::ok(1, serde_json::Value::String("hello".into())));
 
+        // Bytes on request: any file, not only text.
+        let img = tmp.path().join("pic.png");
+        fs::write(&img, [0x89, b'P', b'N', b'G', 0xff, 0x00]).unwrap();
+        let r = ag
+            .handle(
+                &Message::ReadFile {
+                    id: 3,
+                    path: s(&img),
+                    base64: true,
+                },
+                &mut side,
+            )
+            .unwrap();
+        assert_eq!(
+            r,
+            Message::ok(3, serde_json::json!({ "base64": "iVBOR/8A" }))
+        );
+        // ...while a plain read of it fails right away (what an agent that
+        // does not know `base64` answers).
+        let r = ag
+            .handle(
+                &Message::ReadFile {
+                    id: 4,
+                    path: s(&img),
+                    base64: false,
+                },
+                &mut side,
+            )
+            .unwrap();
+        assert!(matches!(r, Message::Result { error: Some(_), .. }));
+        // Bytes are no way around the roots either.
+        let r = ag
+            .handle(
+                &Message::ReadFile {
+                    id: 5,
+                    path: s(&tmp.path().join("../outside.png")),
+                    base64: true,
+                },
+                &mut side,
+            )
+            .unwrap();
+        assert!(matches!(r, Message::Result { error: Some(_), .. }));
+        fs::remove_file(&img).unwrap();
+
         let out = s(&tmp.path().join("../outside.md"));
         let r = ag
-            .handle(&Message::ReadFile { id: 2, path: out }, &mut side)
+            .handle(
+                &Message::ReadFile {
+                    id: 2,
+                    path: out,
+                    base64: false,
+                },
+                &mut side,
+            )
             .unwrap();
         assert!(matches!(
             r,

@@ -4,6 +4,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { attachPanZoom } from './svg-panzoom.js';
 import { highlightCode } from './code-highlight.js';
 import { isLocalTauri } from '../backend.js';
+import { isRemotePath, resolveRemotePath } from './remote-path.js';
 import { openExternal, isExternalUrl } from './external-link.js';
 import { resolveLinkTarget } from './link-target.js';
 import { time, start as startTimer } from './perf-trace.js';
@@ -90,6 +91,14 @@ function createMd() {
         // markdown-it hands us a percent-encoded URL; files are named by the
         // decoded form (non-ASCII names, spaces).
         const file = srcToFilePath(src);
+        // A document on a remote agent's machine: its images are there too.
+        // Neither the asset protocol nor the HTTP API reaches them, so name
+        // the remote file and let resolveLocalImages fetch it via the agent.
+        if (isRemotePath(currentBasePath)) {
+          token.attrs[srcIndex][1] = PLACEHOLDER_SRC;
+          token.attrSet(LOCAL_SRC_ATTR, resolveRemotePath(currentBasePath, file));
+          return defaultImageRender(tokens, idx, options, env, self);
+        }
         const isAbsolute = /^(\/|\\|[A-Za-z]:[/\\])/.test(file);
         const joined = isAbsolute ? file : `${currentBasePath}/${file}`;
         // Convert any backslashes to forward slashes so the Tauri asset
@@ -631,7 +640,8 @@ export async function enhancePreview(container) {
   await renderPlantumlBlocks(container);
   await renderMermaidBlocks(container);
   await highlightCodeBlocks(container);
-  // Browser mode's local images (no-op on the desktop: nothing is marked).
+  // Images that need fetching: browser mode's local ones and, on the desktop,
+  // those of a remote tab (a local desktop tab marks nothing).
   await resolveLocalImages(container);
 }
 

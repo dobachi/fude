@@ -44,6 +44,27 @@ describe('backend module (Tauri mode)', () => {
     });
   });
 
+  // リモートのタブの画像: アセットプロトコルでは届かないので、エージェントから
+  // base64 で受け取り、拡張子に応じた種別の Blob にする。
+  it('readImageBlob は remote:// の画像をエージェント経由のバイト列から作る', async () => {
+    const mod = await import('../backend.js');
+    mockInvoke.mockResolvedValueOnce('iVAA/w=='); // 137 80 0 255
+    const blob = await mod.readImageBlob('remote://box/home/u/img/a.png');
+    expect(mockInvoke).toHaveBeenCalledWith('remote_read_bytes', {
+      path: 'remote://box/home/u/img/a.png',
+    });
+    expect(blob.type).toBe('image/png');
+    expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([137, 80, 0, 255]);
+
+    mockInvoke.mockResolvedValueOnce('PHN2Zy8+');
+    const svg = await mod.readImageBlob('remote://box/d/x.svg');
+    expect(svg.type).toBe('image/svg+xml');
+    expect(await svg.text()).toBe('<svg/>');
+
+    mockInvoke.mockRejectedValueOnce(new Error('outside what this fude-cli serves'));
+    await expect(mod.readImageBlob('remote://box/etc/x.png')).rejects.toThrow(/outside/);
+  });
+
   // remote://host/... は接続中の fude-cli エージェントが持つファイル。読み書き・
   // ツリー・監視だけが remote_* コマンドに振り分けられ、それ以外は従来どおり。
   it('remote:// のパスは remote_* コマンドへ振り分ける', async () => {
@@ -575,6 +596,16 @@ describe('retryAfterSeconds', () => {
     expect(retryAfterSeconds('')).toBeNull();
     expect(retryAfterSeconds('-5')).toBeNull();
     expect(retryAfterSeconds('Wed, 21 Oct 2015 07:28:00 GMT')).toBeNull();
+  });
+});
+
+describe('base64ToBytes', () => {
+  it('is the inverse of bytesToBase64', async () => {
+    const { base64ToBytes, bytesToBase64 } = await import('../backend.js');
+    expect([...base64ToBytes('')]).toEqual([]);
+    expect([...base64ToBytes('iVAA/w==')]).toEqual([137, 80, 0, 255]);
+    const big = new Uint8Array(70000).map((_, i) => (i * 7) % 256);
+    expect([...base64ToBytes(bytesToBase64(big))]).toEqual([...big]);
   });
 });
 

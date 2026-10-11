@@ -579,6 +579,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_forward_targets_the_gui_socket_on_unix() {
+        let _env = crate::discover::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         std::env::remove_var(fude_core::ipc::SOCKET_ENV);
         assert_eq!(forward_target(Path::new("/c")), "/c/gui.sock");
     }

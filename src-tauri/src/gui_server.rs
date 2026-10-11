@@ -912,6 +912,7 @@ mod tests {
             Message::ReadFile {
                 id: 1,
                 path: "/x".into(),
+                base64: false,
             },
             &sink,
         );
@@ -1179,7 +1180,7 @@ mod tests {
         let (s, rx) = session("box", &["/r"]);
         let s2 = Arc::clone(&s);
         let answer = thread::spawn(move || {
-            let Ok(Event::Send(Message::ReadFile { id, path })) = rx.recv() else {
+            let Ok(Event::Send(Message::ReadFile { id, path, .. })) = rx.recv() else {
                 panic!("expected a read request");
             };
             assert_eq!(path, "/r/a.md");
@@ -1189,6 +1190,7 @@ mod tests {
             .request(|id| Message::ReadFile {
                 id,
                 path: "/r/a.md".into(),
+                base64: false,
             })
             .unwrap();
         assert_eq!(v, serde_json::json!("content"));
@@ -1211,6 +1213,7 @@ mod tests {
             .request(|id| Message::ReadFile {
                 id,
                 path: "/r/a.md".into(),
+                base64: false,
             })
             .unwrap_err();
         assert_eq!(e, "nope");
@@ -1221,6 +1224,7 @@ mod tests {
             .request(|id| Message::ReadFile {
                 id,
                 path: "/r/a.md".into(),
+                base64: false,
             })
             .unwrap_err();
         assert!(e.contains("disconnected"));

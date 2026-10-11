@@ -37,6 +37,7 @@ import { attachPanZoom } from './core/svg-panzoom.js';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
 import { outdatedCliMessage } from './core/setup-hosts.js';
+import { isRemotePath } from './core/remote-path.js';
 import { createStatusBar } from './core/statusbar.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
@@ -1983,10 +1984,11 @@ function renderImageTab(pane, tab) {
   const holder = document.createElement('div');
   holder.className = 'puml-diagram image-view';
   const img = document.createElement('img');
-  if (isLocalTauri()) {
+  if (isLocalTauri() && !isRemotePath(tab.path)) {
     img.src = convertFileSrc(tab.path);
   } else {
     // Browser mode: fetch through the authenticated API (see local-image.js).
+    // A remote tab's image comes from its agent the same way.
     img.src = PLACEHOLDER_SRC;
     localImageUrl(tab.path)
       .then((url) => {

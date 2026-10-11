@@ -181,7 +181,8 @@ mod tests {
         assert!(st
             .handle(&Message::ReadFile {
                 id: 1,
-                path: "/a".into()
+                path: "/a".into(),
+                base64: false,
             })
             .is_none());
         assert!(!st.done());

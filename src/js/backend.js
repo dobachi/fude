@@ -15,7 +15,7 @@ import {
   isRejected,
   reportLockout,
 } from './browser-token.js';
-import { isRemotePath } from './core/remote-path.js';
+import { isRemotePath, imageMime } from './core/remote-path.js';
 
 // Detect whether we're running inside a Tauri webview.
 //
@@ -252,8 +252,26 @@ export async function getOpenDir() {
  * @returns {Promise<Blob>}
  */
 export async function readImageBlob(path) {
+  // A file on a remote agent's machine: its bytes come back base64-encoded
+  // over the agent connection (the asset protocol only reaches local files).
+  if (isRemotePath(path)) {
+    const b64 = await doInvoke('remote_read_bytes', { path });
+    return new Blob([base64ToBytes(b64)], { type: imageMime(path) });
+  }
   const res = await httpApi('read_image_file', { path });
   return res.blob();
+}
+
+/**
+ * The bytes of a base64 string.
+ * @param {string} b64
+ * @returns {Uint8Array}
+ */
+export function base64ToBytes(b64) {
+  const bin = globalThis.atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 export async function getStartupDirs() {

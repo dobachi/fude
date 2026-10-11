@@ -1352,10 +1352,41 @@ fn remote_read_file(
     sessions: State<'_, Arc<gui_server::RemoteSessions>>,
 ) -> Result<String, String> {
     let (session, p) = sessions.lookup(&path)?;
-    let v = session.request(|id| fude_core::ipc::Message::ReadFile { id, path: p })?;
+    let v = session.request(|id| fude_core::ipc::Message::ReadFile {
+        id,
+        path: p,
+        base64: false,
+    })?;
     v.as_str()
         .map(str::to_string)
         .ok_or_else(|| "agent returned no text".to_string())
+}
+
+/// The base64 of what an agent answered to a `base64` read. An agent that
+/// predates the flag answers with the file's text (it can only do so for a
+/// text file, an SVG say), which is encoded here so callers get one shape.
+fn remote_bytes_reply(v: &serde_json::Value) -> Result<String, String> {
+    if let Some(b) = v.get("base64").and_then(|b| b.as_str()) {
+        return Ok(b.to_string());
+    }
+    v.as_str()
+        .map(|text| fude_core::base64_encode(text.as_bytes()))
+        .ok_or_else(|| "agent returned no data".to_string())
+}
+
+/// A remote file's bytes, base64-encoded (images in a remote tab's preview).
+#[tauri::command(async)]
+fn remote_read_bytes(
+    path: String,
+    sessions: State<'_, Arc<gui_server::RemoteSessions>>,
+) -> Result<String, String> {
+    let (session, p) = sessions.lookup(&path)?;
+    let v = session.request(|id| fude_core::ipc::Message::ReadFile {
+        id,
+        path: p,
+        base64: true,
+    })?;
+    remote_bytes_reply(&v)
 }
 
 #[tauri::command(async)]
@@ -1865,6 +1896,7 @@ pub fn run() {
             gui_ready,
             wait_tab_closed,
             remote_read_file,
+            remote_read_bytes,
             remote_write_file,
             remote_read_dir_tree,
             remote_watch_file,
@@ -2158,6 +2190,21 @@ mod tests {
         // A damaged config value never reaches wsl.exe.
         assert_eq!(wsl_route(true, Some("-e sh")), None);
         assert_eq!(wsl_route(true, Some("")), None);
+    }
+
+    #[test]
+    fn remote_bytes_come_back_as_base64_from_new_and_old_agents() {
+        assert_eq!(
+            remote_bytes_reply(&serde_json::json!({ "base64": "iVBOR/8A" })),
+            Ok("iVBOR/8A".to_string())
+        );
+        // An older agent sent the text of an SVG.
+        assert_eq!(
+            remote_bytes_reply(&serde_json::json!("<svg/>")),
+            Ok("PHN2Zy8+".to_string())
+        );
+        assert!(remote_bytes_reply(&serde_json::Value::Null).is_err());
+        assert!(remote_bytes_reply(&serde_json::json!({ "other": 1 })).is_err());
     }
 
     #[test]

@@ -19,6 +19,54 @@ pub fn read_file(path: &str) -> Result<String, String> {
     fs::read_to_string(path).map_err(|e| format!("Failed to read file '{}': {}", path, e))
 }
 
+/// The largest file handed over as base64 in one message (an image for the
+/// preview travels this way from a remote agent).
+pub const MAX_BASE64_FILE_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Standard base64 (RFC 4648, padded) of `bytes`.
+pub fn base64_encode(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        out.push(T[(b[0] >> 2) as usize] as char);
+        out.push(T[(((b[0] & 0x03) << 4) | (b[1] >> 4)) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            T[(((b[1] & 0x0f) << 2) | (b[2] >> 6)) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[(b[2] & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// A file's bytes as base64, refusing anything over `max_bytes`.
+pub fn read_file_base64(path: &str, max_bytes: u64) -> Result<String, String> {
+    let meta = fs::metadata(path).map_err(|e| format!("Failed to read file '{}': {}", path, e))?;
+    if !meta.is_file() {
+        return Err(format!("'{}' is not a file", path));
+    }
+    if meta.len() > max_bytes {
+        return Err(format!(
+            "'{}' is too large to transfer ({} bytes, limit {})",
+            path,
+            meta.len(),
+            max_bytes
+        ));
+    }
+    let bytes = fs::read(path).map_err(|e| format!("Failed to read file '{}': {}", path, e))?;
+    Ok(base64_encode(&bytes))
+}
+
 /// Write `content`, creating missing parent directories.
 pub fn write_file(path: &str, content: &str) -> Result<(), String> {
     let file_path = Path::new(path);
@@ -250,6 +298,46 @@ fn scan_dir_entries(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn base64_matches_the_rfc_vectors_and_handles_binary() {
+        for (plain, encoded) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64_encode(plain.as_bytes()), encoded);
+        }
+        assert_eq!(base64_encode(&[0xff, 0xfe, 0xfd]), "//79");
+        assert_eq!(base64_encode(&[0x00]), "AA==");
+        assert_eq!(base64_encode(&[0xfb, 0xef]), "++8=");
+    }
+
+    #[test]
+    fn read_file_base64_reads_bytes_within_the_limit() {
+        let tmp = TempDir::new().unwrap();
+        let f = tmp.path().join("pic.png");
+        fs::write(&f, [0x89, b'P', b'N', b'G', 0xff, 0x00]).unwrap();
+        let p = f.to_string_lossy().to_string();
+        assert_eq!(read_file_base64(&p, 6).unwrap(), "iVBOR/8A");
+        // One byte over the limit is refused, and says so.
+        assert!(read_file_base64(&p, 5).unwrap_err().contains("too large"));
+        // A directory and a missing file are errors, not empty data.
+        let dir = tmp.path().to_string_lossy().to_string();
+        assert!(read_file_base64(&dir, 100)
+            .unwrap_err()
+            .contains("not a file"));
+        let missing = tmp.path().join("no.png").to_string_lossy().to_string();
+        assert!(read_file_base64(&missing, 100).is_err());
+        // Empty file: empty string.
+        let e = tmp.path().join("empty.bin");
+        fs::write(&e, []).unwrap();
+        assert_eq!(read_file_base64(&e.to_string_lossy(), 100).unwrap(), "");
+    }
 
     #[test]
     fn scan_dir_tree_finds_md_files() {

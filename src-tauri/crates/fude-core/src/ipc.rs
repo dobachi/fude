@@ -76,6 +76,12 @@ pub enum Message {
     ReadFile {
         id: u64,
         path: String,
+        /// Ask for the bytes, base64-encoded, as `{"base64": "..."}` (an
+        /// image for the preview). Left off the wire when false, and an
+        /// agent that predates it reads the file as text as before, so a
+        /// binary file then fails at once instead of going unanswered.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        base64: bool,
     },
     WriteFile {
         id: u64,
@@ -303,6 +309,25 @@ mod tests {
         };
         assert_eq!(req.request_id(), Some(7));
         assert_eq!(Message::Bye.request_id(), None);
+        // A text read looks on the wire as it always did; `base64` appears
+        // only when asked for, and older peers' requests parse without it.
+        let text = Message::ReadFile {
+            id: 1,
+            path: "/a".into(),
+            base64: false,
+        };
+        assert_eq!(
+            encode(&text),
+            "{\"type\":\"read_file\",\"id\":1,\"path\":\"/a\"}\n"
+        );
+        assert_eq!(decode(&encode(&text)).unwrap(), Some(text));
+        let bytes = Message::ReadFile {
+            id: 2,
+            path: "/a.png".into(),
+            base64: true,
+        };
+        assert!(encode(&bytes).contains("\"base64\":true"));
+        assert_eq!(decode(&encode(&bytes)).unwrap(), Some(bytes));
         // `show_all_files` may be left out by older peers.
         let parsed = decode(r#"{"type":"read_dir_tree","id":7,"path":"/v"}"#)
             .unwrap()
