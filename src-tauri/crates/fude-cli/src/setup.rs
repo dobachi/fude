@@ -150,12 +150,29 @@ pub fn ensure_host_lines(config: &str, host: &str, wants: &[Want]) -> (String, V
 /// session would come up without the forward. Both spellings are returned;
 /// `host` itself never is.
 pub fn tailscale_names(status_json: &str, host: &str) -> Vec<String> {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(status_json) else {
+    let Some(peer) = tailscale_peer(status_json, host) else {
         return Vec::new();
     };
-    let Some(peers) = v.get("Peer").and_then(|p| p.as_object()) else {
-        return Vec::new();
-    };
+    [peer.fqdn.clone(), format!("{}.", peer.fqdn)]
+        .into_iter()
+        .filter(|n| n != host)
+        .collect()
+}
+
+/// A machine on the tailnet, as `tailscale status --json` describes it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TsPeer {
+    /// MagicDNS name, without the trailing dot.
+    pub fqdn: String,
+    /// Tailnet addresses, as listed (IPv4 first in practice).
+    pub ips: Vec<String>,
+}
+
+/// The tailnet peer that `host` names: by short name, MagicDNS name or
+/// machine name, ignoring case.
+pub fn tailscale_peer(status_json: &str, host: &str) -> Option<TsPeer> {
+    let v = serde_json::from_str::<serde_json::Value>(status_json).ok()?;
+    let peers = v.get("Peer").and_then(|p| p.as_object())?;
     let want = host.trim_end_matches('.').to_ascii_lowercase();
     for peer in peers.values() {
         let dns = peer.get("DNSName").and_then(|d| d.as_str()).unwrap_or("");
@@ -166,13 +183,79 @@ pub fn tailscale_names(status_json: &str, host: &str) -> Vec<String> {
         let short = fqdn.split('.').next().unwrap_or("").to_ascii_lowercase();
         let name = peer.get("HostName").and_then(|d| d.as_str()).unwrap_or("");
         if short == want || fqdn.eq_ignore_ascii_case(&want) || name.eq_ignore_ascii_case(&want) {
-            return [fqdn.to_string(), format!("{}.", fqdn)]
-                .into_iter()
-                .filter(|n| n != host)
-                .collect();
+            let ips = peer
+                .get("TailscaleIPs")
+                .and_then(|i| i.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|ip| ip.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            return Some(TsPeer {
+                fqdn: fqdn.to_string(),
+                ips,
+            });
         }
     }
-    Vec::new()
+    None
+}
+
+/// The `HostName` to write for a host ssh cannot find by itself, or `None`
+/// when ssh is fine as it is.
+///
+/// `effective` is what ssh would connect to (`ssh -G`). A machine can be on
+/// the tailnet while its short name does not resolve — no search domain, or
+/// MagicDNS switched off, as in a WSL distribution that keeps its own
+/// resolv.conf. The MagicDNS name is preferred; the address is the fallback
+/// when DNS knows neither.
+pub fn hostname_fix(
+    effective: &str,
+    peer: Option<&TsPeer>,
+    resolves: impl Fn(&str) -> bool,
+) -> Option<String> {
+    if resolves(effective) {
+        return None;
+    }
+    let peer = peer?;
+    if resolves(&peer.fqdn) {
+        return Some(peer.fqdn.clone());
+    }
+    peer.ips
+        .iter()
+        .find(|ip| !ip.contains(':'))
+        .or(peer.ips.first())
+        .cloned()
+}
+
+pub fn hostname_want(address: &str) -> Want {
+    Want {
+        keys: vec!["hostname".into()],
+        lines: vec![format!("HostName {}", address)],
+    }
+}
+
+/// The `hostname` line of `ssh -G` output: where ssh would really connect.
+pub fn effective_hostname(ssh_g: &str) -> Option<String> {
+    ssh_g.lines().find_map(|l| {
+        let (key, value) = l.trim().split_once(' ')?;
+        (key.eq_ignore_ascii_case("hostname") && !value.trim().is_empty())
+            .then(|| value.trim().to_string())
+    })
+}
+
+/// What to tell the user when ssh's own error says the name is unknown.
+pub fn unresolved_hint(error: &str, host: &str) -> Option<String> {
+    error
+        .to_ascii_lowercase()
+        .contains("could not resolve hostname")
+        .then(|| {
+            format!(
+                "ssh on this machine does not know `{host}`. Use a name or address that `ssh` \
+                 reaches from here, or add `HostName <address>` under `Host {host}` in \
+                 ~/.ssh/config."
+            )
+        })
 }
 
 /// Like [`ensure_host_lines`], for a set of names that mean one machine: an
@@ -205,14 +288,34 @@ pub fn ensure_alias_lines(
 }
 
 fn tailscale_status() -> Option<String> {
-    let out = Command::new("tailscale")
-        .args(["status", "--json"])
+    // Inside WSL the tailnet may belong to Windows; its client answers too.
+    ["tailscale", "tailscale.exe"].iter().find_map(|program| {
+        let out = Command::new(program)
+            .args(["status", "--json"])
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).to_string())
+    })
+}
+
+fn resolves(name: &str) -> bool {
+    use std::net::ToSocketAddrs;
+    (name, 22)
+        .to_socket_addrs()
+        .is_ok_and(|mut a| a.next().is_some())
+}
+
+/// Where ssh would connect for `host`, per the config as it stands.
+fn ssh_effective_hostname(host: &str) -> Option<String> {
+    let out = Command::new("ssh")
+        .args(["-G", host])
         .stderr(std::process::Stdio::null())
         .output()
         .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).to_string())
+    effective_hostname(&String::from_utf8_lossy(&out.stdout))
 }
 
 /// Return `config` with the forward for `host` in place. An existing
@@ -385,9 +488,17 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
     if share && !cfg!(windows) {
         wants.push(sharing_want());
     }
-    let (updated, host_added, appended) = ensure_host_lines(&existing, host, &wants);
+    let ts_status = tailscale_status();
+    // On the tailnet but unknown to this machine's DNS: point ssh at it.
+    let peer = ts_status.as_deref().and_then(|j| tailscale_peer(j, host));
+    let effective = ssh_effective_hostname(host).unwrap_or_else(|| host.to_string());
+    let mut host_wants = wants.clone();
+    if let Some(address) = hostname_fix(&effective, peer.as_ref(), resolves) {
+        host_wants.push(hostname_want(&address));
+    }
+    let (updated, host_added, appended) = ensure_host_lines(&existing, host, &host_wants);
     // `tailscale ssh <host>` reaches the same machine under another name.
-    let ts_names = tailscale_status()
+    let ts_names = ts_status
         .map(|j| tailscale_names(&j, host))
         .unwrap_or_default();
     let (updated, ts_added, _) = ensure_alias_lines(&updated, &ts_names, &wants);
@@ -437,7 +548,11 @@ fn run_inner(host: &str, port: u16, share: bool) -> Result<(), String> {
     let uname = ssh(
         host,
         "mkdir -p ~/.config/fude ~/.local/bin && uname -sm && (echo $PATH | tr : '\\n' | grep -qx \"$HOME/.local/bin\" && echo PATH_OK || echo PATH_MISSING)",
-    )?;
+    )
+    .map_err(|e| match unresolved_hint(&e, host) {
+        Some(hint) => format!("{}\n  {}", e, hint),
+        None => e,
+    })?;
     let mut lines = uname.lines();
     let remote_uname = lines.next().unwrap_or_default().to_string();
     let path_ok = lines.next() == Some("PATH_OK");
@@ -620,6 +735,92 @@ mod tests {
         assert_eq!(tailscale_names(TS, "unknown"), Vec::<String>::new());
         assert_eq!(tailscale_names("not json", "k16"), Vec::<String>::new());
         assert_eq!(tailscale_names("{}", "k16"), Vec::<String>::new());
+    }
+
+    const TS_IPS: &str = r#"{"Peer":{
+        "a":{"HostName":"k16","DNSName":"k16.tail.example.net.","TailscaleIPs":["100.64.0.1","fd7a::1"]},
+        "b":{"HostName":"six","DNSName":"six.tail.example.net.","TailscaleIPs":["fd7a::2"]},
+        "c":{"HostName":"bare","DNSName":"bare.tail.example.net."}}}"#;
+
+    #[test]
+    fn tailscale_peer_carries_the_name_and_addresses() {
+        let k16 = tailscale_peer(TS_IPS, "K16").unwrap();
+        assert_eq!(k16.fqdn, "k16.tail.example.net");
+        assert_eq!(k16.ips, ["100.64.0.1", "fd7a::1"]);
+        assert_eq!(
+            tailscale_peer(TS_IPS, "bare").unwrap().ips,
+            Vec::<String>::new()
+        );
+        assert_eq!(tailscale_peer(TS_IPS, "k1"), None);
+        assert_eq!(tailscale_peer("not json", "k16"), None);
+    }
+
+    #[test]
+    fn a_host_ssh_cannot_find_gets_its_tailnet_name_or_address() {
+        let k16 = tailscale_peer(TS_IPS, "k16");
+        // Resolves already: ssh is left alone, tailnet or not.
+        assert_eq!(hostname_fix("k16", k16.as_ref(), |_| true), None);
+        // The short name fails but MagicDNS answers the full one.
+        assert_eq!(
+            hostname_fix("k16", k16.as_ref(), |n| n.contains('.')),
+            Some("k16.tail.example.net".into())
+        );
+        // DNS knows nothing of the tailnet: the IPv4 address.
+        assert_eq!(
+            hostname_fix("k16", k16.as_ref(), |_| false),
+            Some("100.64.0.1".into())
+        );
+        // Only IPv6 listed: better than nothing.
+        let six = tailscale_peer(TS_IPS, "six");
+        assert_eq!(
+            hostname_fix("six", six.as_ref(), |_| false),
+            Some("fd7a::2".into())
+        );
+        // No address at all, or not on the tailnet: nothing to offer.
+        let bare = tailscale_peer(TS_IPS, "bare");
+        assert_eq!(hostname_fix("bare", bare.as_ref(), |_| false), None);
+        assert_eq!(hostname_fix("nope", None, |_| false), None);
+    }
+
+    #[test]
+    fn the_hostname_goes_into_the_block_once_and_never_over_the_users() {
+        let wants = [forward_want(47821, SOCK), hostname_want("100.64.0.1")];
+        // A block left by an earlier, failed run gains just the HostName.
+        let cfg = format!("Host k16\n  {}\n", forward_line(47821, SOCK));
+        let (out, added, appended) = ensure_host_lines(&cfg, "k16", &wants);
+        assert_eq!(added, ["HostName 100.64.0.1"]);
+        assert!(!appended);
+        assert!(out.starts_with("Host k16\n  HostName 100.64.0.1\n"));
+        let (again, added, _) = ensure_host_lines(&out, "k16", &wants);
+        assert!(added.is_empty());
+        assert_eq!(again, out);
+        // The user's own HostName stays, whatever it says.
+        let cfg = "Host k16\n  hostname gone.example\n";
+        let (out, added, _) = ensure_host_lines(cfg, "k16", &wants);
+        assert_eq!(added, [forward_line(47821, SOCK)]);
+        assert!(!out.contains("100.64.0.1"));
+    }
+
+    #[test]
+    fn effective_hostname_reads_ssh_g() {
+        assert_eq!(
+            effective_hostname("user u\nhostname 10.0.0.1\nport 22\n"),
+            Some("10.0.0.1".into())
+        );
+        assert_eq!(effective_hostname("user u\nhostnamex y\n"), None);
+        assert_eq!(effective_hostname(""), None);
+    }
+
+    #[test]
+    fn an_unknown_name_is_explained() {
+        let e = "ssh k16 failed: ssh: Could not resolve hostname k16: Name or service not known";
+        let hint = unresolved_hint(e, "k16").unwrap();
+        assert!(hint.contains("HostName <address>") && hint.contains("Host k16"));
+        assert!(!hint.contains("  "), "one line, single-spaced: {hint}");
+        assert_eq!(
+            unresolved_hint("ssh k16 failed: Permission denied", "k16"),
+            None
+        );
     }
 
     #[test]
