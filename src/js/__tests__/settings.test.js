@@ -17,6 +17,9 @@ vi.mock('../backend.js', () => ({
   wslBridgeSet: vi.fn(),
   remoteOpen: vi.fn(),
   sshHostCandidates: vi.fn().mockResolvedValue([]),
+  remoteComplete: vi.fn().mockResolvedValue([]),
+  remoteConnections: vi.fn().mockResolvedValue([]),
+  remoteDisconnect: vi.fn(),
   wslOpen: vi.fn(),
 }));
 
@@ -77,7 +80,7 @@ describe('settings module', () => {
     // The settings step aside for the view (its contents: remote-view.test.js).
     expect(document.querySelector('.settings-panel:not(.remote-panel)')).toBeNull();
     await vi.waitFor(() => expect(document.querySelector('.remote-panel')).not.toBeNull());
-    expect(document.querySelector('.remote-panel #remote-host')).not.toBeNull();
+    expect(document.querySelector('.remote-panel #remote-open-path')).not.toBeNull();
     const { closeRemoteView } = await import('../features/remote/remote-view.js');
     closeRemoteView();
     backend.isLocalTauri.mockReturnValue(false);

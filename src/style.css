@@ -3264,21 +3264,8 @@ body:has(#app.ai-panel-open) #mode-indicator {
   max-width: calc(100vw - 32px);
 }
 
-.setting-remote .remote-open-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 4px 0 10px;
-}
-
-.setting-remote .remote-wsl .remote-open-row {
-  flex: 1 1 100%;
-  margin: 0;
-}
-
-.setting-remote .remote-open-row .remote-path {
-  flex: 1 1 auto;
-  min-width: 0;
+.setting-remote .remote-connection-row .remote-host-name {
+  flex: 0 0 auto;
 }
 
 .setting-remote-link button {
@@ -3288,4 +3275,119 @@ body:has(#app.ai-panel-open) #mode-indicator {
   background: var(--bg-primary);
   color: var(--fg-primary);
   cursor: pointer;
+}
+
+.remote-panel .remote-heading {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+
+.remote-panel .remote-lead {
+  margin: 0 0 8px;
+  font-size: calc(var(--ui-font-size) - 1px);
+  color: var(--fg-secondary);
+}
+
+.setting-remote .remote-open-form {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.setting-remote .remote-open-form select {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 40%;
+}
+
+.setting-remote .remote-open-form #remote-target-host {
+  flex: 1 1 140px;
+}
+
+.setting-remote .remote-path-wrap {
+  position: relative;
+  flex: 2 1 220px;
+  min-width: 0;
+}
+
+.setting-remote .remote-path-wrap input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.setting-remote .remote-suggest {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 10;
+  margin: 2px 0 0;
+  padding: 2px 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.setting-remote .remote-suggest li {
+  padding: 3px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono, monospace);
+  font-size: calc(var(--ui-font-size) - 1px);
+  cursor: pointer;
+}
+
+.setting-remote .remote-suggest li.active,
+.setting-remote .remote-suggest li:hover {
+  background: var(--fg-accent);
+  color: var(--bg-primary);
+}
+
+.setting-remote .remote-connection-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.setting-remote .remote-connection-roots {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-secondary);
+  font-size: calc(var(--ui-font-size) - 1px);
+}
+
+.setting-remote .remote-connections-none {
+  color: var(--fg-secondary);
+  font-size: calc(var(--ui-font-size) - 1px);
+}
+
+.remote-panel .remote-optional {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.remote-panel .remote-optional > summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.setting-remote kbd {
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 0.9em;
 }

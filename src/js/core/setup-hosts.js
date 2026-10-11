@@ -71,3 +71,61 @@ export function forgetRecent(list, host) {
   const prefix = `${String(host ?? '').trim()}${SEP}`;
   return clean(list).filter((e) => !e.startsWith(prefix));
 }
+
+/** The ssh hosts places were opened on, newest first (WSL is not one). */
+export function recentHosts(list) {
+  const hosts = [];
+  for (const e of clean(list)) {
+    const i = e.indexOf(SEP);
+    const h = i > 0 ? e.slice(0, i) : '';
+    if (h && h !== WSL_HOST && !hosts.includes(h)) hosts.push(h);
+  }
+  return hosts;
+}
+
+/**
+ * The hosts offered as destinations: the ones used lately first, then the
+ * ones set up, then the names in the ssh config. Each once.
+ */
+export function openTargets(recent, setupHosts, candidates) {
+  const out = [];
+  for (const h of [...recentHosts(recent), ...clean(setupHosts), ...clean(candidates)]) {
+    const name = h.trim();
+    if (name && !hostError(name) && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+/** The longest string every one of `strings` starts with. */
+export function commonPrefix(strings) {
+  const list = clean(strings);
+  if (!list.length) return '';
+  let prefix = list[0];
+  for (const s of list.slice(1)) {
+    let i = 0;
+    while (i < prefix.length && i < s.length && prefix[i] === s[i]) i++;
+    prefix = prefix.slice(0, i);
+    if (!prefix) break;
+  }
+  return prefix;
+}
+
+/** How many suggestions are shown under the path field. */
+export const SUGGEST_MAX = 50;
+
+/**
+ * What to offer under the path field for `typed`: the places opened there
+ * before that match (all of them while nothing is typed), then what the far
+ * side says the path could be completed to. Each once, what was typed
+ * itself left out.
+ */
+export function pathSuggestions(typed, recent, completions) {
+  const t = String(typed ?? '');
+  const out = [];
+  const add = (p) => {
+    if (typeof p === 'string' && p && p !== t && !out.includes(p)) out.push(p);
+  };
+  for (const p of clean(recent)) if (!t || p.startsWith(t)) add(p);
+  for (const p of clean(completions)) add(p);
+  return out.slice(0, SUGGEST_MAX);
+}

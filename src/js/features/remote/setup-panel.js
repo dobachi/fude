@@ -1,93 +1,30 @@
-// setup-panel.js - the controls of the remote view (remote-view.js): run
-// `fude-cli setup` for an ssh host from the app instead of a terminal, keep
-// the hosts that were set up so they can be re-checked or updated later, and
-// open a folder on one of them — or inside WSL — without logging in first.
-import {
-  hostError,
-  addHost,
-  removeHost,
-  addRecent,
-  recentPaths,
-  forgetRecent,
-  WSL_HOST,
-} from '../../core/setup-hosts.js';
-
-/**
- * The places opened from the view, shared by the host rows and the WSL row.
- * `backend` needs getConfig() and saveConfig().
- */
-export function createRecentStore(backend, initial) {
-  let list = addRecent(initial, '', '');
-  // Read-modify-write so settings saved elsewhere meanwhile are kept.
-  const persist = async () => {
-    const existing = await backend.getConfig();
-    await backend.saveConfig({ ...existing, remote_recent: list });
-  };
-  return {
-    paths: (host) => recentPaths(list, host),
-    async add(host, path) {
-      const next = addRecent(list, host, path);
-      if (next.join('\n') === list.join('\n')) return;
-      list = next;
-      await persist();
-    },
-    async forget(host) {
-      const next = forgetRecent(list, host);
-      if (next.length === list.length) return;
-      list = next;
-      await persist();
-    },
-  };
-}
-
-let datalistSeq = 0;
-
-/** A path field with the remembered places of `host` to pick from. */
-function pathField(store, host) {
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'remote-path';
-  input.placeholder = '開くフォルダ / ファイル（空欄はホーム。例: ~/notes）';
-  input.spellcheck = false;
-  input.autocomplete = 'off';
-  const datalist = document.createElement('datalist');
-  datalist.id = `remote-paths-${++datalistSeq}`;
-  input.setAttribute('list', datalist.id);
-  const refresh = () => {
-    datalist.textContent = '';
-    const paths = store ? store.paths(host) : [];
-    for (const p of paths) {
-      const opt = document.createElement('option');
-      opt.value = p;
-      datalist.appendChild(opt);
-    }
-    // The place opened last is the likeliest to be wanted again.
-    if (!input.value && paths.length) input.value = paths[0];
-  };
-  refresh();
-  return { input, datalist, refresh };
-}
+// setup-panel.js - the optional part of the remote view (remote-view.js):
+// what makes `fude FILE` typed in a terminal *on* a host, or inside WSL,
+// open in this window. Runs `fude-cli setup` for an ssh host from the app
+// instead of a terminal, keeps the hosts that were set up so they can be
+// re-checked or updated later, and switches WSL integration.
+// Opening a place from here needs none of this: see open-panel.js.
+import { hostError, addHost, removeHost } from '../../core/setup-hosts.js';
 
 export function remoteSectionHtml() {
   return `
-    <div class="setting-group setting-remote">
+    <div class="setting-group setting-remote remote-setup">
+      <p class="remote-lead">ホストの端末（ssh でログインした先）で <code>fude FILE</code> と打って、この Fude に開きたい場合だけ必要な設定です。上の「開く」だけを使うなら、ここは触らなくて構いません。</p>
       <label>ssh ホスト</label>
       <div class="remote-add">
-        <input type="text" id="remote-host" list="remote-host-candidates" placeholder="ssh のホスト名（例: k16, user@host）" spellcheck="false" autocomplete="off" />
-        <datalist id="remote-host-candidates"></datalist>
+        <input type="text" id="remote-host" placeholder="ssh のホスト名（例: k16, user@host）" spellcheck="false" autocomplete="off" />
         <button type="button" id="remote-setup-btn">セットアップ</button>
       </div>
+      <small class="setting-hint">ホストに <code>fude-cli</code> を入れ、そのホストから この Fude へ戻る経路（ssh の転送）を <code>~/.ssh/config</code> に書きます（<code>fude setup HOST</code> と同じ）。パスワード入力なしで <code>ssh HOST</code> できることが前提です。</small>
+      <div class="remote-hosts" id="remote-hosts"></div>
+      <div class="remote-status" id="remote-status" role="status"></div>
+      <pre class="remote-log" id="remote-log" style="display:none"></pre>
       <div class="remote-wsl" id="remote-wsl" style="display:none">
         <span class="remote-wsl-label">WSL 連携</span>
         <select id="remote-wsl-distro"><option value="">オフ</option></select>
         <span class="remote-wsl-status" id="remote-wsl-status" role="status"></span>
-        <div class="remote-open-row" id="remote-wsl-open" style="display:none"></div>
-        <small class="setting-hint">WSL のディストリビューションを選ぶと、Fude の起動中はその中で中継（<code>fude bridge</code>）を自動で動かします。WSL やそこから ssh した先で開いたファイルがこの Fude に出るようになり、上の「セットアップ」も WSL の ssh で実行されます。</small>
+        <small class="setting-hint">ディストリビューションを選ぶと、WSL の端末や、そこから ssh した先で <code>fude FILE</code> と打ったものが この Fude に開きます（Fude の起動中、WSL の中で中継 <code>fude bridge</code> を自動で動かします）。上の「セットアップ」と「開く」の ssh も、WSL の中のものを使うようになります。</small>
       </div>
-      <div class="remote-hosts" id="remote-hosts"></div>
-      <div class="remote-status" id="remote-status" role="status"></div>
-      <pre class="remote-log" id="remote-log" style="display:none"></pre>
-      <small class="setting-hint">ssh で入れるホストを登録すると、そのホストで <code>fude FILE</code> と打つだけでこの Fude に開けます（<code>fude setup HOST</code> と同じ処理）。登録したホストは、ここからフォルダやファイルを指定して開くこともできます。パスワード入力なしで <code>ssh HOST</code> できることが前提です。</small>
     </div>`;
 }
 
@@ -137,62 +74,12 @@ export async function initWslSection(root, backend, delays = [2000, 6000, 15000]
     opt.textContent = name;
     select.appendChild(opt);
   }
-  // Open a place inside the distro: offered while the bridge runs.
-  const openRow = root.querySelector('#remote-wsl-open');
-  const sharedStatus = root.querySelector('#remote-status');
-  const sharedLog = root.querySelector('#remote-log');
-  if (openRow && backend.wslOpen) {
-    const field = pathField(opts.recent, WSL_HOST);
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'remote-open';
-    btn.textContent = '開く';
-    btn.title = 'WSL の中のフォルダ / ファイルをこの Fude で開く';
-    const say = (text, kind, log) => {
-      if (sharedStatus) {
-        sharedStatus.textContent = text;
-        sharedStatus.dataset.kind = kind || '';
-      }
-      if (sharedLog) {
-        sharedLog.textContent = log || '';
-        sharedLog.style.display = log ? '' : 'none';
-      }
-    };
-    const open = async () => {
-      if (btn.disabled) return;
-      const path = field.input.value.trim() || '~';
-      btn.disabled = true;
-      say(`WSL: ${path} を開いています…`, 'busy');
-      try {
-        const res = await backend.wslOpen(path);
-        if (res?.ok) {
-          say(`WSL: ${path} を開きました`, 'ok', '');
-          if (opts.recent) await opts.recent.add(WSL_HOST, path);
-          field.refresh();
-          opts.onOpened?.();
-        } else {
-          say(`WSL: ${path} を開けませんでした`, 'error', res?.log || '');
-        }
-      } catch (e) {
-        say(`WSL: ${e?.message || e}`, 'error');
-      } finally {
-        btn.disabled = false;
-      }
-    };
-    btn.addEventListener('click', open);
-    field.input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        open();
-      }
-    });
-    openRow.append(field.input, field.datalist, btn);
-  }
   const show = (st) => {
     select.value = st?.distro || '';
     statusEl.textContent = wslStatusText(st);
     statusEl.dataset.kind = st?.distro ? (st.running ? 'ok' : 'error') : '';
-    if (openRow) openRow.style.display = st?.distro && st.running && backend.wslOpen ? '' : 'none';
+    // The open section offers the distro as a place to open.
+    opts.onChange?.(st);
   };
   show(status);
   box.style.display = '';
@@ -229,11 +116,7 @@ export async function initWslSection(root, backend, delays = [2000, 6000, 15000]
 
 /**
  * Wire the section inside `root`.
- * `backend` needs remoteSetup(host, checkOnly), getConfig() and saveConfig();
- * with remoteOpen(host, path) each host also gets a field to open a place
- * there, and with sshHostCandidates() the host field offers the names in the
- * ssh config. `opts.recent` is a createRecentStore(); `opts.onOpened` runs
- * after something was opened.
+ * `backend` needs remoteSetup(host, checkOnly), getConfig() and saveConfig().
  */
 export function initRemoteSection(root, backend, initialHosts, opts = {}) {
   const input = root.querySelector('#remote-host');
@@ -245,30 +128,6 @@ export function initRemoteSection(root, backend, initialHosts, opts = {}) {
 
   let hosts = addHost(initialHosts, '');
   let busy = false;
-  // What is typed per host survives the re-renders a run causes.
-  const typed = new Map();
-
-  // Names from the ssh config, to pick instead of type.
-  const candidatesEl = root.querySelector('#remote-host-candidates');
-  let candidates = [];
-  const renderCandidates = () => {
-    if (!candidatesEl) return;
-    candidatesEl.textContent = '';
-    for (const name of candidates.filter((c) => !hosts.includes(c))) {
-      const opt = document.createElement('option');
-      opt.value = name;
-      candidatesEl.appendChild(opt);
-    }
-  };
-  if (backend.sshHostCandidates) {
-    backend
-      .sshHostCandidates()
-      .then((names) => {
-        candidates = Array.isArray(names) ? names : [];
-        renderCandidates();
-      })
-      .catch(() => {});
-  }
 
   const setStatus = (text, kind) => {
     statusEl.textContent = text;
@@ -283,6 +142,8 @@ export function initRemoteSection(root, backend, initialHosts, opts = {}) {
   const persist = async () => {
     const existing = await backend.getConfig();
     await backend.saveConfig({ ...existing, setup_hosts: hosts });
+    // The open section lists these hosts among its destinations.
+    opts.onHosts?.(hosts);
   };
 
   const render = () => {
@@ -324,64 +185,10 @@ export function initRemoteSection(root, backend, initialHosts, opts = {}) {
         'remote-forget icon-btn',
       );
       listEl.appendChild(row);
-
-      if (backend.remoteOpen) {
-        const openRow = document.createElement('div');
-        openRow.className = 'remote-open-row';
-        openRow.dataset.host = host;
-        const field = pathField(opts.recent, host);
-        if (typed.has(host)) field.input.value = typed.get(host);
-        field.input.disabled = busy;
-        field.input.addEventListener('input', () => typed.set(host, field.input.value));
-        field.input.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            open(host, field.input.value);
-          }
-        });
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'remote-open';
-        btn.textContent = '開く';
-        btn.title = 'このホストのフォルダ / ファイルをこの Fude で開く';
-        btn.disabled = busy;
-        btn.addEventListener('click', () => open(host, field.input.value));
-        openRow.append(field.input, field.datalist, btn);
-        listEl.appendChild(openRow);
-      }
     }
     addBtn.disabled = busy;
     input.disabled = busy;
-    renderCandidates();
   };
-
-  async function open(host, rawPath) {
-    if (busy) return;
-    const path = String(rawPath ?? '').trim() || '~';
-    typed.set(host, path);
-    busy = true;
-    render();
-    showLog('');
-    setStatus(`${host}: ${path} を開いています…`, 'busy');
-    let opened = false;
-    try {
-      const res = await backend.remoteOpen(host, path);
-      if (res?.ok) {
-        opened = true;
-        setStatus(`${host}: ${path} を開きました`, 'ok');
-        if (opts.recent) await opts.recent.add(host, path);
-      } else {
-        showLog(res?.log || '');
-        setStatus(`${host}: ${path} を開けませんでした`, 'error');
-      }
-    } catch (e) {
-      setStatus(`${host}: ${e?.message || e}`, 'error');
-    } finally {
-      busy = false;
-      render();
-    }
-    if (opened) opts.onOpened?.();
-  }
 
   async function run(rawHost, checkOnly) {
     if (busy) return;
@@ -430,11 +237,9 @@ export function initRemoteSection(root, backend, initialHosts, opts = {}) {
   async function forget(host) {
     if (busy) return;
     hosts = removeHost(hosts, host);
-    typed.delete(host);
     render();
     try {
       await persist();
-      if (opts.recent) await opts.recent.forget(host);
       setStatus(`${host} を一覧から外しました`, '');
     } catch (e) {
       setStatus(`保存に失敗しました: ${e?.message || e}`, 'error');

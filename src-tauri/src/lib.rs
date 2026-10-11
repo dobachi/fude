@@ -1,6 +1,7 @@
 mod file_watcher;
 mod gui_server;
 mod key_storage;
+mod remote_direct;
 mod updater_env;
 mod wait_client;
 mod wsl_bridge;
@@ -852,25 +853,6 @@ fn valid_remote_path(path: &str) -> Result<String, String> {
     })
 }
 
-/// `fude-cli` arguments that open `path` on `host` in this Fude.
-fn remote_open_args(host: &str, path: &str) -> Result<Vec<String>, String> {
-    Ok(vec![
-        "remote".to_string(),
-        valid_ssh_host(host)?,
-        "--".to_string(),
-        valid_remote_path(path)?,
-    ])
-}
-
-/// `fude-cli` arguments that open `path` inside the WSL distro.
-fn wsl_open_args(path: &str) -> Result<Vec<String>, String> {
-    Ok(vec![
-        "here".to_string(),
-        "--".to_string(),
-        valid_remote_path(path)?,
-    ])
-}
-
 /// The host names in `fude-cli hosts` output, one per line.
 fn parse_host_lines(out: &str) -> Vec<String> {
     out.lines()
@@ -880,11 +862,140 @@ fn parse_host_lines(out: &str) -> Vec<String> {
         .collect()
 }
 
-/// Open `path` on ssh host `host` in this window, from here: the host's
-/// `fude-cli` is started over ssh and connects back through the forward.
+/// The WSL distro ssh runs in for this app, when there is one.
+fn wsl_distro_in_use() -> Option<String> {
+    let distro = fude_core::load_config().ok().and_then(|c| c.wsl_distro);
+    wsl_route(cfg!(windows), distro.as_deref())
+}
+
+/// The place a request from the remote view names: an ssh host, or the WSL
+/// distro when `host` is absent.
+fn direct_target(host: Option<&str>) -> Result<remote_direct::Target, String> {
+    match host.map(str::trim).filter(|h| !h.is_empty()) {
+        Some(h) => Ok(remote_direct::Target::Ssh(valid_ssh_host(h)?)),
+        None => Ok(remote_direct::Target::Wsl),
+    }
+}
+
+fn open_direct(
+    app: tauri::AppHandle,
+    registry: &Arc<gui_server::WaitRegistry>,
+    sessions: &Arc<gui_server::RemoteSessions>,
+    target: remote_direct::Target,
+    path: &str,
+) -> Result<CliOutcome, String> {
+    let path = valid_remote_path(path)?;
+    let (program, args) = remote_direct::command_line(
+        &target,
+        wsl_distro_in_use().as_deref(),
+        env!("CARGO_PKG_VERSION"),
+        "here --_stdio",
+        &path,
+        None,
+    )?;
+    let sink: Arc<dyn gui_server::OpenSink> = Arc::new(WindowSink(app));
+    let outcome = remote_direct::open(
+        &program,
+        &args,
+        Arc::clone(registry),
+        Arc::clone(sessions),
+        sink,
+        None,
+    )?;
+    Ok(match outcome {
+        remote_direct::Outcome::Opened => CliOutcome {
+            ok: true,
+            log: String::new(),
+        },
+        remote_direct::Outcome::Failed(said) => {
+            let log = match remote_direct::failure_hint(&target, &said) {
+                Some(hint) => format!("{}\n{}", said, hint),
+                None => said,
+            };
+            CliOutcome { ok: false, log }
+        }
+    })
+}
+
+/// Open `path` on ssh host `host` in this window, from here: the app starts
+/// the host's `fude-cli` over ssh and talks to it directly.
 #[tauri::command(async)]
-fn remote_open(host: String, path: String) -> Result<CliOutcome, String> {
-    run_fude_cli(&remote_open_args(&host, &path)?)
+fn remote_open(
+    app: tauri::AppHandle,
+    registry: State<'_, Arc<gui_server::WaitRegistry>>,
+    sessions: State<'_, Arc<gui_server::RemoteSessions>>,
+    host: String,
+    path: String,
+) -> Result<CliOutcome, String> {
+    let target = direct_target(Some(&host))?;
+    open_direct(app, registry.inner(), sessions.inner(), target, &path)
+}
+
+/// Open `path` inside the WSL distro of WSL integration in this window.
+#[tauri::command(async)]
+fn wsl_open(
+    app: tauri::AppHandle,
+    registry: State<'_, Arc<gui_server::WaitRegistry>>,
+    sessions: State<'_, Arc<gui_server::RemoteSessions>>,
+    path: String,
+) -> Result<CliOutcome, String> {
+    open_direct(
+        app,
+        registry.inner(),
+        sessions.inner(),
+        remote_direct::Target::Wsl,
+        &path,
+    )
+}
+
+/// What `partial` could be completed to on `host` (absent: in the WSL
+/// distro). Empty when it cannot be asked: completion is only a help.
+#[tauri::command(async)]
+fn remote_complete(host: Option<String>, partial: String) -> Vec<String> {
+    let Ok(target) = direct_target(host.as_deref()) else {
+        return Vec::new();
+    };
+    if partial.len() > 4096 || partial.chars().any(|c| c.is_control()) {
+        return Vec::new();
+    }
+    match remote_direct::command_line(
+        &target,
+        wsl_distro_in_use().as_deref(),
+        env!("CARGO_PKG_VERSION"),
+        "complete",
+        &partial,
+        Some(remote_direct::complete_timeout()),
+    ) {
+        Ok((program, args)) => remote_direct::complete(&program, &args),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// One connected agent, for the remote view.
+#[derive(Debug, Clone, Serialize)]
+pub struct RemoteConnection {
+    pub id: u64,
+    pub host: String,
+    pub roots: Vec<String>,
+}
+
+/// The agents connected to this window, however they got here.
+#[tauri::command]
+fn remote_connections(
+    sessions: State<'_, Arc<gui_server::RemoteSessions>>,
+) -> Vec<RemoteConnection> {
+    sessions
+        .list()
+        .into_iter()
+        .map(|(id, host, roots)| RemoteConnection { id, host, roots })
+        .collect()
+}
+
+/// End the connection `id`. Its tabs stay open but cannot be saved until
+/// the place is opened again. False when it was already gone.
+#[tauri::command]
+fn remote_disconnect(sessions: State<'_, Arc<gui_server::RemoteSessions>>, id: u64) -> bool {
+    sessions.hang_up(id)
 }
 
 /// The ssh hosts the machine that runs ssh for this app knows (its
@@ -897,22 +1008,6 @@ fn ssh_host_candidates() -> Result<Vec<String>, String> {
     } else {
         Vec::new()
     })
-}
-
-/// Open `path` inside the WSL distro of WSL integration in this window.
-#[tauri::command(async)]
-fn wsl_open(path: String) -> Result<CliOutcome, String> {
-    let args = wsl_open_args(&path)?;
-    let distro = fude_core::load_config().ok().and_then(|c| c.wsl_distro);
-    let Some(distro) = wsl_route(cfg!(windows), distro.as_deref()) else {
-        return Err("WSL 連携がオフです".into());
-    };
-    let (ok, out, err) = wsl_bridge::run_script(
-        WSL_EXE,
-        &wsl_bridge::wsl_args(&distro),
-        &wsl_bridge::cli_script(env!("CARGO_PKG_VERSION"), &args),
-    )?;
-    Ok(cli_outcome(ok, &out, &err))
 }
 
 /// Run `fude-cli` with `args` where ssh sessions start from, and return
@@ -1988,6 +2083,9 @@ pub fn run() {
             remote_open,
             ssh_host_candidates,
             wsl_open,
+            remote_complete,
+            remote_connections,
+            remote_disconnect,
             wsl_bridge_status,
             wsl_bridge_set,
             read_file,
@@ -2191,24 +2289,22 @@ mod tests {
     }
 
     #[test]
-    fn opening_from_the_remote_view_builds_safe_arguments() {
-        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    fn a_request_from_the_remote_view_names_a_host_or_wsl() {
         assert_eq!(
-            remote_open_args(" k16 ", " ~/my notes ").unwrap(),
-            a(&["remote", "k16", "--", "~/my notes"])
+            direct_target(Some(" k16 ")).unwrap(),
+            remote_direct::Target::Ssh("k16".into())
         );
-        // No path means the home directory there.
+        assert_eq!(direct_target(None).unwrap(), remote_direct::Target::Wsl);
         assert_eq!(
-            remote_open_args("me@box", "").unwrap(),
-            a(&["remote", "me@box", "--", "~"])
+            direct_target(Some("  ")).unwrap(),
+            remote_direct::Target::Wsl
         );
-        // A path that looks like an option stays a path: `--` precedes it.
-        assert_eq!(wsl_open_args("-n").unwrap(), a(&["here", "--", "-n"]));
-        assert_eq!(wsl_open_args("  ").unwrap(), a(&["here", "--", "~"]));
-        assert!(remote_open_args("-oProxyCommand=x", "~").is_err());
-        assert!(remote_open_args("k16", "a\nb").is_err());
-        assert!(wsl_open_args("a\u{0}b").is_err());
-        assert!(wsl_open_args(&"x".repeat(5000)).is_err());
+        assert!(direct_target(Some("-oProxyCommand=x")).is_err());
+        // No path means the home directory; a path is one line.
+        assert_eq!(valid_remote_path("  ").unwrap(), "~");
+        assert_eq!(valid_remote_path(" ~/my notes ").unwrap(), "~/my notes");
+        assert!(valid_remote_path("a\nb").is_err());
+        assert!(valid_remote_path(&"x".repeat(5000)).is_err());
     }
 
     #[test]

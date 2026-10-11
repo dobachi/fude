@@ -8,6 +8,11 @@ import {
   recentPaths,
   forgetRecent,
   RECENT_MAX,
+  recentHosts,
+  openTargets,
+  commonPrefix,
+  pathSuggestions,
+  SUGGEST_MAX,
 } from '../core/setup-hosts.js';
 
 describe('hostError', () => {
@@ -114,5 +119,48 @@ describe('remembered places', () => {
 
   it('the outdated notice points at the remote view', () => {
     expect(outdatedCliMessage('k16', '0.8.8', '0.8.9')).toMatch(/リモート接続/);
+  });
+});
+
+describe('destinations and suggestions', () => {
+  it('lists hosts used lately first, then set up, then from the ssh config', () => {
+    const recent = ['box\t/a', 'wsl\t~/x', 'k16\t~/n', 'box\t/b'];
+    expect(recentHosts(recent)).toEqual(['box', 'k16']);
+    expect(openTargets(recent, ['k16', 'dev'], ['dev', 'git', 'box'])).toEqual([
+      'box',
+      'k16',
+      'dev',
+      'git',
+    ]);
+    expect(openTargets([], [], [])).toEqual([]);
+    // A name ssh could not take is not offered.
+    expect(openTargets([], ['ok', 'bad name', '-x'], null)).toEqual(['ok']);
+  });
+
+  it('finds how far candidates agree', () => {
+    expect(commonPrefix(['~/Sources/', '~/Sandbox/', '~/Summary.md'])).toBe('~/S');
+    expect(commonPrefix(['~/Sources/'])).toBe('~/Sources/');
+    expect(commonPrefix(['abc', 'xyz'])).toBe('');
+    expect(commonPrefix([])).toBe('');
+    expect(commonPrefix(null)).toBe('');
+  });
+
+  it('offers matching earlier places before completions, each once', () => {
+    const recent = ['~/Sources/fude', '/srv/docs', '~/Sources/'];
+    expect(pathSuggestions('~/S', recent, ['~/Sandbox/', '~/Sources/'])).toEqual([
+      '~/Sources/fude',
+      '~/Sources/',
+      '~/Sandbox/',
+    ]);
+    // Nothing typed: everything opened before, then what is in home.
+    expect(pathSuggestions('', recent, ['notes/'])).toEqual([...recent, 'notes/']);
+    // What is already typed is not a suggestion.
+    expect(pathSuggestions('/srv/docs', recent, ['/srv/docs/a.md'])).toEqual(['/srv/docs/a.md']);
+    expect(pathSuggestions('x', null, null)).toEqual([]);
+  });
+
+  it('keeps the list short', () => {
+    const many = Array.from({ length: SUGGEST_MAX + 20 }, (_, i) => `/p${i}`);
+    expect(pathSuggestions('', [], many).length).toBe(SUGGEST_MAX);
   });
 });

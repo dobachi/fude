@@ -24,6 +24,12 @@ pub struct Args {
     /// `here [PATH]`: open PATH on this machine, read from the home
     /// directory (for callers without a shell or a working directory).
     pub here: bool,
+    /// `here --_stdio`: talk to the GUI over stdin/stdout (it started us).
+    pub stdio: bool,
+    /// `--hex`: the path operands are hex-encoded (see `run::unhex`).
+    pub hex: bool,
+    /// `complete [PARTIAL]`: list what a partial path could be completed to.
+    pub complete: bool,
     /// `hosts`: list the ssh hosts this machine knows.
     pub hosts: bool,
     /// `--to NAME`: the machine whose Fude gets the files, when several do.
@@ -108,9 +114,17 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
         Some("pipe") => a.pipe = true,
         Some("hosts") => a.hosts = true,
         Some("here") => a.here = true,
+        Some("complete") => a.complete = true,
         _ => {}
     }
-    let skip = if want_setup_host || want_remote_host || a.bridge || a.pipe || a.hosts || a.here {
+    let skip = if want_setup_host
+        || want_remote_host
+        || a.bridge
+        || a.pipe
+        || a.hosts
+        || a.here
+        || a.complete
+    {
         2
     } else {
         1
@@ -157,6 +171,8 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
             "--gui" => a.gui = true,
             "--tui" => a.tui = true,
             "--_foreground" => a.foreground = true,
+            "--_stdio" => a.stdio = true,
+            "--hex" => a.hex = true,
             "-h" | "--help" => a.help = true,
             "-V" | "--version" => a.version = true,
             s if s.starts_with('-') && s.len() > 1 => {
@@ -238,6 +254,12 @@ mod tests {
         let a = parse(&argv(&["fude-cli", "here", "--", "~/notes"])).unwrap();
         assert!(a.here);
         assert_eq!(a.paths, ["~/notes"]);
+        let a = parse(&argv(&["fude-cli", "here", "--_stdio", "--hex", "7e2f61"])).unwrap();
+        assert!(a.here && a.stdio && a.hex);
+        assert_eq!(a.paths, ["7e2f61"]);
+        let a = parse(&argv(&["fude-cli", "complete", "--hex", "7e"])).unwrap();
+        assert!(a.complete && a.hex);
+        assert!(parse(&argv(&["fude-cli", "complete"])).unwrap().complete);
         assert!(parse(&argv(&["fude-cli", "here"]))
             .unwrap()
             .paths

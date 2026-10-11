@@ -94,6 +94,14 @@ describe('backend module (Tauri mode)', () => {
     expect(mockInvoke).toHaveBeenCalledWith('ssh_host_candidates');
     await mod.wslOpen('/srv');
     expect(mockInvoke).toHaveBeenCalledWith('wsl_open', { path: '/srv' });
+    await mod.remoteComplete('k16', '~/S');
+    expect(mockInvoke).toHaveBeenCalledWith('remote_complete', { host: 'k16', partial: '~/S' });
+    await mod.remoteComplete(null, '');
+    expect(mockInvoke).toHaveBeenCalledWith('remote_complete', { host: null, partial: '' });
+    await mod.remoteConnections();
+    expect(mockInvoke).toHaveBeenCalledWith('remote_connections');
+    await mod.remoteDisconnect(7);
+    expect(mockInvoke).toHaveBeenCalledWith('remote_disconnect', { id: 7 });
   });
 
   it('writeTempFile calls invoke with write_temp_file command', async () => {

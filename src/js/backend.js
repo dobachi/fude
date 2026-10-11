@@ -325,6 +325,27 @@ export async function sshHostCandidates() {
   return doInvoke('ssh_host_candidates');
 }
 
+/**
+ * What `partial` could be completed to on `host` (null: inside the WSL
+ * distro). Resolves to a list of paths; empty when it cannot be asked.
+ */
+export async function remoteComplete(host, partial) {
+  if (!isTauriWebview()) return [];
+  return doInvoke('remote_complete', { host: host || null, partial });
+}
+
+/** The agents connected to this window: `[{ id, host, roots }]`. */
+export async function remoteConnections() {
+  if (!isTauriWebview()) return [];
+  return doInvoke('remote_connections');
+}
+
+/** End the connection `id`. Resolves to false when it was already gone. */
+export async function remoteDisconnect(id) {
+  if (!isTauriWebview()) return false;
+  return doInvoke('remote_disconnect', { id });
+}
+
 /** Open `path` inside the WSL distro of WSL integration. Resolves to `{ ok, log }`. */
 export async function wslOpen(path) {
   if (!isTauriWebview()) throw new Error('デスクトップ版でのみ使えます');

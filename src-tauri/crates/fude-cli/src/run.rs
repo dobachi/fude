@@ -275,6 +275,73 @@ fn hello_maker() -> (Vec<crate::guis::Gui>, impl Fn(&Candidate) -> Message) {
     (guis, hello_for)
 }
 
+/// Greet the GUI that started this process, over stdin/stdout.
+pub fn connect_stdio() -> Result<Connected, String> {
+    let (_, hello_for) = hello_maker();
+    let mut hello = hello_for(&Candidate::Stdio);
+    // The pipe is the proof of who is asking; no secret travels on it.
+    if let Message::Hello { token, .. } = &mut hello {
+        *token = None;
+    }
+    discover::over_stdio(&hello).map_err(|e| format!("the GUI did not answer on stdio: {}", e))
+}
+
+/// The bytes a string of hex digits stands for, as text. Paths the GUI
+/// sends travel this way: through ssh, a remote shell and (on Windows)
+/// wsl.exe, where quoting rules differ and hex needs none.
+pub fn unhex(hex: &str) -> Result<String, String> {
+    let h = hex.trim();
+    if !h.len().is_multiple_of(2) || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("not a hex string".into());
+    }
+    let bytes: Vec<u8> = (0..h.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap_or(0))
+        .collect();
+    String::from_utf8(bytes).map_err(|_| "not UTF-8".to_string())
+}
+
+/// How many completions are offered at most.
+pub const COMPLETIONS_MAX: usize = 200;
+
+/// What `partial` could be completed to, read like `here` reads paths:
+/// the entries of its directory part whose names start with the rest,
+/// directories with a trailing `/`. The directory part is kept as typed
+/// (`~/So` gives `~/Sources/`). Hidden entries only when asked for by a
+/// leading dot. Directories first, then by name.
+pub fn completions(home: &Path, partial: &str) -> Vec<String> {
+    let p = partial.trim_start();
+    let (dir_part, prefix) = match p.rfind('/') {
+        Some(i) => (&p[..=i], &p[i + 1..]),
+        None if p == "~" => ("~/", ""),
+        None => ("", p),
+    };
+    let dir = home_path(home, if dir_part.is_empty() { "~" } else { dir_part });
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(bool, String)> = rd
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_str()?.to_string();
+            if !name.starts_with(prefix) || (name.starts_with('.') && !prefix.starts_with('.')) {
+                return None;
+            }
+            // Follow symlinks: a link to a directory completes as one.
+            let is_dir = std::fs::metadata(e.path())
+                .map(|m| m.is_dir())
+                .unwrap_or(false);
+            Some((is_dir, name))
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    found
+        .into_iter()
+        .take(COMPLETIONS_MAX)
+        .map(|(is_dir, name)| format!("{}{}{}", dir_part, name, if is_dir { "/" } else { "" }))
+        .collect()
+}
+
 /// `--to`, else `$FUDE_TO`.
 pub fn wanted_machine(flag: Option<&str>) -> Option<String> {
     flag.map(str::to_string)
@@ -451,6 +518,7 @@ pub fn detach(args: &Args, log: &Path, via: &Candidate) -> Result<(), String> {
     match via {
         Candidate::Tcp(addr) => cmd.env(discover::ADDR_ENV, addr),
         Candidate::Socket(path) => cmd.env(ipc::SOCKET_ENV, path),
+        Candidate::Stdio => &mut cmd, // never detached: the pipe is the link
     };
     cmd.env_remove(TO_ENV);
     cmd.stdin(std::process::Stdio::null())
@@ -490,6 +558,58 @@ mod tests {
         assert_eq!(home_path(home, "/srv/docs"), PathBuf::from("/srv/docs"));
         // `~user` is not expanded: it is a name under home, as typed.
         assert_eq!(home_path(home, "~root"), PathBuf::from("/home/u/~root"));
+    }
+
+    #[test]
+    fn hex_carries_any_path_and_refuses_what_is_not_hex() {
+        assert_eq!(unhex("7e2f6e6f746573").unwrap(), "~/notes");
+        assert_eq!(unhex(" 7E2F ").unwrap(), "~/");
+        assert_eq!(unhex("").unwrap(), "");
+        assert_eq!(unhex("e697a5e69cac2061").unwrap(), "日本 a");
+        assert!(unhex("7e2").is_err());
+        assert!(unhex("zz").is_err());
+        assert!(unhex("ff").is_err()); // not UTF-8
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn completions_list_what_a_partial_path_could_become() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path();
+        for d in ["Sources/fude", "Sandbox", ".config", "notes dir"] {
+            std::fs::create_dir_all(home.join(d)).unwrap();
+        }
+        for f in ["Summary.md", ".bashrc", "Sources/readme.md"] {
+            std::fs::write(home.join(f), "").unwrap();
+        }
+        std::os::unix::fs::symlink(home.join("Sources"), home.join("Slink")).unwrap();
+        // Directories first, each with its slash; the typed prefix is kept.
+        assert_eq!(
+            completions(home, "~/S"),
+            ["~/Sandbox/", "~/Slink/", "~/Sources/", "~/Summary.md"]
+        );
+        assert_eq!(
+            completions(home, "~/Sources/"),
+            ["~/Sources/fude/", "~/Sources/readme.md"]
+        );
+        // Relative means under home, as `here` reads it.
+        assert_eq!(completions(home, "So"), ["Sources/"]);
+        assert_eq!(completions(home, "Sources/f"), ["Sources/fude/"]);
+        // Nothing typed, or just `~`: what is in home, hidden entries aside.
+        let top = ["Sandbox/", "Slink/", "Sources/", "notes dir/", "Summary.md"];
+        assert_eq!(completions(home, ""), top);
+        assert_eq!(completions(home, "~"), top.map(|t| format!("~/{t}")));
+        // Hidden ones on request.
+        assert_eq!(completions(home, "~/."), ["~/.config/", "~/.bashrc"]);
+        // Absolute paths work the same way.
+        let abs = format!("{}/Sources/", home.display());
+        assert_eq!(
+            completions(home, &abs),
+            [format!("{abs}fude/"), format!("{abs}readme.md")]
+        );
+        // No such directory, or a file used as one: nothing, not an error.
+        assert_eq!(completions(home, "~/nope/x"), Vec::<String>::new());
+        assert_eq!(completions(home, "~/Summary.md/"), Vec::<String>::new());
     }
 
     #[test]

@@ -59,6 +59,8 @@ enum Event {
     },
     /// Write this to the peer (a request from the frontend).
     Send(Message),
+    /// The user asked to disconnect: say goodbye and end the connection.
+    Hangup,
 }
 
 /// Identifies a connection inside the registry so it can withdraw its own
@@ -137,6 +139,8 @@ impl WaitRegistry {
 /// One connected remote agent: where to send requests and who is waiting
 /// for which answer.
 pub struct RemoteSession {
+    /// Identifies the session to the frontend (to disconnect it).
+    pub id: u64,
     pub host: String,
     /// Directories the agent serves (absolute, on its machine).
     pub roots: Vec<String>,
@@ -258,6 +262,36 @@ impl RemoteSessions {
         Ok((session, path.to_string()))
     }
 
+    /// Every connected agent as (id, host, roots), in a stable order.
+    pub fn list(&self) -> Vec<(u64, String, Vec<String>)> {
+        let mut all: Vec<_> = self
+            .by_host
+            .lock()
+            .map(|m| {
+                m.values()
+                    .flatten()
+                    .map(|s| (s.id, s.host.clone(), s.roots.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        all.sort_by_key(|(id, _, _)| *id);
+        all
+    }
+
+    /// End the session `id`. Its tabs stay; they cannot be saved until the
+    /// host is connected again. False when there is no such session.
+    pub fn hang_up(&self, id: u64) -> bool {
+        let session = self
+            .by_host
+            .lock()
+            .ok()
+            .and_then(|m| m.values().flatten().find(|s| s.id == id).cloned());
+        match session {
+            Some(s) => s.tx.send(Event::Hangup).is_ok(),
+            None => false,
+        }
+    }
+
     pub fn hosts(&self) -> Vec<String> {
         self.by_host
             .lock()
@@ -279,6 +313,8 @@ pub struct ConnState {
     /// that arrived over TCP, where the socket's file permissions protect
     /// nothing.
     token_always: bool,
+    /// Set for peers we spawned (`trusted`): no token is asked for.
+    trusted: bool,
     cwd: Option<String>,
     /// Set when the peer is a remote agent (its hello carried a host).
     host: Option<String>,
@@ -297,6 +333,15 @@ impl ConnState {
     pub fn with_token(token: Option<String>) -> ConnState {
         ConnState {
             required_token: token,
+            ..Default::default()
+        }
+    }
+
+    /// For a peer this application started itself: a remote agent (its
+    /// hello names a host) is accepted without a token.
+    pub fn trusted() -> ConnState {
+        ConnState {
+            trusted: true,
             ..Default::default()
         }
     }
@@ -365,7 +410,7 @@ impl ConnState {
                     );
                 }
                 let host = host.filter(|h| !h.is_empty() && !h.contains('/'));
-                if host.is_some() || self.token_always {
+                if !self.trusted && (host.is_some() || self.token_always) {
                     let ok = match &self.required_token {
                         Some(t) => fude_core::token::matches(t, token.as_deref()),
                         None => false,
@@ -553,7 +598,7 @@ pub fn start_tcp(
                                 serve(
                                     Box::new(stream),
                                     Box::new(w),
-                                    token,
+                                    Some(token),
                                     true,
                                     registry,
                                     sessions,
@@ -599,7 +644,7 @@ pub fn start(
                                 serve(
                                     Box::new(recv),
                                     Box::new(send),
-                                    token,
+                                    Some(token),
                                     false,
                                     registry,
                                     sessions,
@@ -614,10 +659,24 @@ pub fn start(
     Ok(())
 }
 
+/// Serve an agent this application started itself, over the pipes to it
+/// (`recv` its stdout, `send` its stdin). No token is asked for: nobody
+/// else can be at the other end of a pipe we opened. Returns when the
+/// connection ends.
+pub fn serve_child(
+    recv: Box<dyn std::io::Read + Send>,
+    send: Box<dyn Write + Send>,
+    registry: Arc<WaitRegistry>,
+    sessions: Arc<RemoteSessions>,
+    sink: Arc<dyn OpenSink>,
+) {
+    serve(recv, send, None, false, registry, sessions, sink)
+}
+
 fn serve(
     recv: Box<dyn std::io::Read + Send>,
     mut send: Box<dyn Write + Send>,
-    token: Arc<String>,
+    token: Option<Arc<String>>,
     token_always: bool,
     registry: Arc<WaitRegistry>,
     sessions: Arc<RemoteSessions>,
@@ -648,10 +707,10 @@ fn serve(
         });
 
     let conn_id = registry.new_conn_id();
-    let mut state = if token_always {
-        ConnState::with_token_always(Some(token.to_string()))
-    } else {
-        ConnState::with_token(Some(token.to_string()))
+    let mut state = match token {
+        Some(token) if token_always => ConnState::with_token_always(Some(token.to_string())),
+        Some(token) => ConnState::with_token(Some(token.to_string())),
+        None => ConnState::trusted(),
     };
     let mut session: Option<Arc<RemoteSession>> = None;
     let write_all = |send: &mut dyn Write, msgs: &[Message]| -> bool {
@@ -685,6 +744,7 @@ fn serve(
                         if !was_open && state.opened && session.is_none() {
                             if let Some(host) = state.host() {
                                 let s = Arc::new(RemoteSession {
+                                    id: conn_id,
                                     host: host.to_string(),
                                     roots: state.roots().to_vec(),
                                     tx: tx.clone(),
@@ -722,6 +782,10 @@ fn serve(
                     let _ = write_all(&mut send, &[Message::Bye]);
                     break;
                 }
+            }
+            Event::Hangup => {
+                let _ = write_all(&mut send, &[Message::Bye]);
+                break;
             }
             Event::Eof => break,
         }
@@ -917,6 +981,106 @@ mod tests {
             &sink,
         );
         assert!(matches!(replies[0], Message::Error { .. }));
+    }
+
+    #[test]
+    fn an_agent_we_started_ourselves_needs_no_token() {
+        let sink = Recorder::default();
+        let mut st = ConnState::trusted();
+        let (replies, _) = st.handle(
+            Message::Hello {
+                protocol: PROTOCOL_VERSION,
+                cwd: None,
+                cli_version: None,
+                host: Some("box".into()),
+                token: None,
+            },
+            &sink,
+        );
+        assert!(matches!(replies[0], Message::Welcome { .. }), "{replies:?}");
+        assert_eq!(st.host(), Some("box"));
+    }
+
+    /// The whole life of a connection the app opened itself: greeted
+    /// without a token, listed once it serves something, ended on request.
+    #[test]
+    fn a_child_agent_is_served_listed_and_hung_up_on() {
+        use std::io::BufRead;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let agent = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (gui_side, _) = listener.accept().unwrap();
+        let registry = Arc::new(WaitRegistry::default());
+        let sessions = Arc::new(RemoteSessions::default());
+        let sink = Arc::new(Recorder::default());
+        let server = {
+            let (registry, sessions, sink) = (
+                Arc::clone(&registry),
+                Arc::clone(&sessions),
+                Arc::clone(&sink),
+            );
+            let w = gui_side.try_clone().unwrap();
+            thread::spawn(move || {
+                serve_child(Box::new(gui_side), Box::new(w), registry, sessions, sink)
+            })
+        };
+        let mut to_gui = agent.try_clone().unwrap();
+        let mut from_gui = BufReader::new(agent);
+        let mut read = || {
+            let mut line = String::new();
+            from_gui.read_line(&mut line).unwrap();
+            ipc::decode(&line).unwrap()
+        };
+        to_gui
+            .write_all(
+                ipc::encode(&Message::Hello {
+                    protocol: PROTOCOL_VERSION,
+                    cwd: None,
+                    cli_version: Some(env!("CARGO_PKG_VERSION").into()),
+                    host: Some("k16".into()),
+                    token: None,
+                })
+                .as_bytes(),
+            )
+            .unwrap();
+        assert!(matches!(read(), Some(Message::Welcome { .. })));
+        assert!(sessions.list().is_empty(), "nothing is served yet");
+        to_gui
+            .write_all(
+                ipc::encode(&Message::Open {
+                    paths: vec!["/home/u/notes".into()],
+                    wait: true,
+                    roots: Some(vec!["/home/u/notes".into()]),
+                })
+                .as_bytes(),
+            )
+            .unwrap();
+        // The open is acknowledged once the sink has it.
+        let _ = read();
+        assert_eq!(
+            sink.calls.lock().unwrap().as_slice(),
+            [("remote://k16/home/u/notes".to_string(), true)]
+        );
+        let listed = sessions.list();
+        assert_eq!(listed.len(), 1);
+        let (id, host, roots) = listed[0].clone();
+        assert_eq!(
+            (host.as_str(), roots.as_slice()),
+            ("k16", ["/home/u/notes".to_string()].as_slice())
+        );
+
+        assert!(!sessions.hang_up(id + 999), "no such session");
+        assert!(sessions.hang_up(id));
+        // The agent is told goodbye, then the line goes quiet.
+        loop {
+            match read() {
+                Some(Message::Bye) => break,
+                Some(_) => continue,
+                None => panic!("the connection ended without a goodbye"),
+            }
+        }
+        server.join().unwrap();
+        assert!(sessions.list().is_empty());
+        assert!(!sessions.hang_up(id), "already gone");
     }
 
     #[test]
@@ -1165,6 +1329,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         (
             Arc::new(RemoteSession {
+                id: 0,
                 host: host.into(),
                 roots: roots.iter().map(|s| s.to_string()).collect(),
                 tx,

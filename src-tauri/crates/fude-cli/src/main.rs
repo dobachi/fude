@@ -81,6 +81,26 @@ fn main() {
             }
         }
     }
+    if args.hex {
+        let decoded: Result<Vec<String>, String> =
+            args.paths.iter().map(|p| run::unhex(p)).collect();
+        match decoded {
+            Ok(paths) => args.paths = paths,
+            Err(e) => {
+                eprintln!("fude-cli: --hex: {}", e);
+                std::process::exit(2);
+            }
+        }
+    }
+    if args.complete {
+        if let Some(home) = dirs::home_dir() {
+            let partial = args.paths.first().map(String::as_str).unwrap_or("");
+            for c in run::completions(&home, partial) {
+                println!("{}", c);
+            }
+        }
+        return;
+    }
     if args.here {
         let Some(home) = dirs::home_dir() else {
             eprintln!("fude-cli: cannot find the home directory");
@@ -94,6 +114,18 @@ fn main() {
         }
         args.paths = vec![path.to_string_lossy().to_string()];
         args.gui = true;
+        if args.stdio {
+            // The GUI started this process and speaks on its stdin/stdout:
+            // serve there until it hangs up. Nothing else may be printed
+            // on stdout.
+            match run::connect_stdio() {
+                Ok(conn) => std::process::exit(run::serve(conn, args.paths.clone(), false)),
+                Err(e) => {
+                    eprintln!("fude-cli: {}", e);
+                    std::process::exit(2);
+                }
+            }
+        }
     }
     if args.paths.is_empty() {
         eprintln!("fude-cli: nothing to open\n\n{}", args::USAGE);

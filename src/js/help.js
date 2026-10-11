@@ -123,7 +123,7 @@ const sections = [
       ],
       [
         'fude-cli remote HOST PATH',
-        'ssh でログインせずに、HOST のフォルダ / ファイルを手元の Fude に開く（「リモート接続」画面の「開く」と同じ）',
+        '端末から、ssh でログインせずに HOST のフォルダ / ファイルを手元の Fude に開く（セットアップ済みのホスト向け。画面からはメニュー「ファイル」→「リモート接続」の「開く」）',
       ],
       ['fude tui FILE / DIR', '端末内で編集（Ctrl+S 保存、Alt+Q 終了、F1 キー一覧）'],
       ['fude check', '起動中の Fude に届くか・どの経路かを表示'],

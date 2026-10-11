@@ -32,6 +32,9 @@ pub const DEFAULT_TCP_ADDR: &str = "127.0.0.1:47821";
 pub enum Candidate {
     Socket(PathBuf),
     Tcp(String),
+    /// This process's own stdin/stdout: the GUI started it and listens
+    /// there (see `over_stdio`). Never found by discovery.
+    Stdio,
 }
 
 impl std::fmt::Display for Candidate {
@@ -39,6 +42,7 @@ impl std::fmt::Display for Candidate {
         match self {
             Candidate::Socket(p) => write!(f, "{}", p.display()),
             Candidate::Tcp(a) => write!(f, "tcp://{}", a),
+            Candidate::Stdio => write!(f, "stdio"),
         }
     }
 }
@@ -177,8 +181,19 @@ fn open(cand: &Candidate) -> io::Result<Halves> {
             let w = stream.try_clone()?;
             (Box::new(BufReader::new(stream)), Box::new(w))
         }
+        Candidate::Stdio => (
+            Box::new(BufReader::new(io::stdin())),
+            Box::new(io::stdout()),
+        ),
     };
     Ok(halves)
+}
+
+/// Greet the GUI that started this process over its stdin/stdout. No
+/// forward, port or token is involved: whoever holds the other end of the
+/// pipe is the GUI that asked for these files.
+pub fn over_stdio(hello: &Message) -> io::Result<Connected> {
+    try_one(&Candidate::Stdio, hello)
 }
 
 /// Send `hello` and wait for `welcome`. The handshake read blocks, and a
