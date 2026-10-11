@@ -73,10 +73,103 @@ pub fn run_pipe(candidates: &[crate::discover::Candidate]) -> i32 {
             return 2;
         }
     };
-    let up = std::thread::spawn(move || pump(io::stdin(), writer));
-    pump(reader, io::stdout());
-    drop(up); // stdin may never end; the process exits with the GUI's side
+    relay(io::stdin(), io::stdout(), reader, writer);
     0
+}
+
+/// Splice `near` (our stdin/stdout) to `far` (the GUI) and return as soon as
+/// *either* direction ends. The caller exits the process then, which is what
+/// ends the other direction: a read blocked on the GUI cannot be cancelled,
+/// and the GUI does not hang up just because we stopped writing.
+pub fn relay(
+    near_r: impl Read + Send + 'static,
+    near_w: impl Write + Send + 'static,
+    far_r: impl Read + Send + 'static,
+    far_w: impl Write + Send + 'static,
+) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let tx2 = tx.clone();
+    std::thread::spawn(move || {
+        pump(near_r, far_w);
+        let _ = tx.send(());
+    });
+    std::thread::spawn(move || {
+        pump(far_r, near_w);
+        let _ = tx2.send(());
+    });
+    let _ = rx.recv();
+}
+
+#[cfg(test)]
+mod relay_tests {
+    use super::*;
+    use std::sync::mpsc::{channel, Receiver};
+    use std::time::Duration;
+
+    /// A reader fed by a channel: blocks while the sender lives, like a
+    /// connection whose peer neither writes nor hangs up.
+    struct ChanReader(Receiver<Vec<u8>>);
+    impl Read for ChanReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            match self.0.recv() {
+                Ok(b) => {
+                    buf[..b.len()].copy_from_slice(&b);
+                    Ok(b.len())
+                }
+                Err(_) => Ok(0),
+            }
+        }
+    }
+
+    fn returns_within(secs: u64, f: impl FnOnce() + Send + 'static) -> bool {
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            f();
+            let _ = tx.send(());
+        });
+        rx.recv_timeout(Duration::from_secs(secs)).is_ok()
+    }
+
+    /// Regression: `pipe` used to wait for the GUI to hang up even after its
+    /// stdin closed, so every finished client left a process behind.
+    #[test]
+    fn relay_returns_when_stdin_ends_though_the_gui_stays_silent() {
+        let (near_tx, near_rx) = channel::<Vec<u8>>();
+        let (_far_tx, far_rx) = channel::<Vec<u8>>(); // kept alive: never ends
+        let (seen_tx, seen_rx) = channel::<Vec<u8>>();
+        struct Sink(std::sync::mpsc::Sender<Vec<u8>>);
+        impl Write for Sink {
+            fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+                let _ = self.0.send(b.to_vec());
+                Ok(b.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        near_tx.send(b"hello\n".to_vec()).unwrap();
+        drop(near_tx); // stdin: one line, then EOF
+        assert!(returns_within(5, move || relay(
+            ChanReader(near_rx),
+            io::sink(),
+            ChanReader(far_rx),
+            Sink(seen_tx)
+        )));
+        assert_eq!(seen_rx.recv().unwrap(), b"hello\n");
+    }
+
+    #[test]
+    fn relay_returns_when_the_gui_ends_though_stdin_stays_open() {
+        let (_near_tx, near_rx) = channel::<Vec<u8>>(); // kept alive
+        let (far_tx, far_rx) = channel::<Vec<u8>>();
+        drop(far_tx);
+        assert!(returns_within(5, move || relay(
+            ChanReader(near_rx),
+            io::sink(),
+            ChanReader(far_rx),
+            io::sink()
+        )));
+    }
 }
 
 #[cfg(unix)]
@@ -92,6 +185,7 @@ pub fn run_bridge(_exe: Option<&str>) -> i32 {
 mod unix {
     use super::*;
     use std::os::unix::net::{UnixListener, UnixStream};
+    use std::sync::{Arc, Mutex};
 
     /// Where the Windows `fude-cli.exe` may be, in the order tried:
     /// `$FUDE_CLI_EXE`, a cached download, then next to an installed Fude.
@@ -234,13 +328,27 @@ mod unix {
             return;
         }
         let _ = stdin.flush();
-        // client → child on a helper thread; child → client here. When the
-        // GUI side ends, shut the client down so the helper's read returns.
-        let up = std::thread::spawn(move || pump(reader, stdin));
+        // client → child on a helper thread; child → client here. Whichever
+        // side ends first takes the other down: the GUI ending shuts the
+        // client so the helper's read returns, and the client leaving kills
+        // the child, which does not stop on a closed stdin by itself (the
+        // GUI keeps its end of the connection open).
+        let child = Arc::new(Mutex::new(child));
+        let up = {
+            let child = Arc::clone(&child);
+            std::thread::spawn(move || {
+                pump(reader, stdin);
+                if let Ok(mut c) = child.lock() {
+                    let _ = c.kill();
+                }
+            })
+        };
         pump(stdout, &client_w);
         let _ = client_w.shutdown(std::net::Shutdown::Both);
-        let _ = child.kill();
-        let _ = child.wait();
+        if let Ok(mut c) = child.lock() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
         let _ = up.join();
     }
 
@@ -373,6 +481,52 @@ mod unix {
             assert_eq!(line, "second line\n");
             c.shutdown(std::net::Shutdown::Both).unwrap();
             server.join().unwrap();
+        }
+
+        /// Regression: the Windows child does not leave when its stdin closes
+        /// (the GUI keeps its end open), so a client that hung up used to
+        /// leave the child, and this thread, behind for good.
+        #[test]
+        fn a_client_that_leaves_takes_the_child_with_it() {
+            let tmp = TempDir::new().unwrap();
+            let sock = tmp.path().join("gui.sock");
+            let pid_file = tmp.path().join("pid");
+            let listener = bind(&sock).unwrap();
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            let script = format!(
+                "echo $$ > '{}'; cat; exec sleep 600",
+                pid_file.to_string_lossy()
+            );
+            std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                // Echoes, then outlives its stdin with stdout still open.
+                serve_conn(stream, &|| {
+                    Command::new("sh")
+                        .args(["-c", &script])
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .spawn()
+                });
+                let _ = done_tx.send(());
+            });
+            let mut c = UnixStream::connect(&sock).unwrap();
+            let h = hello(Some("box"));
+            c.write_all(h.as_bytes()).unwrap();
+            let mut r = BufReader::new(c.try_clone().unwrap());
+            let mut line = String::new();
+            r.read_line(&mut line).unwrap();
+            assert_eq!(line, h);
+            let pid = std::fs::read_to_string(&pid_file).unwrap();
+            let pid = pid.trim();
+            drop(r);
+            drop(c);
+            let ended = done_rx.recv_timeout(std::time::Duration::from_secs(10));
+            if ended.is_err() {
+                let _ = Command::new("kill").arg(pid).status();
+            }
+            assert!(ended.is_ok(), "serve_conn must return once the client left");
+            // Reaped, not merely signalled.
+            assert!(!Path::new("/proc").join(pid).exists() || cfg!(not(target_os = "linux")));
         }
 
         #[test]
