@@ -3,6 +3,7 @@
 //! docs/TUI_DESIGN.md §6 describes (`Ctrl+Shift+X` becomes `Alt+X`).
 
 use super::doc::Doc;
+use super::help;
 use super::list_continue::{continuation, Continuation};
 use super::render::{self, Rendered};
 use super::sidebar::Sidebar;
@@ -68,6 +69,10 @@ pub struct App {
     preview_follow: bool,
     watcher: Option<Watcher>,
     watch_rx: mpsc::Receiver<PathBuf>,
+    /// First line of the key list shown (it can be taller than the terminal).
+    pub help_scroll: u16,
+    /// How far the key list can scroll at the size it was last drawn.
+    help_max_scroll: u16,
 }
 
 fn hash_text(s: &str) -> u64 {
@@ -102,6 +107,8 @@ impl App {
             preview_follow: true,
             watcher,
             watch_rx: rx,
+            help_scroll: 0,
+            help_max_scroll: u16::MAX,
         }
     }
 
@@ -292,6 +299,7 @@ impl App {
             (KeyCode::Char('r'), true, _) => return self.reload(),
             (KeyCode::F(1), _, _) | (KeyCode::Char('?'), true, _) => {
                 self.prompt = Prompt::Help;
+                self.help_scroll = 0;
                 return;
             }
             _ => {}
@@ -319,7 +327,26 @@ impl App {
         );
         match self.prompt.clone() {
             Prompt::None => {}
-            Prompt::Help => self.prompt = Prompt::None,
+            // The list scrolls; any other key closes it.
+            Prompt::Help => {
+                let max = self.help_max_scroll;
+                let to = |v: u16| v.min(max);
+                match k.code {
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        self.help_scroll = to(self.help_scroll.saturating_add(1))
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        self.help_scroll = self.help_scroll.saturating_sub(1)
+                    }
+                    KeyCode::PageDown | KeyCode::Char(' ') => {
+                        self.help_scroll = to(self.help_scroll.saturating_add(10))
+                    }
+                    KeyCode::PageUp => self.help_scroll = self.help_scroll.saturating_sub(10),
+                    KeyCode::Home => self.help_scroll = 0,
+                    KeyCode::End => self.help_scroll = max,
+                    _ => self.prompt = Prompt::None,
+                }
+            }
             Prompt::ConfirmClose(idx) => {
                 if yes {
                     self.prompt = Prompt::None;
@@ -775,7 +802,48 @@ impl App {
         .render(area, frame.buffer_mut());
     }
 
-    fn draw_prompt(&self, frame: &mut Frame, area: Rect) {
+    /// The key list: as wide as its longest line, as tall as fits, scrolled
+    /// when the terminal is shorter than the list.
+    fn draw_help(&mut self, frame: &mut Frame, area: Rect) {
+        let lines = help::lines(self.vim);
+        let width = (help::content_width(self.vim) as u16 + 4)
+            .min(area.width.saturating_sub(2))
+            .max(20);
+        let height = (lines.len() as u16 + 2)
+            .min(area.height.saturating_sub(2))
+            .max(3);
+        let rect = Rect {
+            x: area.x + (area.width.saturating_sub(width)) / 2,
+            y: area.y + (area.height.saturating_sub(height)) / 2,
+            width: width.min(area.width),
+            height: height.min(area.height),
+        };
+        let inner_height = rect.height.saturating_sub(2);
+        self.help_max_scroll = (lines.len() as u16).saturating_sub(inner_height);
+        self.help_scroll = self.help_scroll.min(self.help_max_scroll);
+        let footer = if self.help_max_scroll > 0 {
+            " ↑↓ / j k でスクロール ・ 他のキーで閉じる "
+        } else {
+            " 任意のキーで閉じる "
+        };
+        Clear.render(rect, frame.buffer_mut());
+        Paragraph::new(lines)
+            .scroll((self.help_scroll, 0))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" キー一覧 ")
+                    .title_bottom(Line::from(footer).right_aligned())
+                    .border_style(Style::default().fg(Color::Yellow))
+                    .padding(ratatui::widgets::Padding::horizontal(1)),
+            )
+            .render(rect, frame.buffer_mut());
+    }
+
+    fn draw_prompt(&mut self, frame: &mut Frame, area: Rect) {
+        if self.prompt == Prompt::Help {
+            return self.draw_help(frame, area);
+        }
         let (title, body): (&str, String) = match &self.prompt {
             Prompt::None => return,
             Prompt::ConfirmClose(idx) => (
@@ -796,7 +864,7 @@ impl App {
                     self.docs.get(*idx).map(|d| d.name()).unwrap_or_default()
                 ),
             ),
-            Prompt::Help => (" Keys ", HELP.into()),
+            Prompt::Help => return,
         };
         let lines = body.lines().count() as u16 + 2;
         let width = (area.width.saturating_sub(4)).clamp(20, 64);
@@ -819,14 +887,6 @@ impl App {
             .render(rect, frame.buffer_mut());
     }
 }
-
-const HELP: &str = "\
-Ctrl+S save   Alt+W close tab   Alt+T new tab   Alt+] / Alt+[ next/prev tab
-Alt+J editor  Alt+K split  Alt+L preview      Alt+E file list (Tab: back)
-Ctrl+F search  Alt+R reload from disk          Alt+Q / Ctrl+Q quit
-Edit mode: Ctrl+Z undo  Ctrl+Y redo  Enter continues lists
-Vim mode (key_mode=vim in config): i/Esc, u, Ctrl+R, /, v …
-Preview: j/k, Ctrl+D/U, g/G scroll           any key closes this";
 
 /// Run the editor on `paths` (files and/or one directory). Returns the exit code.
 pub fn run(paths: &[String]) -> i32 {
@@ -902,13 +962,19 @@ mod tests {
 
     fn rows(t: &Terminal<TestBackend>) -> Vec<String> {
         let buf = t.backend().buffer();
+        // A wide character covers the cell to its right as well. A terminal
+        // shows nothing of that cell, but the test backend keeps whatever an
+        // earlier frame left in it, so it is skipped here.
         (0..buf.area.height)
             .map(|y| {
-                (0..buf.area.width)
-                    .map(|x| buf[(x, y)].symbol().to_string())
-                    .collect::<String>()
-                    .trim_end()
-                    .to_string()
+                let mut row = String::new();
+                let mut x = 0;
+                while x < buf.area.width {
+                    let sym = buf[(x, y)].symbol();
+                    row.push_str(sym);
+                    x += unicode_width::UnicodeWidthStr::width(sym).max(1) as u16;
+                }
+                row.trim_end().to_string()
             })
             .collect()
     }
@@ -1005,6 +1071,79 @@ mod tests {
         app.handle(&k(KeyCode::Char('e'), KeyModifiers::ALT));
         assert!(!app.sidebar.visible);
         assert_eq!(app.focus, Focus::Editor);
+    }
+
+    #[test]
+    fn the_key_list_is_grouped_and_fits_a_tall_terminal_whole() {
+        let mut app = App::new(false);
+        app.new_doc();
+        app.handle(&k(KeyCode::F(1), KeyModifiers::NONE));
+        let mut t = Terminal::new(TestBackend::new(100, 50)).unwrap();
+        t.draw(|f| app.draw(f)).unwrap();
+        let screen = rows(&t);
+        // Wide characters occupy two cells, the second one blank: compare
+        // without spaces.
+        let squeezed: Vec<String> = screen.iter().map(|r| r.replace(' ', "")).collect();
+        let row_of = |needle: &str| {
+            squeezed
+                .iter()
+                .position(|r| r.contains(needle))
+                .unwrap_or_else(|| panic!("{} not on screen:\n{}", needle, screen.join("\n")))
+        };
+        // Titles on their own rows, in order, each followed by its keys.
+        let file = row_of("ファイル│");
+        let view = row_of("表示│");
+        let edit = row_of("編集│");
+        assert!(file < view && view < edit);
+        assert_eq!(row_of("Ctrl+S保存"), file + 1);
+        assert!(row_of("Alt+Jエディタのみ") > view);
+        assert!(row_of("Vimモード") > edit);
+        assert!(squeezed.iter().any(|r| r.contains("任意のキーで閉じる")));
+        // Whole list visible: nothing to scroll.
+        app.handle(&k(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.help_scroll, 0);
+        assert_eq!(app.prompt, Prompt::Help);
+    }
+
+    #[test]
+    fn the_key_list_scrolls_in_a_short_terminal_and_other_keys_close_it() {
+        let mut app = App::new(false);
+        app.new_doc();
+        app.handle(&k(KeyCode::F(1), KeyModifiers::NONE));
+        let mut t = Terminal::new(TestBackend::new(80, 12)).unwrap();
+        let screen = |app: &mut App, t: &mut Terminal<TestBackend>| {
+            t.draw(|f| app.draw(f)).unwrap();
+            rows(t).join("\n").replace(' ', "")
+        };
+        let top = screen(&mut app, &mut t);
+        assert!(top.contains("Ctrl+S保存"));
+        assert!(!top.contains("Vimモード"));
+        assert!(top.contains("スクロール"));
+
+        app.handle(&k(KeyCode::Down, KeyModifiers::NONE));
+        app.handle(&k(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.help_scroll, 2);
+        assert_eq!(app.prompt, Prompt::Help);
+        app.handle(&k(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(app.help_scroll, 1);
+
+        // End shows the last group; scrolling further does nothing.
+        app.handle(&k(KeyCode::End, KeyModifiers::NONE));
+        let bottom = screen(&mut app, &mut t);
+        assert!(bottom.contains("Vimモード"), "{}", bottom);
+        assert!(!bottom.contains("Ctrl+S保存"));
+        let at_end = app.help_scroll;
+        app.handle(&k(KeyCode::PageDown, KeyModifiers::NONE));
+        assert_eq!(app.help_scroll, at_end);
+        app.handle(&k(KeyCode::Home, KeyModifiers::NONE));
+        assert_eq!(app.help_scroll, 0);
+
+        // Esc closes; reopening starts at the top again.
+        app.handle(&k(KeyCode::End, KeyModifiers::NONE));
+        app.handle(&k(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.prompt, Prompt::None);
+        app.handle(&k(KeyCode::F(1), KeyModifiers::NONE));
+        assert_eq!(app.help_scroll, 0);
     }
 
     #[test]

@@ -4,6 +4,7 @@
 
 pub mod app;
 pub mod doc;
+pub mod help;
 pub mod list_continue;
 pub mod render;
 pub mod sidebar;
