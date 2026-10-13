@@ -371,11 +371,15 @@ export async function wslBridgeSet(distro) {
   return doInvoke('wsl_bridge_set', { distro: distro || null });
 }
 
+// A remote folder is watched by the agent that serves it, which reports
+// through the same `directory-changed` event as the local watcher.
 export async function watchDirectory(path) {
+  if (isRemotePath(path)) return doInvoke('remote_watch_directory', { path });
   return doInvoke('watch_directory', { path });
 }
 
 export async function unwatchDirectory(path) {
+  if (isRemotePath(path)) return doInvoke('remote_unwatch_directory', { path });
   return doInvoke('unwatch_directory', { path });
 }
 

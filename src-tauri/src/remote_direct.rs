@@ -174,6 +174,9 @@ impl OpenSink for Notify {
     fn file_changed(&self, path: &str) {
         self.inner.file_changed(path)
     }
+    fn dir_changed(&self, path: &str) {
+        self.inner.dir_changed(path)
+    }
     fn disconnected(&self, host: &str) {
         self.inner.disconnected(host)
     }

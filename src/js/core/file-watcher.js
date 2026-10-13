@@ -7,6 +7,7 @@
 import * as backend from '../backend.js';
 import { isLocalTauri } from '../backend.js';
 import { setContentFromDisk } from './editor.js';
+import { remoteHost } from './remote-path.js';
 
 /** @type {((path: string) => void) | null} */
 let onExternalChange = null;
@@ -94,6 +95,16 @@ export async function watchVault(path) {
       console.warn('watch_directory failed:', next, e);
     }
   }
+}
+
+/**
+ * The agent on `host` went away, and the watch on a folder there with it.
+ * Forget that folder, so that opening it again — over a new connection —
+ * asks the new agent to watch instead of assuming it still is.
+ * @param {string} host
+ */
+export function vaultHostLost(host) {
+  if (host && remoteHost(currentVault) === host) currentVault = null;
 }
 
 /** Begin watching a file path. No-op in browser mode or for null paths. */

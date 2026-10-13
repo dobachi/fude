@@ -1393,6 +1393,13 @@ impl gui_server::OpenSink for WindowSink {
         }
     }
 
+    fn dir_changed(&self, path: &str) {
+        // Likewise for the file tree: what the vault watcher emits.
+        if let Some(window) = self.0.get_webview_window("main") {
+            let _ = window.emit("directory-changed", serde_json::json!({ "path": path }));
+        }
+    }
+
     fn disconnected(&self, host: &str) {
         if let Some(window) = self.0.get_webview_window("main") {
             let _ = window.emit("remote-disconnected", serde_json::json!({ "host": host }));
@@ -1628,6 +1635,30 @@ fn remote_unwatch_file(
     let (session, p) = sessions.lookup(&path)?;
     session
         .request(|id| fude_core::ipc::Message::Unwatch { id, path: p })
+        .map(|_| ())
+}
+
+/// Have the agent report changes anywhere under a remote folder (the one the
+/// file tree shows), as `directory-changed`.
+#[tauri::command(async)]
+fn remote_watch_directory(
+    path: String,
+    sessions: State<'_, Arc<gui_server::RemoteSessions>>,
+) -> Result<(), String> {
+    let (session, p) = sessions.lookup(&path)?;
+    session
+        .request(|id| fude_core::ipc::Message::WatchDir { id, path: p })
+        .map(|_| ())
+}
+
+#[tauri::command(async)]
+fn remote_unwatch_directory(
+    path: String,
+    sessions: State<'_, Arc<gui_server::RemoteSessions>>,
+) -> Result<(), String> {
+    let (session, p) = sessions.lookup(&path)?;
+    session
+        .request(|id| fude_core::ipc::Message::UnwatchDir { id, path: p })
         .map(|_| ())
 }
 
@@ -2087,6 +2118,8 @@ pub fn run() {
             remote_read_dir_tree,
             remote_watch_file,
             remote_unwatch_file,
+            remote_watch_directory,
+            remote_unwatch_directory,
             remote_hosts,
             remote_setup,
             remote_open,

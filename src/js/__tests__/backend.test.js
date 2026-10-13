@@ -83,6 +83,19 @@ describe('backend module (Tauri mode)', () => {
     expect(mockInvoke).toHaveBeenCalledWith('remote_watch_file', { path: p });
     await mod.unwatchFile(p);
     expect(mockInvoke).toHaveBeenCalledWith('remote_unwatch_file', { path: p });
+    // ファイラが表示しているフォルダの監視も、そのフォルダを持つ側へ頼む
+    await mod.watchDirectory('remote://box/home/u');
+    expect(mockInvoke).toHaveBeenCalledWith('remote_watch_directory', {
+      path: 'remote://box/home/u',
+    });
+    await mod.unwatchDirectory('remote://box/home/u');
+    expect(mockInvoke).toHaveBeenCalledWith('remote_unwatch_directory', {
+      path: 'remote://box/home/u',
+    });
+    await mod.watchDirectory('/home/u');
+    expect(mockInvoke).toHaveBeenCalledWith('watch_directory', { path: '/home/u' });
+    await mod.unwatchDirectory('/home/u');
+    expect(mockInvoke).toHaveBeenCalledWith('unwatch_directory', { path: '/home/u' });
     // 暫定保存はローカル側に残る（リモートが落ちても復元できるように）
     await mod.writeTempFile(p, 'draft');
     expect(mockInvoke).toHaveBeenCalledWith('write_temp_file', { path: p, content: 'draft' });

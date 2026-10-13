@@ -8,7 +8,7 @@ use super::list_continue::{continuation, Continuation};
 use super::render::{self, Rendered};
 use super::sidebar::Sidebar;
 use crate::agent::Side;
-use crate::watch::Watcher;
+use crate::watch::{Change, Watcher};
 use edtui::{EditorMode, EditorTheme, EditorView, LineNumbers};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -68,7 +68,7 @@ pub struct App {
     pub preview_scroll: usize,
     preview_follow: bool,
     watcher: Option<Watcher>,
-    watch_rx: mpsc::Receiver<PathBuf>,
+    watch_rx: mpsc::Receiver<Change>,
     /// First line of the key list shown (it can be taller than the terminal).
     pub help_scroll: u16,
     /// How far the key list can scroll at the size it was last drawn.
@@ -228,8 +228,11 @@ impl App {
     /// Disk changes and autosaves; call every tick.
     pub fn tick(&mut self) {
         let mut changed: Vec<PathBuf> = Vec::new();
-        while let Ok(p) = self.watch_rx.try_recv() {
-            changed.push(p);
+        while let Ok(change) = self.watch_rx.try_recv() {
+            // Only files are watched here; the viewer has no file tree.
+            if let Change::File(p) = change {
+                changed.push(p);
+            }
         }
         for p in changed {
             for d in self.docs.iter_mut() {

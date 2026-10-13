@@ -154,6 +154,7 @@ import {
   initFileWatcher,
   initDirectoryWatcher,
   watchVault,
+  vaultHostLost,
   watchFile,
   unwatchFile,
   reloadFromDisk,
@@ -1070,10 +1071,12 @@ async function init() {
     // the autosave temp file) but cannot be saved until it reconnects.
     listen('remote-disconnected', (event) => {
       const host = event.payload?.host;
-      if (host)
+      if (host) {
+        vaultHostLost(host);
         showToast(`${host} との接続が切れました（再接続するまで保存できません）`, {
           type: 'error',
         });
+      }
     });
     // A host connected with a fude-cli older than this app (told once per host).
     listen('remote-cli-outdated', (event) => {

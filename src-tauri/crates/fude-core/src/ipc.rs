@@ -103,6 +103,16 @@ pub enum Message {
         id: u64,
         path: String,
     },
+    /// Start reporting `DirChanged` for the directory `path`: the folder the
+    /// GUI shows in its file tree. An agent that predates it does not answer.
+    WatchDir {
+        id: u64,
+        path: String,
+    },
+    UnwatchDir {
+        id: u64,
+        path: String,
+    },
     /// Answer to a request: exactly one of `ok` / `error` is set.
     Result {
         id: u64,
@@ -113,6 +123,11 @@ pub enum Message {
     },
     /// agent → GUI: `path` changed on disk (not by the GUI's own write).
     FileChanged {
+        path: String,
+    },
+    /// agent → GUI: a file or folder somewhere under the watched directory
+    /// `path` was added, removed or changed.
+    DirChanged {
         path: String,
     },
 }
@@ -126,6 +141,8 @@ impl Message {
             | Message::ReadDirTree { id, .. }
             | Message::Watch { id, .. }
             | Message::Unwatch { id, .. }
+            | Message::WatchDir { id, .. }
+            | Message::UnwatchDir { id, .. }
             | Message::Result { id, .. } => Some(*id),
             _ => None,
         }
@@ -363,9 +380,43 @@ mod tests {
                 id: 2,
                 path: "/a".into(),
             },
+            Message::WatchDir {
+                id: 3,
+                path: "/d".into(),
+            },
+            Message::UnwatchDir {
+                id: 4,
+                path: "/d".into(),
+            },
+            Message::DirChanged { path: "/d".into() },
         ] {
             assert_eq!(decode(&encode(&m)).unwrap(), Some(m));
         }
+    }
+
+    #[test]
+    fn directory_watch_messages_keep_their_wire_names() {
+        // Pinned: an agent and a GUI of different versions meet on these.
+        assert_eq!(
+            encode(&Message::WatchDir {
+                id: 1,
+                path: "/d".into()
+            }),
+            "{\"type\":\"watch_dir\",\"id\":1,\"path\":\"/d\"}\n"
+        );
+        assert_eq!(
+            encode(&Message::DirChanged { path: "/d".into() }),
+            "{\"type\":\"dir_changed\",\"path\":\"/d\"}\n"
+        );
+        assert_eq!(
+            Message::WatchDir {
+                id: 5,
+                path: "/d".into()
+            }
+            .request_id(),
+            Some(5)
+        );
+        assert_eq!(Message::DirChanged { path: "/d".into() }.request_id(), None);
     }
 
     #[test]

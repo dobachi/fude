@@ -29,6 +29,9 @@ pub trait OpenSink: Send + Sync + 'static {
     fn open(&self, path: &str, wait: bool) -> Result<(), String>;
     /// A remote agent reports `path` (already `remote://...`) changed on disk.
     fn file_changed(&self, _path: &str) {}
+    /// A remote agent reports that something under the watched directory
+    /// `path` (already `remote://...`) was added, removed or changed.
+    fn dir_changed(&self, _path: &str) {}
     /// The agent for `host` went away.
     fn disconnected(&self, _host: &str) {}
     /// The agent for `host` runs fude-cli `cli_version`, older than this GUI.
@@ -505,6 +508,12 @@ impl ConnState {
                 }
                 (vec![], vec![])
             }
+            Message::DirChanged { path } => {
+                if let Some(host) = &self.host {
+                    sink.dir_changed(&remote_path(host, &path));
+                }
+                (vec![], vec![])
+            }
             // Handled by the connection loop (routed to the requester).
             Message::Result { .. } => (vec![], vec![]),
             // Replies and requests are never valid from a client.
@@ -516,7 +525,9 @@ impl ConnState {
             | Message::WriteFile { .. }
             | Message::ReadDirTree { .. }
             | Message::Watch { .. }
-            | Message::Unwatch { .. } => (
+            | Message::Unwatch { .. }
+            | Message::WatchDir { .. }
+            | Message::UnwatchDir { .. } => (
                 vec![Message::Error {
                     path: None,
                     message: "unexpected message from client".into(),
@@ -837,6 +848,7 @@ mod tests {
     struct Recorder {
         calls: Mutex<Vec<(String, bool)>>,
         changed: Mutex<Vec<String>>,
+        dirs_changed: Mutex<Vec<String>>,
         outdated: Mutex<Vec<(String, String)>>,
         fail_on: Option<String>,
     }
@@ -851,6 +863,9 @@ mod tests {
         }
         fn file_changed(&self, path: &str) {
             self.changed.lock().unwrap().push(path.to_string());
+        }
+        fn dir_changed(&self, path: &str) {
+            self.dirs_changed.lock().unwrap().push(path.to_string());
         }
         fn cli_outdated(&self, host: &str, cli_version: &str) {
             self.outdated
@@ -1266,6 +1281,19 @@ mod tests {
             *sink.changed.lock().unwrap(),
             vec!["remote://box/home/u/notes/a.md".to_string()]
         );
+        // A change in the folder is passed on under the tree's remote path,
+        // and is not mistaken for a change of a file.
+        st.handle(
+            Message::DirChanged {
+                path: "/home/u/notes".into(),
+            },
+            &sink,
+        );
+        assert_eq!(
+            *sink.dirs_changed.lock().unwrap(),
+            vec!["remote://box/home/u/notes".to_string()]
+        );
+        assert_eq!(sink.changed.lock().unwrap().len(), 1);
         assert!(st.closed("remote://box/home/u/notes/a.md", true).is_some());
         assert!(st.finished());
     }

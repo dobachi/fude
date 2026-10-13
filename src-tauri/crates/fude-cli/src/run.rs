@@ -4,7 +4,7 @@
 use crate::agent::{Agent, Side};
 use crate::args::Args;
 use crate::discover::{self, Candidate, Connected};
-use crate::watch::Watcher;
+use crate::watch::{Change, Watcher};
 use fude_core::ipc::{self, Message, PROTOCOL_VERSION};
 use fude_core::wait::{exit_code, WaitState};
 use std::io::{BufRead, Write};
@@ -40,7 +40,7 @@ pub fn log_path(cache_dir: &Path) -> PathBuf {
 enum Event {
     Line(String),
     Eof,
-    Changed(PathBuf),
+    Changed(Change),
 }
 
 /// Resolve the operands against the working directory.
@@ -381,7 +381,7 @@ pub fn serve(mut conn: Connected, paths: Vec<String>, announce: bool) -> i32 {
     }
     let (tx, rx) = mpsc::channel::<Event>();
 
-    let (wtx, wrx) = mpsc::channel::<PathBuf>();
+    let (wtx, wrx) = mpsc::channel::<Change>();
     let mut watcher = match Watcher::new(wtx) {
         Ok(w) => Some(w),
         Err(e) => {
@@ -462,7 +462,10 @@ pub fn serve(mut conn: Connected, paths: Vec<String>, announce: bool) -> i32 {
                     None
                 }
             },
-            Event::Changed(p) => Some(Message::FileChanged {
+            Event::Changed(Change::File(p)) => Some(Message::FileChanged {
+                path: p.to_string_lossy().to_string(),
+            }),
+            Event::Changed(Change::Dir(p)) => Some(Message::DirChanged {
                 path: p.to_string_lossy().to_string(),
             }),
             Event::Eof => {
@@ -488,6 +491,12 @@ impl Side for NoWatch {
         Err("file watching unavailable".into())
     }
     fn unwatch(&mut self, _path: &Path) -> Result<(), String> {
+        Ok(())
+    }
+    fn watch_dir(&mut self, _path: &Path) -> Result<(), String> {
+        Err("file watching unavailable".into())
+    }
+    fn unwatch_dir(&mut self, _path: &Path) -> Result<(), String> {
         Ok(())
     }
 }

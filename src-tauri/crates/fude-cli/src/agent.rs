@@ -11,6 +11,9 @@ pub trait Side {
     fn before_write(&mut self, path: &Path);
     fn watch(&mut self, path: &Path) -> Result<(), String>;
     fn unwatch(&mut self, path: &Path) -> Result<(), String>;
+    /// Report changes anywhere under the directory `path`.
+    fn watch_dir(&mut self, path: &Path) -> Result<(), String>;
+    fn unwatch_dir(&mut self, path: &Path) -> Result<(), String>;
 }
 
 pub struct Agent {
@@ -75,7 +78,9 @@ impl Agent {
             | Message::WriteFile { path, .. }
             | Message::ReadDirTree { path, .. }
             | Message::Watch { path, .. }
-            | Message::Unwatch { path, .. } => path,
+            | Message::Unwatch { path, .. }
+            | Message::WatchDir { path, .. }
+            | Message::UnwatchDir { path, .. } => path,
             _ => return None,
         };
         if !self.allowed(path) {
@@ -102,6 +107,12 @@ impl Agent {
             Message::Unwatch { .. } => side
                 .unwatch(Path::new(path))
                 .map(|_| serde_json::Value::Null),
+            Message::WatchDir { .. } => side
+                .watch_dir(Path::new(path))
+                .map(|_| serde_json::Value::Null),
+            Message::UnwatchDir { .. } => side
+                .unwatch_dir(Path::new(path))
+                .map(|_| serde_json::Value::Null),
             _ => return None,
         };
         Some(match result {
@@ -121,6 +132,7 @@ mod tests {
     struct Rec {
         writes: Vec<PathBuf>,
         watches: Vec<PathBuf>,
+        dir_watches: Vec<PathBuf>,
     }
     impl Side for Rec {
         fn before_write(&mut self, path: &Path) {
@@ -132,6 +144,14 @@ mod tests {
         }
         fn unwatch(&mut self, path: &Path) -> Result<(), String> {
             self.watches.retain(|p| p != path);
+            Ok(())
+        }
+        fn watch_dir(&mut self, path: &Path) -> Result<(), String> {
+            self.dir_watches.push(path.to_path_buf());
+            Ok(())
+        }
+        fn unwatch_dir(&mut self, path: &Path) -> Result<(), String> {
+            self.dir_watches.retain(|p| p != path);
             Ok(())
         }
     }
@@ -287,6 +307,25 @@ mod tests {
         assert_eq!(side.watches, vec![f.clone()]);
         ag.handle(&Message::Unwatch { id: 6, path: s(&f) }, &mut side);
         assert!(side.watches.is_empty());
+
+        let root = tmp.path().to_path_buf();
+        let r = ag.handle(
+            &Message::WatchDir {
+                id: 7,
+                path: s(&root),
+            },
+            &mut side,
+        );
+        assert_eq!(r, Some(Message::ok(7, serde_json::Value::Null)));
+        assert_eq!(side.dir_watches, vec![root.clone()]);
+        ag.handle(
+            &Message::UnwatchDir {
+                id: 8,
+                path: s(&root),
+            },
+            &mut side,
+        );
+        assert!(side.dir_watches.is_empty());
 
         assert!(ag.handle(&Message::Bye, &mut side).is_none());
         assert!(ag
