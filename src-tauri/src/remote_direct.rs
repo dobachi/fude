@@ -454,16 +454,20 @@ mod tests {
     }
 
     /// A stand-in agent: a shell script that speaks just enough protocol.
+    /// It is the argument of `sh` (see `SH`) rather than run by itself: a
+    /// file just written cannot be executed while a process forked by a
+    /// test running beside this one still holds it open ("Text file busy").
     #[cfg(unix)]
-    fn agent_script(body: &str) -> (tempfile::TempDir, String) {
-        use std::os::unix::fs::PermissionsExt;
+    fn agent_script(body: &str) -> (tempfile::TempDir, Vec<String>) {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("agent.sh");
-        std::fs::write(&path, format!("#!/bin/sh\n{}\n", body)).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(&path, format!("{}\n", body)).unwrap();
         let p = path.to_string_lossy().to_string();
-        (tmp, p)
+        (tmp, vec![p])
     }
+
+    #[cfg(unix)]
+    const SH: &str = "sh";
 
     #[derive(Default)]
     struct Recorder {
@@ -497,8 +501,8 @@ done"#,
         let sessions = Arc::new(RemoteSessions::default());
         let sink = Arc::new(Recorder::default());
         let outcome = open(
+            SH,
             &script,
-            &[],
             "ssh:k16",
             Arc::clone(&registry),
             Arc::clone(&sessions),
@@ -537,8 +541,8 @@ done"#,
         let (_tmp, script) =
             agent_script("echo 'fude-cli: /nope: no such file or directory' >&2; exit 2");
         let outcome = open(
+            SH,
             &script,
-            &[],
             "ssh:k16",
             Arc::new(WaitRegistry::default()),
             Arc::new(RemoteSessions::default()),
@@ -563,8 +567,8 @@ sleep 30"#,
         let sessions = Arc::new(RemoteSessions::default());
         let started = std::time::Instant::now();
         let outcome = open(
+            SH,
             &script,
-            &[],
             "ssh:k16",
             Arc::new(WaitRegistry::default()),
             Arc::clone(&sessions),
@@ -717,9 +721,9 @@ sleep 30"#,
     #[test]
     fn completions_are_the_lines_printed_or_nothing() {
         let (_t, ok) = agent_script("printf '~/Sources/\\n~/Summary.md\\r\\n\\n'");
-        assert_eq!(complete(&ok, &[]), ["~/Sources/", "~/Summary.md"]);
+        assert_eq!(complete(SH, &ok), ["~/Sources/", "~/Summary.md"]);
         let (_t2, bad) = agent_script("echo '~/x'; exit 1");
-        assert_eq!(complete(&bad, &[]), Vec::<String>::new());
+        assert_eq!(complete(SH, &bad), Vec::<String>::new());
         assert_eq!(complete("/no/such/program-zz", &[]), Vec::<String>::new());
     }
 }
