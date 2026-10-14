@@ -41,6 +41,23 @@ export function escapeHtml(s) {
 }
 
 /**
+ * The name "Save as PDF" suggests for a file: its name without the directory
+ * or the last extension (`notes.md` → `notes`), with characters a file name
+ * cannot hold replaced. Falls back to `Fude`.
+ * @param {string} [name]
+ * @returns {string}
+ */
+export function printFileName(name) {
+  const base = String(name ?? '')
+    .split(/[/\\]/)
+    .pop()
+    .trim();
+  const stem = base.replace(/(.)\.[^.]*$/, '$1');
+  const safe = stem.replace(/[\\/:*?"<>|]/g, '_').trim();
+  return safe || 'Fude';
+}
+
+/**
  * Build the full HTML document string for the print iframe.
  *
  * @param {object} o

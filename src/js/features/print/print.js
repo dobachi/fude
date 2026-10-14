@@ -6,7 +6,7 @@
 // contentWindow.print(). The OS print dialog covers both physical printing and
 // "Print to File" (PDF). Loaded lazily from app.js to keep it off the hot path.
 
-import { buildPrintDocument, escapeHtml } from '../../core/print-document.js';
+import { buildPrintDocument, escapeHtml, printFileName } from '../../core/print-document.js';
 
 const DEFAULT_TIMEOUT_MS = 10000;
 const AFTERPRINT_FALLBACK_MS = 60000;
@@ -62,7 +62,7 @@ export function langForPath(path) {
  * @param {(path:string)=>string} deps.dirname   derive a base directory from a file path
  * @param {(message:string)=>void} [deps.onError]
  * @param {string} [deps.cssHref]                app stylesheet to link (default 'style.css')
- * @param {(html:string)=>Promise<void>} [deps.printDocument] injectable print sink (default: hidden iframe)
+ * @param {(html:string, title:string)=>Promise<void>} [deps.printDocument] injectable print sink (default: hidden iframe)
  * @param {number} [deps.timeoutMs]
  */
 export function createPrinter(deps) {
@@ -77,7 +77,7 @@ export function createPrinter(deps) {
     timeoutMs = DEFAULT_TIMEOUT_MS,
   } = deps;
 
-  const sink = printDocument || ((html) => printViaIframe(doc, html));
+  const sink = printDocument || ((html, title) => printViaIframe(doc, html, title));
 
   /** Render `tab` into an offscreen node and return its finished innerHTML,
    *  or null if enhancement did not complete within the timeout. */
@@ -104,8 +104,9 @@ export function createPrinter(deps) {
       onError?.('図の描画待ちでタイムアウトしました。印刷を中止しました。');
       return;
     }
-    const html = buildPrintDocument({ bodyHtml: body, title: tab.name || 'Fude', cssHref });
-    await sink(html);
+    const title = printFileName(tab.name);
+    const html = buildPrintDocument({ bodyHtml: body, title, cssHref });
+    await sink(html, title);
   }
 
   /** Build the highlighted (or plain) source HTML for the editor buffer. */
@@ -126,8 +127,9 @@ export function createPrinter(deps) {
   async function printEditor(tab) {
     if (!doc || !tab) return;
     const body = await buildEditorBody(tab);
-    const html = buildPrintDocument({ bodyHtml: body, title: tab.name || 'Fude', cssHref });
-    await sink(html);
+    const title = printFileName(tab.name);
+    const html = buildPrintDocument({ bodyHtml: body, title, cssHref });
+    await sink(html, title);
   }
 
   return { printPreview, printEditor, snapshotPreviewHtml, buildEditorBody };
@@ -162,9 +164,27 @@ function settledWithin(promise, ms) {
   });
 }
 
+/**
+ * Show `title` as the window's document title until the returned function is
+ * called. WebView2's "Save as PDF" names the file after the top-level title
+ * (always "Fude") rather than the printed iframe's. Restoring is a no-op once
+ * done, and leaves a title someone else set in the meantime alone.
+ */
+export function swapTitle(doc, title) {
+  const prev = doc.title;
+  doc.title = title;
+  let restored = false;
+  return () => {
+    if (restored) return;
+    restored = true;
+    if (doc.title === title) doc.title = prev;
+  };
+}
+
 /** Print `html` by loading it into a throwaway hidden iframe. */
-function printViaIframe(doc, html) {
+function printViaIframe(doc, html, title) {
   return new Promise((resolve) => {
+    const restoreTitle = title ? swapTitle(doc, title) : () => {};
     const iframe = doc.createElement('iframe');
     iframe.setAttribute('aria-hidden', 'true');
     // The iframe must have a real layout size: a 0x0 iframe lays out its
@@ -178,6 +198,7 @@ function printViaIframe(doc, html) {
       if (done) return;
       done = true;
       iframe.remove();
+      restoreTitle();
       resolve();
     };
     // Guard against the iframe firing `load` more than once (WebKitGTK emits an

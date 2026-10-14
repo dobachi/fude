@@ -2,7 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { JSDOM } from 'jsdom';
-import { buildPrintDocument, escapeHtml, PRINT_CSS } from '../core/print-document.js';
+import {
+  buildPrintDocument,
+  escapeHtml,
+  PRINT_CSS,
+  printFileName,
+} from '../core/print-document.js';
 
 describe('escapeHtml', () => {
   it('escapes HTML metacharacters', () => {
@@ -82,4 +87,33 @@ describe('印刷文書が 1 ページで切れない', () => {
       }
     });
   }
+});
+
+describe('printFileName: PDF 保存の既定のファイル名', () => {
+  it('拡張子を除いたファイル名にする', () => {
+    expect(printFileName('notes.md')).toBe('notes');
+    expect(printFileName('設計メモ.markdown')).toBe('設計メモ');
+    expect(printFileName('archive.tar.gz')).toBe('archive.tar');
+  });
+
+  it('パスが付いていてもファイル名だけを使う', () => {
+    expect(printFileName('/home/u/notes.md')).toBe('notes');
+    expect(printFileName('remote://k16/home/u/a.md')).toBe('a');
+    expect(printFileName('C:\\Users\\u\\b.md')).toBe('b');
+  });
+
+  it('拡張子の無い名前・ドットで始まる名前はそのまま', () => {
+    expect(printFileName('README')).toBe('README');
+    expect(printFileName('.env')).toBe('.env');
+  });
+
+  it('ファイル名に使えない文字は _ にする', () => {
+    expect(printFileName('a:b*c?.md')).toBe('a_b_c_');
+  });
+
+  it('名前が無ければ Fude', () => {
+    expect(printFileName('')).toBe('Fude');
+    expect(printFileName(undefined)).toBe('Fude');
+    expect(printFileName('   ')).toBe('Fude');
+  });
 });

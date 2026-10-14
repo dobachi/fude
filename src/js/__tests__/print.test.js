@@ -1,16 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createPrinter, langForPath } from '../features/print/print.js';
+import { createPrinter, langForPath, swapTitle } from '../features/print/print.js';
 
 // jsdom provides document; iframe load/print won't fire, so we inject a fake
 // `printDocument` sink and assert the orchestration around it.
 
 function makePrinter(over = {}) {
   const printed = [];
+  const titles = [];
   const errors = [];
   const printer = createPrinter({
     renderPreview: over.renderPreview,
-    printDocument: (html) => {
+    printDocument: (html, title) => {
       printed.push(html);
+      titles.push(title);
       return Promise.resolve();
     },
     onError: (m) => errors.push(m),
@@ -18,7 +20,7 @@ function makePrinter(over = {}) {
     cssHref: 'style.css',
     timeoutMs: over.timeoutMs ?? 50,
   });
-  return { printer, printed, errors };
+  return { printer, printed, titles, errors };
 }
 
 describe('createPrinter.printPreview', () => {
@@ -40,7 +42,7 @@ describe('createPrinter.printPreview', () => {
     expect(printed).toHaveLength(1);
     expect(printed[0]).toContain('<h1>Hello</h1>');
     expect(printed[0]).toMatch(/<svg data-diagram/);
-    expect(printed[0]).toContain('<title>a.md</title>');
+    expect(printed[0]).toContain('<title>a</title>');
     expect(errors).toHaveLength(0);
   });
 
@@ -125,7 +127,7 @@ describe('createPrinter.printEditor', () => {
     expect(printed[0]).toContain(
       '<pre class="print-source"><code><span class="tok-keyword">const</span> x</code></pre>',
     );
-    expect(printed[0]).toContain('<title>x.js</title>');
+    expect(printed[0]).toContain('<title>x</title>');
   });
 
   it('falls back to escaped plain text when highlight returns null', async () => {
@@ -142,5 +144,27 @@ describe('createPrinter.printEditor', () => {
     const { printer, printed } = makeEditorPrinter(highlightCode);
     await printer.printEditor({ content: '<x>', path: '/a/x.md', name: 'x.md' });
     expect(printed[0]).toContain('<code>&lt;x&gt;</code>');
+  });
+});
+
+describe('PDF 保存の既定のファイル名', () => {
+  // WebView2 names the PDF after the top-level document's title, not the
+  // printed iframe's, so the sink is handed the name to show while printing.
+  it('プレビュー印刷・エディタ印刷とも、拡張子を除いたファイル名を渡す', async () => {
+    const { printer, titles } = makePrinter({ renderPreview: () => {} });
+    await printer.printPreview({ content: 'x', path: '/p/notes.md', name: 'notes.md' });
+    await printer.printEditor({ content: 'x', path: '/p/main.rs', name: 'main.rs' });
+    expect(titles).toEqual(['notes', 'main']);
+  });
+
+  it('swapTitle は題を差し替え、戻すと元に戻る（2 度戻しても壊れない）', () => {
+    document.title = 'Fude';
+    const restore = swapTitle(document, 'notes');
+    expect(document.title).toBe('notes');
+    restore();
+    expect(document.title).toBe('Fude');
+    document.title = 'other';
+    restore();
+    expect(document.title).toBe('other');
   });
 });
