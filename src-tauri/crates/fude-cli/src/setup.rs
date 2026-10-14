@@ -499,6 +499,28 @@ fn scp(src: &Path, host: &str, dest: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Where the host's `fude-cli` lives, and where a new one is put first.
+const CLI_DEST: &str = "~/.local/bin/fude-cli";
+const CLI_STAGED: &str = "~/.local/bin/.fude-cli.new";
+
+/// Put the staged `fude-cli` in place. It is renamed over the old one, not
+/// written into it: a running fude-cli (an open remote folder) makes writing
+/// fail with "Text file busy", and keeps running the old file after a rename.
+fn install_cli_cmd() -> String {
+    format!(
+        "chmod 755 {CLI_STAGED} && mv -f {CLI_STAGED} {CLI_DEST} \
+         || {{ rm -f {CLI_STAGED}; false; }}"
+    )
+}
+
+/// Download `url` as the host's `fude-cli`, by way of the staged name.
+fn download_cli_cmd(url: &str) -> String {
+    format!(
+        "(curl -fsSL -o {CLI_STAGED} '{url}' && {}) || {{ rm -f {CLI_STAGED}; false; }}",
+        install_cli_cmd()
+    )
+}
+
 /// What a host is asked to find out which Fude its `fude-cli` reaches:
 /// this machine's when its `port` is known, else whichever answers.
 pub fn remote_check(port: Option<u16>) -> String {
@@ -882,21 +904,14 @@ fn run_inner(host: &str, port: Option<u16>, share: bool) -> Result<(), String> {
     let local = local_uname_sm();
     if remote_uname == local {
         let me = std::env::current_exe().map_err(|e| e.to_string())?;
-        scp(&me, host, "~/.local/bin/fude-cli")?;
-        ssh(host, "chmod 755 ~/.local/bin/fude-cli")?;
+        scp(&me, host, CLI_STAGED)?;
+        ssh(host, &install_cli_cmd())?;
         Step("fude-cli").ok("copied this binary (same OS/arch)");
     } else {
         let asset = release_asset(&remote_uname)
             .ok_or_else(|| format!("no fude-cli build for '{}'", remote_uname))?;
         let url = format!("{}/{}", RELEASES, asset);
-        ssh(
-            host,
-            &format!(
-                "curl -fsSL -o ~/.local/bin/fude-cli '{}' && chmod 755 ~/.local/bin/fude-cli",
-                url
-            ),
-        )
-        .map_err(|e| format!("{} (download {})", e, url))?;
+        ssh(host, &download_cli_cmd(&url)).map_err(|e| format!("{} (download {})", e, url))?;
         Step("fude-cli").ok(&format!("downloaded {}", asset));
     }
 
@@ -1171,6 +1186,28 @@ mod tests {
         assert_eq!(
             remote_check(None),
             "PATH=\"$HOME/.local/bin:$PATH\" fude-cli --check"
+        );
+    }
+
+    #[test]
+    fn fude_cli_is_installed_by_renaming_over_the_old_one() {
+        // A running fude-cli (an open remote folder) makes writing over the
+        // file fail with "Text file busy"; replacing the name does not.
+        assert_eq!(
+            install_cli_cmd(),
+            format!(
+                "chmod 755 {CLI_STAGED} && mv -f {CLI_STAGED} {CLI_DEST} \
+                 || {{ rm -f {CLI_STAGED}; false; }}"
+            )
+        );
+        assert_ne!(CLI_STAGED, CLI_DEST);
+        assert_eq!(
+            download_cli_cmd("https://x/fude-cli-linux"),
+            format!(
+                "(curl -fsSL -o {CLI_STAGED} 'https://x/fude-cli-linux' && {}) \
+                 || {{ rm -f {CLI_STAGED}; false; }}",
+                install_cli_cmd()
+            )
         );
     }
 
