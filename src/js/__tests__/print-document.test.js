@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { JSDOM } from 'jsdom';
 import { buildPrintDocument, escapeHtml, PRINT_CSS } from '../core/print-document.js';
 
 describe('escapeHtml', () => {
@@ -51,4 +54,32 @@ describe('buildPrintDocument', () => {
     });
     expect(html).toContain('<div class="preview-pane print-root print-source">code</div>');
   });
+});
+
+describe('印刷文書が 1 ページで切れない', () => {
+  // The print document links the app stylesheet, which pins html/body (and
+  // .preview-pane) to the window height with overflow hidden for the app
+  // layout. Left as is, only the first page's worth of the document prints.
+  const appCss = readFileSync(resolve(__dirname, '../../style.css'), 'utf8');
+
+  function computed(bodyClass) {
+    const html = buildPrintDocument({ bodyHtml: '<p>x</p>', title: 't', bodyClass });
+    const dom = new JSDOM(html.replace('<style>', `<style>${appCss}</style><style>`));
+    const win = dom.window;
+    const doc = win.document;
+    return ['html', 'body', '.print-root'].map((sel) => {
+      const s = win.getComputedStyle(doc.querySelector(sel));
+      return { sel, height: s.height, overflow: s.overflow, overflowY: s.overflowY };
+    });
+  }
+
+  for (const bodyClass of ['preview-pane print-root', 'preview-pane print-root print-source']) {
+    it(`${bodyClass}: 高さを固定せず、はみ出しを隠さない`, () => {
+      for (const s of computed(bodyClass)) {
+        expect(s.height, s.sel).not.toBe('100%');
+        expect(['hidden', 'auto', 'scroll'], s.sel).not.toContain(s.overflow);
+        expect(['hidden', 'auto', 'scroll'], s.sel).not.toContain(s.overflowY);
+      }
+    });
+  }
 });

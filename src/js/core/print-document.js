@@ -12,6 +12,10 @@
 export const PRINT_CSS = `
 @page { margin: 16mm; }
 html, body { background: #fff; margin: 0; }
+/* The app stylesheet pins html/body and .preview-pane to the window height
+   with the overflow hidden or scrolled; on paper that cuts the document off
+   after the first page. Let them grow with the content instead. */
+html, body, .print-root { height: auto !important; overflow: visible !important; }
 .print-root { max-width: 100%; padding: 0; }
 /* Emit background colors / diagram fills on paper too. */
 * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
