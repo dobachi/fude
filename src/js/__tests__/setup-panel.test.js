@@ -316,3 +316,95 @@ describe('WSL integration row', () => {
     expect(select.disabled).toBe(false);
   });
 });
+
+describe('更新したら、そのホストの接続を新しい fude-cli で繋ぎ直す', () => {
+  function mountWithConns(conns, opts = {}) {
+    document.body.innerHTML = `<div id="root">${remoteSectionHtml()}</div>`;
+    const root = document.getElementById('root');
+    const calls = [];
+    let live = conns;
+    const backend = {
+      remoteSetup: vi.fn(async () => {
+        calls.push('setup');
+        return opts.setup ?? { ok: true, log: 'done' };
+      }),
+      getConfig: vi.fn(async () => ({})),
+      saveConfig: vi.fn(async () => {}),
+      remoteConnections: vi.fn(async () => {
+        calls.push('list');
+        return live;
+      }),
+      remoteDisconnect: vi.fn(async (id) => {
+        calls.push(`off:${id}`);
+        // The connection ends a moment after it is told to.
+        if (!opts.stuck) setTimeout(() => (live = live.filter((c) => c.id !== id)), 0);
+        return true;
+      }),
+      remoteOpen: vi.fn(async (host, path) => {
+        calls.push(`open:${host}:${path}`);
+        return opts.open ?? { ok: true, log: '' };
+      }),
+    };
+    initRemoteSection(root, backend, ['k16'], { gonePoll: [0, 0, 0] });
+    return { backend, calls, $: (sel) => root.querySelector(sel) };
+  }
+  const settle = async () => {
+    for (let i = 0; i < 10; i++) await flush();
+  };
+  const CONNS = [
+    { id: 1, host: 'k16', roots: ['/home/u/notes'], origin: 'ssh:k16' },
+    { id: 2, host: 'k16', roots: ['/tmp/m.md'], origin: null },
+  ];
+
+  it('更新のあと、切ってから同じ場所を開き直す', async () => {
+    const { calls, $ } = mountWithConns(CONNS);
+    $('.remote-update').click();
+    await settle();
+    // Opened again only once the old connection is gone: its end would
+    // otherwise drop the folder watch the new one asks for.
+    const opened = calls.indexOf('open:k16:/home/u/notes');
+    expect(calls.slice(0, 3)).toEqual(['setup', 'list', 'off:1']);
+    expect(opened).toBeGreaterThan(3);
+    expect(calls[opened - 1]).toBe('list');
+    expect($('#remote-status').textContent).toMatch(/繋ぎ直しました/);
+    expect($('#remote-status').dataset.kind).toBe('ok');
+  });
+
+  it('接続確認では繋ぎ直さない', async () => {
+    const { calls, $ } = mountWithConns(CONNS);
+    $('.remote-check').click();
+    await settle();
+    expect(calls).toEqual(['setup']);
+  });
+
+  it('更新が失敗したら接続には触らない', async () => {
+    const { calls, $ } = mountWithConns(CONNS, { setup: { ok: false, log: 'x' } });
+    $('.remote-update').click();
+    await settle();
+    expect(calls).toEqual(['setup']);
+  });
+
+  it('繋ぐ接続が無ければ、そのまま完了', async () => {
+    const { calls, $ } = mountWithConns([]);
+    $('.remote-update').click();
+    await settle();
+    expect(calls).toEqual(['setup', 'list']);
+    expect($('#remote-status').textContent).toBe('k16: セットアップ完了');
+  });
+
+  it('古い接続が切れないままなら、待ちきってから開き直す', async () => {
+    const { calls } = mountWithConns(CONNS, { stuck: true });
+    document.querySelector('.remote-update').click();
+    await settle();
+    expect(calls.filter((c) => c === 'list')).toHaveLength(4);
+    expect(calls.at(-1)).toBe('open:k16:/home/u/notes');
+  });
+
+  it('開き直せなかったら、そう知らせる', async () => {
+    const { $ } = mountWithConns(CONNS, { open: { ok: false, log: 'no' } });
+    $('.remote-update').click();
+    await settle();
+    expect($('#remote-status').textContent).toMatch(/開き直せませんでした.*\/home\/u\/notes/);
+    expect($('#remote-status').dataset.kind).toBe('error');
+  });
+});

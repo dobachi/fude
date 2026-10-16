@@ -4,6 +4,7 @@ import {
   addHost,
   removeHost,
   outdatedCliMessage,
+  reconnectTargets,
   addRecent,
   recentPaths,
   forgetRecent,
@@ -162,5 +163,37 @@ describe('destinations and suggestions', () => {
   it('keeps the list short', () => {
     const many = Array.from({ length: SUGGEST_MAX + 20 }, (_, i) => `/p${i}`);
     expect(pathSuggestions('', [], many).length).toBe(SUGGEST_MAX);
+  });
+});
+
+describe('reconnectTargets: 更新後に繋ぎ直す接続', () => {
+  const conns = [
+    { id: 1, host: 'k16', roots: ['/home/u/notes/'], origin: 'ssh:k16' },
+    { id: 2, host: 'k16', roots: ['/home/u/notes'], origin: 'ssh:k16' },
+    { id: 3, host: 'k16', roots: ['/home/u/a.md', '/srv/x'], origin: 'ssh:k16' },
+    // `fude FILE` typed on the host: not ours to restart.
+    { id: 4, host: 'k16', roots: ['/tmp/m.md'], origin: null },
+    { id: 5, host: 'box', roots: ['/b'], origin: 'ssh:box' },
+    { id: 6, host: 'k16', roots: ['/w'], origin: 'wsl' },
+  ];
+
+  it('そのホストへアプリから張った接続だけを切り、開いていた場所を重複なく開き直す', () => {
+    expect(reconnectTargets(conns, 'k16')).toEqual({
+      ids: [1, 2, 3],
+      roots: ['/home/u/notes/', '/home/u/a.md', '/srv/x'],
+    });
+  });
+
+  it('ホスト名の前後の空白は無視する', () => {
+    expect(reconnectTargets(conns, ' box ').ids).toEqual([5]);
+  });
+
+  it('該当が無い・入力が壊れていても空', () => {
+    expect(reconnectTargets(conns, 'none')).toEqual({ ids: [], roots: [] });
+    expect(reconnectTargets(null, 'k16')).toEqual({ ids: [], roots: [] });
+    expect(reconnectTargets([{ id: 9, origin: 'ssh:k16' }], 'k16')).toEqual({
+      ids: [9],
+      roots: [],
+    });
   });
 });

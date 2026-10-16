@@ -4,7 +4,7 @@
 // instead of a terminal, keeps the hosts that were set up so they can be
 // re-checked or updated later, and switches WSL integration.
 // Opening a place from here needs none of this: see open-panel.js.
-import { hostError, addHost, removeHost } from '../../core/setup-hosts.js';
+import { hostError, addHost, removeHost, reconnectTargets } from '../../core/setup-hosts.js';
 
 export function remoteSectionHtml() {
   return `
@@ -116,7 +116,9 @@ export async function initWslSection(root, backend, delays = [2000, 6000, 15000]
 
 /**
  * Wire the section inside `root`.
- * `backend` needs remoteSetup(host, checkOnly), getConfig() and saveConfig().
+ * `backend` needs remoteSetup(host, checkOnly), getConfig() and saveConfig(),
+ * and remoteConnections(), remoteDisconnect(id) and remoteOpen(host, path)
+ * to reconnect after an update.
  */
 export function initRemoteSection(root, backend, initialHosts, opts = {}) {
   const input = root.querySelector('#remote-host');
@@ -128,6 +130,8 @@ export function initRemoteSection(root, backend, initialHosts, opts = {}) {
 
   let hosts = addHost(initialHosts, '');
   let busy = false;
+  // Waits (ms) between checks that the connections cut after an update ended.
+  const gonePoll = opts.gonePoll ?? [100, 200, 400, 800, 1500];
 
   const setStatus = (text, kind) => {
     statusEl.textContent = text;
@@ -213,6 +217,7 @@ export function initRemoteSection(root, backend, initialHosts, opts = {}) {
       if (res?.ok) {
         setStatus(checkOnly ? `${host}: Fude に届きます` : `${host}: セットアップ完了`, 'ok');
         if (!checkOnly) {
+          await reconnect(host);
           const next = addHost(hosts, host);
           if (next.length !== hosts.length) {
             hosts = next;
@@ -231,6 +236,66 @@ export function initRemoteSection(root, backend, initialHosts, opts = {}) {
     } finally {
       busy = false;
       render();
+    }
+  }
+
+  /**
+   * The places open on `host` are served by the fude-cli that was running
+   * before the update. Cut those connections and open the places again, so
+   * the new one serves them (an old agent lacks what the update brought).
+   */
+  async function reconnect(host) {
+    if (typeof backend.remoteConnections !== 'function') return;
+    let targets;
+    try {
+      targets = reconnectTargets(await backend.remoteConnections(), host);
+    } catch {
+      return;
+    }
+    if (!targets.ids.length) return;
+    setStatus(`${host}: セットアップ完了。接続を繋ぎ直しています…`, 'busy');
+    for (const id of targets.ids) {
+      try {
+        await backend.remoteDisconnect(id);
+      } catch {
+        /* gone already */
+      }
+    }
+    await untilGone(targets.ids);
+    const failed = [];
+    for (const path of targets.roots) {
+      try {
+        const res = await backend.remoteOpen(host, path);
+        if (!res?.ok) failed.push(path);
+      } catch {
+        failed.push(path);
+      }
+    }
+    if (failed.length) {
+      setStatus(
+        `${host}: セットアップ完了。開き直せませんでした: ${failed.join(', ')}（「開く」から開き直してください）`,
+        'error',
+      );
+    } else {
+      setStatus(`${host}: セットアップ完了。新しい fude-cli で繋ぎ直しました`, 'ok');
+    }
+  }
+
+  /**
+   * Wait for the connections `ids` to end. Each ends a moment after it is
+   * told to, and says so to the window; if that came after the new
+   * connection opened the folder, the window would drop the folder watch
+   * the new one just asked for. Gives up after the last of `gonePoll`.
+   */
+  async function untilGone(ids) {
+    for (const ms of gonePoll) {
+      await new Promise((r) => setTimeout(r, ms));
+      try {
+        const live = await backend.remoteConnections();
+        if (!(Array.isArray(live) ? live : []).some((c) => ids.includes(c.id))) return;
+      } catch {
+        return;
+      }
     }
   }
 

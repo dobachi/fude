@@ -38,6 +38,32 @@ export function removeHost(list, host) {
   return clean(list).filter((x) => x !== h);
 }
 
+/**
+ * What to restart after `host`'s fude-cli was updated: the connections this
+ * app opened to it over ssh (`origin` `ssh:HOST`) keep running the old
+ * binary until they are cut, so their `ids` are hung up and their `roots`
+ * opened again, each place once (`/a/` and `/a` are one). Connections made
+ * from the host's own terminal (`fude FILE`, no origin) are left alone.
+ * @returns {{ ids: number[], roots: string[] }}
+ */
+export function reconnectTargets(conns, host) {
+  const origin = `ssh:${String(host ?? '').trim()}`;
+  const ids = [];
+  const roots = [];
+  const seen = new Set();
+  for (const c of Array.isArray(conns) ? conns : []) {
+    if (c?.origin !== origin) continue;
+    ids.push(c.id);
+    for (const r of Array.isArray(c.roots) ? c.roots : []) {
+      const key = r.length > 1 ? r.replace(/\/+$/, '') : r;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      roots.push(r);
+    }
+  }
+  return { ids, roots };
+}
+
 /** The pseudo-host under which places opened inside WSL are remembered. */
 export const WSL_HOST = 'wsl';
 
