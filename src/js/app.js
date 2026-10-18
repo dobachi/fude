@@ -48,6 +48,7 @@ import {
   remoteSaveAsPath,
   saveAsCompletionQuery,
   saveAsCompletions,
+  rewatchOnReconnect,
 } from './core/remote-path.js';
 import { escapeHtml } from './core/print-document.js';
 import { createStatusBar } from './core/statusbar.js';
@@ -1088,6 +1089,42 @@ async function init() {
           type: 'error',
         });
       }
+    });
+    // The link to an agent the app started dropped (sleep, a network change):
+    // it is being started again. Its watches went with it.
+    listen('remote-reconnecting', (event) => {
+      const host = event.payload?.host;
+      if (!host) return;
+      vaultHostLost(host);
+      showToast(`${host} との接続が切れました。再接続しています…`);
+    });
+    // ... and is back: the tabs can be saved again; ask the new agent to
+    // watch what the old one did, and catch up on what changed meanwhile.
+    listen('remote-reconnected', (event) => {
+      const host = event.payload?.host;
+      if (!host) return;
+      showToast(`${host} に再接続しました`);
+      const again = rewatchOnReconnect(
+        host,
+        vaultPath,
+        getAllTabs().map((t) => t.path),
+      );
+      if (again.vault) {
+        watchVault(again.vault);
+        refreshTree();
+      }
+      for (const p of again.files) watchFile(p);
+    });
+    listen('remote-reconnect-failed', (event) => {
+      const host = event.payload?.host;
+      if (!host) return;
+      showToast(
+        `${host} に再接続できませんでした。もう一度開いてください（それまで保存できません）`,
+        {
+          type: 'error',
+          duration: 10000,
+        },
+      );
     });
     // A host connected with a fude-cli older than this app (told once per host).
     listen('remote-cli-outdated', (event) => {

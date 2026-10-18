@@ -12,6 +12,7 @@ import {
   remoteSaveAsPath,
   saveAsCompletionQuery,
   saveAsCompletions,
+  rewatchOnReconnect,
 } from '../core/remote-path.js';
 
 describe('remote-path', () => {
@@ -238,5 +239,32 @@ describe('名前を付けて保存の補完', () => {
     expect(saveAsCompletions({ shownDir: '', prefix: 'note.md' }, ENTRIES)).toEqual([]);
     expect(saveAsCompletions(null, ENTRIES)).toEqual([]);
     expect(saveAsCompletions({ shownDir: '', prefix: '' }, null)).toEqual([]);
+  });
+});
+
+describe('rewatchOnReconnect: 再接続したら監視を頼み直すもの', () => {
+  const tabs = [
+    'remote://k16/home/u/notes/a.md',
+    'remote://k16/srv/b.md',
+    'remote://box/c.md',
+    '/home/me/local.md',
+    null,
+    'remote://k16/home/u/notes/a.md',
+  ];
+
+  it('そのホストのフォルダと、そのホストのファイルのタブ（重複なし）', () => {
+    expect(rewatchOnReconnect('k16', 'remote://k16/home/u/notes', tabs)).toEqual({
+      vault: 'remote://k16/home/u/notes',
+      files: ['remote://k16/home/u/notes/a.md', 'remote://k16/srv/b.md'],
+    });
+  });
+
+  it('開いているフォルダが別のホストや手元なら、フォルダは頼み直さない', () => {
+    expect(rewatchOnReconnect('box', 'remote://k16/home/u', tabs)).toEqual({
+      vault: null,
+      files: ['remote://box/c.md'],
+    });
+    expect(rewatchOnReconnect('k16', '/home/me', []).vault).toBeNull();
+    expect(rewatchOnReconnect('k16', '', undefined)).toEqual({ vault: null, files: [] });
   });
 });

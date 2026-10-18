@@ -86,7 +86,10 @@ pub fn command_line(
             // Batch mode: nobody can answer a prompt here. An existing
             // shared connection is used when there is one, but this
             // process neither becomes one nor sets up forwards — it is
-            // only a pipe to the agent.
+            // only a pipe to the agent. It asks the far side every 15s
+            // whether it is still there: an idle link that died (sleep, a
+            // changed network) is then noticed in under a minute — and
+            // reconnected — instead of at the next save.
             let mut ssh = s(&[
                 "ssh",
                 "-T",
@@ -96,6 +99,10 @@ pub fn command_line(
                 "ControlMaster=no",
                 "-o",
                 "ClearAllForwardings=yes",
+                "-o",
+                "ServerAliveInterval=15",
+                "-o",
+                "ServerAliveCountMax=3",
             ]);
             if let Some(secs) = connect_timeout {
                 ssh.extend(s(&["-o", &format!("ConnectTimeout={}", secs)]));
@@ -154,16 +161,37 @@ pub enum Outcome {
     Failed(String),
 }
 
-/// Tells the waiting command that the agent opened something, and passes
-/// everything on to the real sink.
+/// The waits between attempts to bring back a connection whose link broke:
+/// soon at first (a blip), then once a minute, for about half an hour
+/// (long enough for a short sleep or a network change), then given up.
+pub fn reconnect_delays() -> Vec<Duration> {
+    let mut d: Vec<Duration> = [1, 2, 4, 8, 15, 30]
+        .iter()
+        .map(|s| Duration::from_secs(*s))
+        .collect();
+    d.extend(std::iter::repeat_n(Duration::from_secs(60), 28));
+    d
+}
+
+/// Sits between the connection and the real sink. Tells the waiting
+/// command that the agent opened something; when `quiet` (bringing a
+/// connection back) it does not open it again — it is open already. The
+/// end of the connection is held back (`gone`) so that the caller can say
+/// whether it is over or being brought back.
 struct Notify {
     inner: Arc<dyn OpenSink>,
     opened: Mutex<Option<mpsc::Sender<()>>>,
+    quiet: bool,
+    gone: Mutex<Option<String>>,
 }
 
 impl OpenSink for Notify {
     fn open(&self, path: &str, wait: bool) -> Result<(), String> {
-        let r = self.inner.open(path, wait);
+        let r = if self.quiet {
+            Ok(())
+        } else {
+            self.inner.open(path, wait)
+        };
         if r.is_ok() {
             if let Some(tx) = self.opened.lock().ok().and_then(|mut o| o.take()) {
                 let _ = tx.send(());
@@ -178,17 +206,33 @@ impl OpenSink for Notify {
         self.inner.dir_changed(path)
     }
     fn disconnected(&self, host: &str) {
-        self.inner.disconnected(host)
+        if let Ok(mut g) = self.gone.lock() {
+            *g = Some(host.to_string());
+        }
     }
     fn cli_outdated(&self, host: &str, cli_version: &str) {
         self.inner.cli_outdated(host, cli_version)
     }
 }
 
+/// Everything needed to start the agent again.
+struct Plan {
+    program: String,
+    args: Vec<String>,
+    origin: String,
+    registry: Arc<WaitRegistry>,
+    sessions: Arc<RemoteSessions>,
+    sink: Arc<dyn OpenSink>,
+    timeout: Duration,
+    retry: Vec<Duration>,
+}
+
 /// Start `program args…`, serve the agent it becomes, and wait until it
 /// has opened its place (or failed to). On success the process stays,
 /// serving the tabs, until the connection ends — the user disconnects, the
-/// app exits, or the far side goes away — and is then reaped.
+/// app exits, or the far side goes away — and is then reaped. If the link
+/// breaks (the far side vanishes without a goodbye), it is started again
+/// quietly, as `reconnect_delays` says, so the open tabs can be saved again.
 pub fn open(
     program: &str,
     args: &[String],
@@ -198,15 +242,67 @@ pub fn open(
     sink: Arc<dyn OpenSink>,
     timeout: Option<Duration>,
 ) -> Result<Outcome, String> {
-    let mut cmd = Command::new(program);
-    cmd.args(args)
+    open_with(
+        program,
+        args,
+        origin,
+        registry,
+        sessions,
+        sink,
+        timeout,
+        reconnect_delays(),
+    )
+}
+
+/// `open`, with the waits between attempts to bring a broken link back.
+#[allow(clippy::too_many_arguments)]
+pub fn open_with(
+    program: &str,
+    args: &[String],
+    origin: &str,
+    registry: Arc<WaitRegistry>,
+    sessions: Arc<RemoteSessions>,
+    sink: Arc<dyn OpenSink>,
+    timeout: Option<Duration>,
+    retry: Vec<Duration>,
+) -> Result<Outcome, String> {
+    let plan = Arc::new(Plan {
+        program: program.to_string(),
+        args: args.to_vec(),
+        origin: origin.to_string(),
+        registry,
+        sessions,
+        sink,
+        timeout: timeout.unwrap_or(OPEN_TIMEOUT),
+        retry,
+    });
+    attempt(plan, false)
+}
+
+/// Bring back the connection to `host` that `plan` made, quietly; tell the
+/// window how that went.
+fn reconnect(plan: Arc<Plan>, host: String) {
+    plan.sink.reconnecting(&host);
+    for wait in plan.retry.clone() {
+        std::thread::sleep(wait);
+        if let Ok(Outcome::Opened) = attempt(Arc::clone(&plan), true) {
+            plan.sink.reconnected(&host);
+            return;
+        }
+    }
+    plan.sink.reconnect_failed(&host);
+}
+
+fn attempt(plan: Arc<Plan>, quiet: bool) -> Result<Outcome, String> {
+    let mut cmd = Command::new(&plan.program);
+    cmd.args(&plan.args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     crate::wsl_bridge::no_window(&mut cmd);
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("{} を実行できません: {}", program, e))?;
+        .map_err(|e| format!("{} を実行できません: {}", plan.program, e))?;
     let (Some(stdin), Some(stdout), Some(mut stderr)) =
         (child.stdin.take(), child.stdout.take(), child.stderr.take())
     else {
@@ -233,23 +329,25 @@ pub fn open(
 
     let (opened_tx, opened_rx) = mpsc::channel::<()>();
     let (ended_tx, ended_rx) = mpsc::channel::<()>();
-    let notify: Arc<dyn OpenSink> = Arc::new(Notify {
-        inner: sink,
+    let notify = Arc::new(Notify {
+        inner: Arc::clone(&plan.sink),
         opened: Mutex::new(Some(opened_tx)),
+        quiet,
+        gone: Mutex::new(None),
     });
     let child: Arc<Mutex<Child>> = Arc::new(Mutex::new(child));
     let child_s = Arc::clone(&child);
-    let origin = origin.to_string();
+    let plan_s = Arc::clone(&plan);
     std::thread::Builder::new()
         .name("fude-remote-direct".into())
         .spawn(move || {
-            gui_server::serve_child(
+            let end = gui_server::serve_child(
                 Box::new(stdout),
                 Box::new(stdin),
-                origin,
-                registry,
-                sessions,
-                notify,
+                plan_s.origin.clone(),
+                Arc::clone(&plan_s.registry),
+                Arc::clone(&plan_s.sessions),
+                notify.clone(),
             );
             // The conversation is over, whoever ended it. The agent has
             // been told goodbye and its stdin is closed, so it leaves by
@@ -266,6 +364,16 @@ pub fn open(
                 let _ = c.wait();
             }
             let _ = ended_tx.send(());
+            // A place was being served: either that is over, or the link
+            // broke and it is brought back.
+            let gone = notify.gone.lock().ok().and_then(|mut g| g.take());
+            if let Some(host) = gone {
+                if end == gui_server::End::Lost && !plan_s.retry.is_empty() {
+                    reconnect(plan_s, host);
+                } else {
+                    plan_s.sink.disconnected(&host);
+                }
+            }
         })
         .map_err(|e| e.to_string())?;
 
@@ -274,7 +382,7 @@ pub fn open(
             .map(|s| s.trim().to_string())
             .unwrap_or_default()
     };
-    let deadline = std::time::Instant::now() + timeout.unwrap_or(OPEN_TIMEOUT);
+    let deadline = std::time::Instant::now() + plan.timeout;
     loop {
         if opened_rx.try_recv().is_ok() {
             return Ok(Outcome::Opened);
@@ -373,6 +481,10 @@ mod tests {
                 "ControlMaster=no",
                 "-o",
                 "ClearAllForwardings=yes",
+                "-o",
+                "ServerAliveInterval=15",
+                "-o",
+                "ServerAliveCountMax=3",
                 "me@k16",
                 "PATH=$HOME/.local/bin:$PATH fude-cli here --_stdio --hex 7e2f612062",
             ])
@@ -473,6 +585,9 @@ mod tests {
     struct Recorder {
         opened: Mutex<Vec<String>>,
         gone: Mutex<Vec<String>>,
+        reconnecting: Mutex<Vec<String>>,
+        reconnected: Mutex<Vec<String>>,
+        failed: Mutex<Vec<String>>,
     }
     impl OpenSink for Recorder {
         fn open(&self, path: &str, _wait: bool) -> Result<(), String> {
@@ -482,6 +597,151 @@ mod tests {
         fn disconnected(&self, host: &str) {
             self.gone.lock().unwrap().push(host.to_string());
         }
+        fn reconnecting(&self, host: &str) {
+            self.reconnecting.lock().unwrap().push(host.to_string());
+        }
+        fn reconnected(&self, host: &str) {
+            self.reconnected.lock().unwrap().push(host.to_string());
+        }
+        fn reconnect_failed(&self, host: &str) {
+            self.failed.lock().unwrap().push(host.to_string());
+        }
+    }
+
+    /// Wait (up to 5s) for `cond`.
+    fn eventually(cond: impl Fn() -> bool) -> bool {
+        for _ in 0..250 {
+            if cond() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        cond()
+    }
+
+    const FAST: [Duration; 3] = [
+        Duration::from_millis(10),
+        Duration::from_millis(10),
+        Duration::from_millis(10),
+    ];
+
+    #[test]
+    fn reconnecting_starts_soon_backs_off_and_gives_up_after_a_while() {
+        let d = reconnect_delays();
+        assert_eq!(d[0], Duration::from_secs(1));
+        assert!(d.windows(2).all(|w| w[0] <= w[1]), "never sooner again");
+        assert!(d.iter().all(|x| *x <= Duration::from_secs(60)));
+        let total: Duration = d.iter().sum();
+        assert!(
+            total >= Duration::from_secs(20 * 60) && total <= Duration::from_secs(40 * 60),
+            "{total:?}"
+        );
+    }
+
+    /// The first run opens and then drops (as when the link dies); every
+    /// later run opens and stays.
+    #[cfg(unix)]
+    const DROPS_ONCE: &str = r#"echo '{"type":"hello","protocol":1,"host":"k16"}'
+read welcome
+echo '{"type":"open","paths":["/home/u/a.md"],"wait":true,"roots":["/home/u"]}'
+if [ ! -e "$0.first" ]; then : > "$0.first"; exit 0; fi
+while read line; do
+  case "$line" in *'"bye"'*) exit 0;; esac
+done"#;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dropped_agent_is_reconnected_quietly() {
+        let (_tmp, script) = agent_script(DROPS_ONCE);
+        let sessions = Arc::new(RemoteSessions::default());
+        let sink = Arc::new(Recorder::default());
+        let outcome = open_with(
+            SH,
+            &script,
+            "ssh:k16",
+            Arc::new(WaitRegistry::default()),
+            Arc::clone(&sessions),
+            sink.clone(),
+            Some(Duration::from_secs(10)),
+            FAST.to_vec(),
+        )
+        .unwrap();
+        assert_eq!(outcome, Outcome::Opened);
+        assert!(eventually(|| sink.reconnected.lock().unwrap().len() == 1));
+        assert_eq!(sink.reconnecting.lock().unwrap().as_slice(), ["k16"]);
+        assert_eq!(sink.reconnected.lock().unwrap().as_slice(), ["k16"]);
+        // The place is not opened a second time, and the drop is not
+        // reported as the end of the connection.
+        assert_eq!(
+            sink.opened.lock().unwrap().as_slice(),
+            ["remote://k16/home/u/a.md"]
+        );
+        assert!(sink.gone.lock().unwrap().is_empty());
+        let listed = sessions.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].3.as_deref(), Some("ssh:k16"));
+
+        // Hung up on, it ends for good.
+        assert!(sessions.hang_up(listed[0].0));
+        assert!(eventually(|| sink.gone.lock().unwrap().len() == 1));
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(sink.reconnecting.lock().unwrap().len(), 1);
+        assert!(sessions.list().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reconnecting_gives_up_when_the_host_stays_away() {
+        let (_tmp, script) = agent_script(
+            r#"if [ -e "$0.first" ]; then echo 'ssh: connect to host k16: timed out' >&2; exit 255; fi
+: > "$0.first"
+echo '{"type":"hello","protocol":1,"host":"k16"}'
+read welcome
+echo '{"type":"open","paths":["/home/u"],"wait":true,"roots":["/home/u"]}'
+exit 0"#,
+        );
+        let sink = Arc::new(Recorder::default());
+        open_with(
+            SH,
+            &script,
+            "ssh:k16",
+            Arc::new(WaitRegistry::default()),
+            Arc::new(RemoteSessions::default()),
+            sink.clone(),
+            Some(Duration::from_secs(10)),
+            FAST.to_vec(),
+        )
+        .unwrap();
+        assert!(eventually(|| sink.failed.lock().unwrap().len() == 1));
+        assert_eq!(sink.failed.lock().unwrap().as_slice(), ["k16"]);
+        assert!(sink.reconnected.lock().unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_agent_that_says_goodbye_is_not_called_back() {
+        let (_tmp, script) = agent_script(
+            r#"echo '{"type":"hello","protocol":1,"host":"k16"}'
+read welcome
+echo '{"type":"open","paths":["/home/u"],"wait":true,"roots":["/home/u"]}'
+echo '{"type":"bye"}'
+exit 0"#,
+        );
+        let sink = Arc::new(Recorder::default());
+        open_with(
+            SH,
+            &script,
+            "ssh:k16",
+            Arc::new(WaitRegistry::default()),
+            Arc::new(RemoteSessions::default()),
+            sink.clone(),
+            Some(Duration::from_secs(10)),
+            FAST.to_vec(),
+        )
+        .unwrap();
+        assert!(eventually(|| sink.gone.lock().unwrap().len() == 1));
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(sink.reconnecting.lock().unwrap().is_empty());
     }
 
     #[cfg(unix)]
@@ -532,7 +792,10 @@ done"#,
         }
         assert!(ended.exists(), "the agent was not told goodbye");
         assert!(sessions.list().is_empty());
+        assert!(eventually(|| sink.gone.lock().unwrap().len() == 1));
         assert_eq!(sink.gone.lock().unwrap().as_slice(), ["k16"]);
+        // Ended on purpose: not called back.
+        assert!(sink.reconnecting.lock().unwrap().is_empty());
     }
 
     #[cfg(unix)]

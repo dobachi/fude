@@ -140,6 +140,23 @@ export function saveAsCompletions(query, entries) {
 /** How many candidates the remote "Save As" field shows. */
 const SAVE_AS_SUGGEST_MAX = 50;
 
+/**
+ * What to ask the agent on `host` to watch again once its connection is
+ * back (the watches lived in the agent that went away): the open folder
+ * when it is on that host, and each tab's file there, once.
+ * @param {string} host
+ * @param {string} vaultPath
+ * @param {(string|null)[]} tabPaths
+ * @returns {{ vault: string|null, files: string[] }}
+ */
+export function rewatchOnReconnect(host, vaultPath, tabPaths) {
+  const files = [];
+  for (const p of Array.isArray(tabPaths) ? tabPaths : []) {
+    if (remoteHost(p) === host && !files.includes(p)) files.push(p);
+  }
+  return { vault: remoteHost(vaultPath) === host ? vaultPath : null, files };
+}
+
 const IMAGE_MIME = {
   png: 'image/png',
   jpg: 'image/jpeg',

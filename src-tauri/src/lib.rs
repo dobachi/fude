@@ -1368,6 +1368,15 @@ fn take_open_request(
 /// through `wait_tab_closed`.
 struct WindowSink(tauri::AppHandle);
 
+impl WindowSink {
+    /// Tell the main window `event` happened to the connection to `host`.
+    fn emit_host(&self, event: &str, host: &str) {
+        if let Some(window) = self.0.get_webview_window("main") {
+            let _ = window.emit(event, serde_json::json!({ "host": host }));
+        }
+    }
+}
+
 impl gui_server::OpenSink for WindowSink {
     fn open(&self, path: &str, wait: bool) -> Result<(), String> {
         let window = self
@@ -1401,9 +1410,19 @@ impl gui_server::OpenSink for WindowSink {
     }
 
     fn disconnected(&self, host: &str) {
-        if let Some(window) = self.0.get_webview_window("main") {
-            let _ = window.emit("remote-disconnected", serde_json::json!({ "host": host }));
-        }
+        self.emit_host("remote-disconnected", host);
+    }
+
+    fn reconnecting(&self, host: &str) {
+        self.emit_host("remote-reconnecting", host);
+    }
+
+    fn reconnected(&self, host: &str) {
+        self.emit_host("remote-reconnected", host);
+    }
+
+    fn reconnect_failed(&self, host: &str) {
+        self.emit_host("remote-reconnect-failed", host);
     }
 
     fn cli_outdated(&self, host: &str, cli_version: &str) {

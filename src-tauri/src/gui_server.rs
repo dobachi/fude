@@ -34,6 +34,13 @@ pub trait OpenSink: Send + Sync + 'static {
     fn dir_changed(&self, _path: &str) {}
     /// The agent for `host` went away.
     fn disconnected(&self, _host: &str) {}
+    /// The link to an agent the app started for `host` dropped; it is being
+    /// started again (`remote_direct`).
+    fn reconnecting(&self, _host: &str) {}
+    /// ... and is back: the same place is served again.
+    fn reconnected(&self, _host: &str) {}
+    /// ... and could not be brought back: the place has to be opened again.
+    fn reconnect_failed(&self, _host: &str) {}
     /// The agent for `host` runs fude-cli `cli_version`, older than this GUI.
     fn cli_outdated(&self, _host: &str, _cli_version: &str) {}
 }
@@ -332,6 +339,8 @@ pub struct ConnState {
     /// `pending` drains, otherwise right after the replies are written.
     opened: bool,
     wait: bool,
+    /// Set when the peer said goodbye: the connection ends, whatever else.
+    left: bool,
     /// Roots announced by a remote agent in `Open`.
     roots: Vec<String>,
 }
@@ -375,9 +384,11 @@ impl ConnState {
         &self.roots
     }
 
-    /// True when nothing more will be sent and the connection can end.
+    /// True when nothing more will be sent and the connection can end. An
+    /// agent the app started (`trusted`) serves its place until it leaves
+    /// or is hung up on: its tabs closing does not end it.
     pub fn finished(&self) -> bool {
-        self.opened && (!self.wait || self.pending.is_empty())
+        self.left || (!self.trusted && self.opened && (!self.wait || self.pending.is_empty()))
     }
 
     /// The tab path for a client path: resolved locally for a local client,
@@ -468,6 +479,9 @@ impl ConnState {
                     );
                 }
                 self.opened = true;
+                // Nobody waits on the tabs of an agent the app started: the
+                // place stays open (and served) after they close.
+                let wait = wait && !self.trusted;
                 self.wait = wait;
                 self.roots = roots.unwrap_or_default();
                 let mut replies = Vec::new();
@@ -490,7 +504,7 @@ impl ConnState {
                         }),
                     }
                 }
-                if !wait {
+                if !wait && !self.trusted {
                     replies.push(Message::Bye);
                 }
                 (replies, register)
@@ -500,6 +514,7 @@ impl ConnState {
                 self.pending.clear();
                 self.wait = false;
                 self.opened = true;
+                self.left = true;
                 (vec![], vec![])
             }
             Message::FileChanged { path } => {
@@ -691,13 +706,44 @@ pub fn serve_child(
     registry: Arc<WaitRegistry>,
     sessions: Arc<RemoteSessions>,
     sink: Arc<dyn OpenSink>,
-) {
+) -> End {
     let peer = Peer {
         token: None,
         token_always: false,
         origin: Some(origin),
     };
     serve(recv, send, peer, registry, sessions, sink)
+}
+
+/// Why a connection ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum End {
+    /// This side hung up (`RemoteSessions::hang_up`).
+    HungUp,
+    /// It was over: the peer said goodbye, or had nothing more to wait for.
+    Done,
+    /// The link broke: the peer vanished without a word, or could no longer
+    /// be written to.
+    Lost,
+}
+
+/// The peer can no longer be written to. If it said goodbye before going
+/// (a line still unread), it left; otherwise the link broke. Its remaining
+/// lines arrive within moments, then the end of its output.
+fn after_write_failed(rx: &mpsc::Receiver<Event>) -> End {
+    let deadline = std::time::Instant::now() + Duration::from_millis(500);
+    while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
+        match rx.recv_timeout(left) {
+            Ok(Event::Line(line)) => {
+                if matches!(ipc::decode(&line), Ok(Some(Message::Bye))) {
+                    return End::Done;
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            Ok(_) => {}
+        }
+    }
+    End::Lost
 }
 
 /// What is known about the other end of a connection before it speaks.
@@ -717,7 +763,7 @@ fn serve(
     registry: Arc<WaitRegistry>,
     sessions: Arc<RemoteSessions>,
     sink: Arc<dyn OpenSink>,
-) {
+) -> End {
     let (tx, rx) = mpsc::channel::<Event>();
 
     let reader_tx = tx.clone();
@@ -763,6 +809,7 @@ fn serve(
         send.flush().is_ok()
     };
 
+    let mut end = End::Lost;
     while let Ok(ev) = rx.recv() {
         match ev {
             Event::Line(line) => {
@@ -805,28 +852,37 @@ fn serve(
                     }],
                 };
                 let bye = replies.iter().any(|m| matches!(m, Message::Bye));
-                if !write_all(&mut send, &replies) || bye || state.finished() {
+                if !write_all(&mut send, &replies) {
+                    end = after_write_failed(&rx);
+                    break;
+                }
+                if bye || state.finished() {
+                    end = End::Done;
                     break;
                 }
             }
             Event::Send(msg) => {
                 if !write_all(&mut send, &[msg]) {
+                    end = after_write_failed(&rx);
                     break;
                 }
             }
             Event::Closed { path, saved } => {
                 if let Some(reply) = state.closed(&path, saved) {
                     if !write_all(&mut send, &[reply]) {
+                        end = after_write_failed(&rx);
                         break;
                     }
                 }
                 if state.finished() {
                     let _ = write_all(&mut send, &[Message::Bye]);
+                    end = End::Done;
                     break;
                 }
             }
             Event::Hangup => {
                 let _ = write_all(&mut send, &[Message::Bye]);
+                end = End::HungUp;
                 break;
             }
             Event::Eof => break,
@@ -838,6 +894,7 @@ fn serve(
         s.abort_all();
         sink.disconnected(&s.host);
     }
+    end
 }
 
 #[cfg(test)]
@@ -1047,6 +1104,72 @@ mod tests {
         assert_eq!(st.host(), Some("box"));
     }
 
+    /// An agent the app started serves the place for as long as it is
+    /// connected: closing the tab it first opened must not end it, since
+    /// the folder and the other tabs opened from it are served by it too.
+    #[test]
+    fn an_agent_we_started_is_not_ended_by_closing_a_tab() {
+        let sink = Recorder::default();
+        let mut st = ConnState::trusted();
+        st.handle(
+            Message::Hello {
+                protocol: PROTOCOL_VERSION,
+                cwd: None,
+                cli_version: None,
+                host: Some("box".into()),
+                token: None,
+            },
+            &sink,
+        );
+        let (replies, register) = st.handle(
+            Message::Open {
+                paths: vec!["/home/u/a.md".into()],
+                wait: true,
+                roots: Some(vec!["/home/u".into()]),
+            },
+            &sink,
+        );
+        assert_eq!(
+            replies,
+            vec![Message::Opened {
+                path: "remote://box/home/u/a.md".into()
+            }]
+        );
+        assert!(register.is_empty(), "nobody waits on the tab");
+        // The frontend is not asked to report the close either.
+        assert_eq!(
+            *sink.calls.lock().unwrap(),
+            vec![("remote://box/home/u/a.md".to_string(), false)]
+        );
+        assert!(!st.finished());
+        assert_eq!(st.closed("remote://box/home/u/a.md", true), None);
+        assert!(!st.finished());
+
+        // It still ends when the agent says goodbye.
+        st.handle(Message::Bye, &sink);
+        assert!(st.finished());
+    }
+
+    #[test]
+    fn an_agent_that_connected_on_its_own_still_waits_for_its_tabs() {
+        // `fude --wait FILE` typed on the host: unchanged.
+        let sink = Recorder::default();
+        let mut st = ConnState::with_token(None);
+        st.handle(hello("/"), &sink);
+        let (_, register) = st.handle(
+            Message::Open {
+                paths: vec!["/a.md".into()],
+                wait: true,
+                roots: None,
+            },
+            &sink,
+        );
+        assert_eq!(register, vec!["/a.md".to_string()]);
+        assert!(!st.finished());
+        assert!(st.closed("/a.md", true).is_some());
+        assert!(st.finished());
+    }
+
     /// The whole life of a connection the app opened itself: greeted
     /// without a token, listed once it serves something, ended on request.
     #[test]
@@ -1107,11 +1230,12 @@ mod tests {
                 .as_bytes(),
             )
             .unwrap();
-        // The open is acknowledged once the sink has it.
+        // The open is acknowledged once the sink has it. Nobody is to wait
+        // for its tab: the place stays served after it closes.
         let _ = read();
         assert_eq!(
             sink.calls.lock().unwrap().as_slice(),
-            [("remote://k16/home/u/notes".to_string(), true)]
+            [("remote://k16/home/u/notes".to_string(), false)]
         );
         let listed = sessions.list();
         assert_eq!(listed.len(), 1);
