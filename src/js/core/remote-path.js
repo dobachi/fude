@@ -64,6 +64,31 @@ export function resolveRemotePath(baseDir, file) {
   return `${REMOTE_SCHEME}${parts.host}/${out.join('/')}`;
 }
 
+/**
+ * Where "Save As" on a remote tab writes, from what was typed: a name or a
+ * relative path (from `baseDir`, the tab's folder), `/abs/path` on the same
+ * host, or the path written out as shown (`host:/abs/path`) or in full
+ * (`remote://host/abs/path`). Null for another host, an empty input or one
+ * naming a folder (ending in `/`): the native dialog cannot reach a host, so
+ * the file stays where its connection is.
+ * @param {string} baseDir
+ * @param {string} input
+ * @returns {string|null}
+ */
+export function remoteSaveAsPath(baseDir, input) {
+  const host = remoteHost(isRemotePath(baseDir) ? `${baseDir}/` : baseDir);
+  if (!host) return null;
+  let typed = String(input ?? '').trim();
+  if (!typed || /[/\\]$/.test(typed)) return null;
+  const full = splitRemotePath(typed);
+  const shown = /^([^/\\:]+):(\/.*)$/.exec(typed);
+  if (full || shown) {
+    if ((full ? full.host : shown[1]) !== host) return null;
+    typed = full ? full.path : shown[2];
+  }
+  return resolveRemotePath(baseDir, typed);
+}
+
 const IMAGE_MIME = {
   png: 'image/png',
   jpg: 'image/jpeg',

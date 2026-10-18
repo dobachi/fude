@@ -9,6 +9,7 @@ import {
   remoteParent,
   connectionFor,
   remoteReach,
+  remoteSaveAsPath,
 } from '../core/remote-path.js';
 
 describe('remote-path', () => {
@@ -145,5 +146,37 @@ describe('moving around on a remote machine', () => {
     });
     expect(remoteReach('remote://gone/x', [])).toEqual({ kind: 'ssh', host: 'gone', known: false });
     expect(remoteReach('/local', conns)).toBeNull();
+  });
+});
+
+describe('remoteSaveAsPath: リモートのタブを名前を付けて保存する先', () => {
+  const DIR = 'remote://k16/home/u/notes';
+
+  it('ファイル名だけなら、同じフォルダに保存する', () => {
+    expect(remoteSaveAsPath(DIR, 'b.md')).toBe('remote://k16/home/u/notes/b.md');
+    expect(remoteSaveAsPath(DIR, '  sub/c.md  ')).toBe('remote://k16/home/u/notes/sub/c.md');
+    expect(remoteSaveAsPath(DIR, '../d.md')).toBe('remote://k16/home/u/d.md');
+  });
+
+  it('/ で始まればホストの絶対パス', () => {
+    expect(remoteSaveAsPath(DIR, '/tmp/x.md')).toBe('remote://k16/tmp/x.md');
+  });
+
+  it('表示どおりの host:/path も、remote:// の形も受け付ける', () => {
+    expect(remoteSaveAsPath(DIR, 'k16:/home/u/e.md')).toBe('remote://k16/home/u/e.md');
+    expect(remoteSaveAsPath(DIR, 'remote://k16/srv/f.md')).toBe('remote://k16/srv/f.md');
+  });
+
+  it('別のホストや空の入力、フォルダで終わる入力は受け付けない', () => {
+    expect(remoteSaveAsPath(DIR, 'box:/home/u/a.md')).toBeNull();
+    expect(remoteSaveAsPath(DIR, 'remote://box/a.md')).toBeNull();
+    expect(remoteSaveAsPath(DIR, '   ')).toBeNull();
+    expect(remoteSaveAsPath(DIR, undefined)).toBeNull();
+    expect(remoteSaveAsPath(DIR, 'sub/')).toBeNull();
+    expect(remoteSaveAsPath(DIR, '/')).toBeNull();
+  });
+
+  it('基準がリモートでなければ null', () => {
+    expect(remoteSaveAsPath('/home/u', 'a.md')).toBeNull();
   });
 });

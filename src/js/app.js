@@ -38,7 +38,16 @@ import { attachPanZoom } from './core/svg-panzoom.js';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
 import { outdatedCliMessage } from './core/setup-hosts.js';
-import { isRemotePath, remoteParent, remoteReach, splitRemotePath } from './core/remote-path.js';
+import {
+  isRemotePath,
+  remoteParent,
+  remoteReach,
+  splitRemotePath,
+  displayRemotePath,
+  resolveRemotePath,
+  remoteSaveAsPath,
+} from './core/remote-path.js';
+import { escapeHtml } from './core/print-document.js';
 import { createStatusBar } from './core/statusbar.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
@@ -2766,7 +2775,7 @@ function saveActivePaneTabState() {
 }
 
 // ── Global keyboard shortcuts ──────────────────────────────
-// Save the active tab to disk. Used by Ctrl+Shift+S (save) and Ctrl+Alt+S (save as).
+// Save the active tab to disk. Used by Ctrl+S (save) and Ctrl+Shift+S (save as).
 async function performSave({ forceDialog }) {
   // Save what the user sees: an edit still open in the preview goes in first.
   commitInlineEdit();
@@ -2778,6 +2787,14 @@ async function performSave({ forceDialog }) {
   // Quick path: existing path + not forcing dialog → save with a conflict check
   if (tab.path && !forceDialog) {
     await saveWithConflictCheck(tab, content);
+    return;
+  }
+
+  // A tab on a remote host (or a new one while a remote folder is open): the
+  // native dialog only sees this machine, so ask for a path on that host.
+  const base = tab.path || vaultPath || '';
+  if (isRemotePath(base)) {
+    await saveRemoteAs(tab, content, base);
     return;
   }
 
@@ -2813,7 +2830,63 @@ async function performSave({ forceDialog }) {
     }
   } catch (err) {
     console.error('Save failed:', err);
+    showToast(`保存できませんでした: ${err?.message || err}`, { type: 'error', duration: 6000 });
   }
+}
+
+/**
+ * "Save As" for a remote tab: ask for a path on the same host, confirm
+ * before writing over another file, then point the tab at the new path.
+ * `base` is the tab's path, or the remote folder open when it has none.
+ */
+async function saveRemoteAs(tab, content, base) {
+  const dir = tab.path ? remoteParent(tab.path) : base;
+  const host = splitRemotePath(`${base}/`)?.host || '';
+  const initial = displayRemotePath(tab.path || resolveRemotePath(base, 'untitled.md'));
+  const typed = await promptDialog(
+    `名前を付けて保存（${escapeHtml(host)} 上のパス）`,
+    initial,
+    '保存',
+  );
+  if (typed == null) return;
+  const filePath = remoteSaveAsPath(dir, typed);
+  if (!filePath) {
+    showToast(`${host} 上のファイルのパスを指定してください（別のホストには保存できません）`, {
+      type: 'error',
+      duration: 6000,
+    });
+    return;
+  }
+  if (filePath !== tab.path) {
+    let exists = false;
+    try {
+      await backend.readFile(filePath);
+      exists = true;
+    } catch {
+      /* not there (or unreadable): nothing to overwrite */
+    }
+    if (
+      exists &&
+      !(await confirmDialog(
+        `${escapeHtml(displayRemotePath(filePath))} は既にあります。上書きしますか？`,
+        { okLabel: '上書き', danger: true },
+      ))
+    ) {
+      return;
+    }
+  }
+  const ok = await triggerSave(filePath, content);
+  if (!ok) {
+    showToast(`保存に失敗しました: ${displayRemotePath(filePath)}`, {
+      type: 'error',
+      duration: 6000,
+    });
+    return;
+  }
+  updateTabPath(tab.id, filePath);
+  markClean(tab.id);
+  await markTabSynced(tab.id, content);
+  refreshSidebar();
 }
 
 /** Set a tab's disk-sync baseline hash to match the given content. */
