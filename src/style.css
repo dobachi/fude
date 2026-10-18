@@ -3381,6 +3381,40 @@ body:has(#app.ai-panel-open) #mode-indicator {
   color: var(--bg-primary);
 }
 
+/* Candidates under a dialog's text field (promptDialog with completion). */
+.dlg-suggest {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 10;
+  margin: 2px 0 0;
+  padding: 2px 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.dlg-suggest li {
+  padding: 3px 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono, monospace);
+  font-size: calc(var(--ui-font-size) - 1px);
+  color: var(--fg-primary);
+  cursor: pointer;
+}
+
+.dlg-suggest li.active,
+.dlg-suggest li:hover {
+  background: var(--fg-accent);
+  color: var(--bg-primary);
+}
+
 .setting-remote .remote-connection-row {
   display: flex;
   align-items: center;

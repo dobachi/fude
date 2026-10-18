@@ -10,6 +10,8 @@ import {
   connectionFor,
   remoteReach,
   remoteSaveAsPath,
+  saveAsCompletionQuery,
+  saveAsCompletions,
 } from '../core/remote-path.js';
 
 describe('remote-path', () => {
@@ -178,5 +180,63 @@ describe('remoteSaveAsPath: リモートのタブを名前を付けて保存す�
 
   it('基準がリモートでなければ null', () => {
     expect(remoteSaveAsPath('/home/u', 'a.md')).toBeNull();
+  });
+});
+
+describe('名前を付けて保存の補完', () => {
+  const DIR = 'remote://k16/home/u/notes';
+
+  it('入力の最後の / までを読むフォルダ、その先を絞り込みに使う', () => {
+    expect(saveAsCompletionQuery(DIR, 'k16:/home/u/no')).toEqual({
+      dir: 'remote://k16/home/u',
+      shownDir: 'k16:/home/u/',
+      prefix: 'no',
+    });
+    expect(saveAsCompletionQuery(DIR, 'sub/a')).toEqual({
+      dir: 'remote://k16/home/u/notes/sub',
+      shownDir: 'sub/',
+      prefix: 'a',
+    });
+    expect(saveAsCompletionQuery(DIR, '/')).toEqual({
+      dir: 'remote://k16/',
+      shownDir: '/',
+      prefix: '',
+    });
+  });
+
+  it('/ が無ければ、いまのフォルダの中から', () => {
+    expect(saveAsCompletionQuery(DIR, 'b')).toEqual({ dir: DIR, shownDir: '', prefix: 'b' });
+  });
+
+  it('別のホストは読まない', () => {
+    expect(saveAsCompletionQuery(DIR, 'box:/home/')).toBeNull();
+    expect(saveAsCompletionQuery('/local', 'a')).toBeNull();
+  });
+
+  const ENTRIES = [
+    { name: 'notes', is_dir: true, children: [{ name: 'deep.md', is_dir: false }] },
+    { name: 'note.md', is_dir: false },
+    { name: '.hidden', is_dir: true },
+    { name: 'other.md', is_dir: false },
+  ];
+
+  it('入力どおりに書き足した候補を出し、フォルダには / を付ける', () => {
+    const q = { dir: 'x', shownDir: 'k16:/home/u/', prefix: 'no' };
+    expect(saveAsCompletions(q, ENTRIES)).toEqual(['k16:/home/u/notes/', 'k16:/home/u/note.md']);
+  });
+
+  it('隠しファイルは . で始めたときだけ', () => {
+    expect(saveAsCompletions({ shownDir: '', prefix: '' }, ENTRIES)).toEqual([
+      'notes/',
+      'note.md',
+      'other.md',
+    ]);
+    expect(saveAsCompletions({ shownDir: '', prefix: '.' }, ENTRIES)).toEqual(['.hidden/']);
+  });
+
+  it('入力そのものや壊れた入力は候補にしない', () => {
+    expect(saveAsCompletions({ shownDir: '', prefix: 'note.md' }, ENTRIES)).toEqual([]);
+    expect(saveAsCompletions(null, ENTRIES)).toEqual([]);
+    expect(saveAsCompletions({ shownDir: '', prefix: '' }, null)).toEqual([]);
   });
 });

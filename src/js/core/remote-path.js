@@ -76,18 +76,69 @@ export function resolveRemotePath(baseDir, file) {
  * @returns {string|null}
  */
 export function remoteSaveAsPath(baseDir, input) {
+  const typed = String(input ?? '').trim();
+  if (!typed || /[/\\]$/.test(typed)) return null;
+  return resolveTypedPath(baseDir, typed);
+}
+
+/** `typed` (a name, a path, `host:/path` or `remote://host/path`) as a
+ *  remote path on `baseDir`'s host, or null for another host. */
+function resolveTypedPath(baseDir, typed) {
   const host = remoteHost(isRemotePath(baseDir) ? `${baseDir}/` : baseDir);
   if (!host) return null;
-  let typed = String(input ?? '').trim();
-  if (!typed || /[/\\]$/.test(typed)) return null;
-  const full = splitRemotePath(typed);
-  const shown = /^([^/\\:]+):(\/.*)$/.exec(typed);
+  let rel = typed;
+  const full = splitRemotePath(rel);
+  const shown = /^([^/\\:]+):(\/.*)$/.exec(rel);
   if (full || shown) {
     if ((full ? full.host : shown[1]) !== host) return null;
-    typed = full ? full.path : shown[2];
+    rel = full ? full.path : shown[2];
   }
-  return resolveRemotePath(baseDir, typed);
+  return resolveRemotePath(baseDir, rel);
 }
+
+/**
+ * What to list for completing `typed` in the remote "Save As" field: the
+ * folder up to its last `/` (`dir`, a remote path), that part as typed
+ * (`shownDir`, kept so candidates read like the input) and the rest
+ * (`prefix`, what names must start with). Null for another host.
+ * @param {string} baseDir
+ * @param {string} typed
+ * @returns {{ dir: string, shownDir: string, prefix: string } | null}
+ */
+export function saveAsCompletionQuery(baseDir, typed) {
+  const t = String(typed ?? '');
+  const cut = Math.max(t.lastIndexOf('/'), t.lastIndexOf('\\'));
+  const shownDir = t.slice(0, cut + 1);
+  const dir = resolveTypedPath(baseDir, shownDir || '.');
+  if (!dir) return null;
+  return { dir, shownDir, prefix: t.slice(cut + 1) };
+}
+
+/**
+ * The candidates for a `saveAsCompletionQuery` result, from the folder's
+ * `entries` (`{ name, is_dir }`): the input with a matching name written
+ * out, folders ending in `/` to go on into. Hidden names only once a `.`
+ * is typed; the input itself is not offered.
+ * @param {{ shownDir: string, prefix: string } | null} query
+ * @param {{ name: string, is_dir: boolean }[]} entries
+ * @returns {string[]}
+ */
+export function saveAsCompletions(query, entries) {
+  if (!query || !Array.isArray(entries)) return [];
+  const { shownDir, prefix } = query;
+  const out = [];
+  for (const e of entries) {
+    const name = e?.name;
+    if (typeof name !== 'string' || !name.startsWith(prefix)) continue;
+    if (name.startsWith('.') && !prefix.startsWith('.')) continue;
+    if (!e.is_dir && name === prefix) continue;
+    out.push(`${shownDir}${name}${e.is_dir ? '/' : ''}`);
+  }
+  return out.slice(0, SAVE_AS_SUGGEST_MAX);
+}
+
+/** How many candidates the remote "Save As" field shows. */
+const SAVE_AS_SUGGEST_MAX = 50;
 
 const IMAGE_MIME = {
   png: 'image/png',

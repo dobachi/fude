@@ -46,6 +46,8 @@ import {
   displayRemotePath,
   resolveRemotePath,
   remoteSaveAsPath,
+  saveAsCompletionQuery,
+  saveAsCompletions,
 } from './core/remote-path.js';
 import { escapeHtml } from './core/print-document.js';
 import { createStatusBar } from './core/statusbar.js';
@@ -2843,10 +2845,25 @@ async function saveRemoteAs(tab, content, base) {
   const dir = tab.path ? remoteParent(tab.path) : base;
   const host = splitRemotePath(`${base}/`)?.host || '';
   const initial = displayRemotePath(tab.path || resolveRemotePath(base, 'untitled.md'));
+  // Candidates come through the tab's own connection, so only the folders
+  // it was opened on (and below) can be listed.
+  const listed = new Map();
+  const complete = async (text) => {
+    const query = saveAsCompletionQuery(dir, text);
+    if (!query) return [];
+    if (!listed.has(query.dir)) {
+      listed.set(
+        query.dir,
+        backend.readDirTree(query.dir, true).catch(() => []),
+      );
+    }
+    return saveAsCompletions(query, await listed.get(query.dir));
+  };
   const typed = await promptDialog(
     `名前を付けて保存（${escapeHtml(host)} 上のパス）`,
     initial,
     '保存',
+    { complete },
   );
   if (typed == null) return;
   const filePath = remoteSaveAsPath(dir, typed);
