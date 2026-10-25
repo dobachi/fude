@@ -1,8 +1,15 @@
-// context-menu.js - Custom right-click context menu with AI actions
-// Shows AI-related options when text is selected in the editor.
+// context-menu.js - Right-click menu for the editor body and the preview.
+// Replaces the WebView's default (browser-style) menu with an app menu built
+// on the shared core/menu.js, so it looks and behaves like the other menus.
+import { EditorView } from '@codemirror/view';
+import { undo, redo, undoDepth, redoDepth } from '@codemirror/commands';
 import { executeActionDirect } from './composer.js';
-
-let menuEl = null;
+import { showMenu } from '../../core/menu.js';
+import {
+  AI_ACTION_IDS,
+  buildEditorMenuItems,
+  buildPreviewMenuItems,
+} from '../../core/editor-menu-items.js';
 
 /**
  * @typedef {Object} ContextMenuCallbacks
@@ -21,166 +28,115 @@ let callbacks = null;
  */
 export function initContextMenu(cbs) {
   callbacks = cbs;
-
-  // Use capture phase to intercept before browser default
+  // Capture phase so we run before the WebView's default menu.
   document.getElementById('workspace')?.addEventListener('contextmenu', handleContextMenu, true);
-
-  // Close menu on click outside or Escape
-  document.addEventListener('mousedown', (e) => {
-    if (menuEl && !menuEl.contains(e.target)) {
-      closeMenu();
-    }
-  });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && menuEl) {
-      closeMenu();
-    }
-  });
 }
 
 /**
  * @param {MouseEvent} e
  */
 function handleContextMenu(e) {
-  // Check if the click is inside a CodeMirror editor
-  const cmEditor = e.target.closest('.cm-editor');
-  if (!cmEditor) return;
+  const target = /** @type {Element} */ (e.target);
+  const cmEditor = target.closest?.('.cm-editor');
+  if (cmEditor) {
+    const view =
+      EditorView.findFromDOM(/** @type {HTMLElement} */ (cmEditor)) || callbacks?.getActiveView?.();
+    if (!view) return;
+    e.preventDefault();
+    e.stopPropagation();
+    moveCursorToClick(view, e.clientX, e.clientY);
+    showEditorMenu(view, e.clientX, e.clientY);
+    return;
+  }
+  const preview = target.closest?.('.preview-pane');
+  if (preview) {
+    e.preventDefault();
+    e.stopPropagation();
+    showPreviewMenu(preview, e.clientX, e.clientY);
+  }
+}
 
-  // Get the active EditorView via the callback
-  const view = callbacks?.getActiveView?.();
-  if (!view) return;
-
+/**
+ * Like most editors: right-clicking outside the current selection moves the
+ * cursor there (so Paste lands where you clicked); inside it keeps the selection.
+ */
+function moveCursorToClick(view, x, y) {
+  const pos = view.posAtCoords({ x, y });
+  if (pos == null) return;
   const { from, to } = view.state.selection.main;
-  if (from === to) return; // No selection — let browser default menu show
-
-  e.preventDefault();
-  e.stopPropagation();
-  showMenu(e.clientX, e.clientY, view);
+  if (from !== to && pos >= from && pos <= to) return;
+  view.dispatch({ selection: { anchor: pos } });
 }
 
-const EDIT_ITEMS = [
-  { id: 'cut', label: 'Cut', icon: '✂' },
-  { id: 'copy', label: 'Copy', icon: '📋' },
-  { id: 'paste', label: 'Paste', icon: '📌' },
-  { id: 'delete', label: 'Delete', icon: '🗑' },
-  { id: 'select-all', label: 'Select All', icon: '☐' },
-  { id: 'to-table', label: 'Convert to Table', icon: '▦' },
-];
-
-const AI_ITEMS = [
-  { id: 'ask-ai', label: 'Ask AI about this', icon: '💬' },
-  { id: 'rewrite', label: 'Rewrite', icon: '✏' },
-  { id: 'summarize', label: 'Summarize', icon: '📝' },
-  { id: 'expand', label: 'Expand', icon: '📖' },
-  { id: 'fix_grammar', label: 'Fix Grammar', icon: '✓' },
-];
-
-function showMenu(x, y, view) {
-  closeMenu();
-
-  menuEl = document.createElement('div');
-  menuEl.className = 'ai-context-menu';
-
-  // Edit items
-  for (const item of EDIT_ITEMS) {
-    menuEl.appendChild(createMenuItem(item, view));
-  }
-
-  // Divider
-  const divider = document.createElement('div');
-  divider.className = 'ai-context-menu-divider';
-  menuEl.appendChild(divider);
-
-  // AI items
-  for (const item of AI_ITEMS) {
-    menuEl.appendChild(createMenuItem(item, view));
-  }
-
-  document.body.appendChild(menuEl);
-
-  // Position within viewport
-  const rect = menuEl.getBoundingClientRect();
-  if (x + rect.width > window.innerWidth) {
-    x = window.innerWidth - rect.width - 8;
-  }
-  if (y + rect.height > window.innerHeight) {
-    y = window.innerHeight - rect.height - 8;
-  }
-  x = Math.max(8, x);
-  y = Math.max(8, y);
-
-  menuEl.style.left = `${x}px`;
-  menuEl.style.top = `${y}px`;
-}
-
-function createMenuItem(item, view) {
-  const btn = document.createElement('button');
-  btn.className = 'ai-context-menu-item';
-  btn.dataset.action = item.id;
-  btn.innerHTML = `<span class="ai-context-menu-icon">${item.icon}</span>${item.label}`;
-  btn.addEventListener('click', () => {
-    handleAction(item.id, view);
-    closeMenu();
+function showEditorMenu(view, x, y) {
+  const { from, to } = view.state.selection.main;
+  const specs = buildEditorMenuItems({
+    hasSelection: from !== to,
+    canUndo: undoDepth(view.state) > 0,
+    canRedo: redoDepth(view.state) > 0,
   });
-  return btn;
+  const items = specs.map((s) =>
+    s.separator ? s : { ...s, action: () => runEditorAction(s.id, view) },
+  );
+  showMenu(x, y, items, { onClose: () => view.focus() });
 }
 
-function handleAction(actionId, view) {
+function showPreviewMenu(preview, x, y) {
+  const sel = window.getSelection();
+  const text = sel && preview.contains(sel.anchorNode) ? sel.toString() : '';
+  const specs = buildPreviewMenuItems({ hasSelection: text.length > 0 });
+  const items = specs.map((s) =>
+    s.separator ? s : { ...s, action: () => s.id === 'copy' && writeClipboard(text) },
+  );
+  showMenu(x, y, items);
+}
+
+async function writeClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    document.execCommand('copy');
+  }
+}
+
+function runEditorAction(actionId, view) {
+  const { from, to } = view.state.selection.main;
+  const selected = view.state.sliceDoc(from, to);
   switch (actionId) {
+    case 'undo':
+      undo(view);
+      break;
+    case 'redo':
+      redo(view);
+      break;
     case 'cut':
-      document.execCommand('cut');
-      view.focus();
+      writeClipboard(selected).then(() => {
+        view.dispatch({ changes: { from, to, insert: '' } });
+      });
       break;
     case 'copy':
-      document.execCommand('copy');
-      view.focus();
+      writeClipboard(selected);
       break;
     case 'paste':
       navigator.clipboard
         .readText()
-        .then((text) => {
-          view.dispatch(view.state.replaceSelection(text));
-          view.focus();
-        })
-        .catch(() => {
-          document.execCommand('paste');
-          view.focus();
-        });
+        .then((text) => view.dispatch(view.state.replaceSelection(text)))
+        .catch(() => document.execCommand('paste'));
       break;
-    case 'delete': {
-      const { from, to } = view.state.selection.main;
-      if (from !== to) {
-        view.dispatch({ changes: { from, to, insert: '' } });
-      }
-      view.focus();
+    case 'delete':
+      if (from !== to) view.dispatch({ changes: { from, to, insert: '' } });
       break;
-    }
     case 'select-all':
       view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
-      view.focus();
       break;
     case 'to-table':
       callbacks?.onConvertTable?.(view);
       break;
-    case 'ask-ai': {
-      if (!callbacks) break;
-      const { from, to } = view.state.selection.main;
-      const selectedText = view.state.sliceDoc(from, to);
-      callbacks.onAskAI(selectedText);
+    case 'ask-ai':
+      callbacks?.onAskAI?.(selected);
       break;
-    }
-    case 'rewrite':
-    case 'summarize':
-    case 'expand':
-    case 'fix_grammar':
-      executeActionDirect(view, actionId);
+    default:
+      if (AI_ACTION_IDS.includes(actionId)) executeActionDirect(view, actionId);
       break;
-  }
-}
-
-function closeMenu() {
-  if (menuEl) {
-    menuEl.remove();
-    menuEl = null;
   }
 }

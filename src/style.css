@@ -3046,50 +3046,6 @@ body:has(#app.ai-panel-open) #mode-indicator {
   color: var(--fg-primary);
 }
 
-/* ===== AI Context Menu (Right-click) ===== */
-.ai-context-menu {
-  position: fixed;
-  z-index: 3000;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  padding: 4px;
-  min-width: 180px;
-}
-
-.ai-context-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 12px;
-  background: none;
-  border: none;
-  color: var(--fg-primary);
-  font-size: var(--ui-font-size);
-  font-family: var(--font-sans);
-  cursor: pointer;
-  border-radius: 4px;
-  text-align: left;
-}
-
-.ai-context-menu-item:hover {
-  background: var(--bg-hover);
-}
-
-.ai-context-menu-icon {
-  width: 18px;
-  text-align: center;
-  font-size: calc(var(--ui-font-size) + 1px);
-}
-
-.ai-context-menu-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 4px 8px;
-}
-
 /* ===== AI Ghost Text (Inline Completion) ===== */
 .ai-ghost-text {
   opacity: 0.4;
