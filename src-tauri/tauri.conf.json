@@ -64,6 +64,11 @@
         "mimeType": "text/markdown"
       }
     ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    },
     "linux": {
       "deb": {
         "postInstallScript": "scripts/postinst.sh",

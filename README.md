@@ -41,6 +41,8 @@ GitHub Releasesから最新版をダウンロードしてください。
 - **exe**: `Fude_x.x.x_x64-setup.exe` (NSISインストーラー)
 - **msi**: `Fude_x.x.x_x64.msi` (MSIインストーラー)
 
+`.md` をダブルクリックして「アプリケーションが見つかりません」と出る場合は、以前の場所（例: MSI の `C:\Program Files\Fude`）に入れていた頃の「プログラムから開く」の設定が残っています。exe（NSIS）インストーラーで入れ直すと今の場所へ書き直されます（`src-tauri/windows/hooks.nsh`）。
+
 ### macOS
 
 GitHub Releasesから`.dmg`ファイルをダウンロードしてインストールしてください。
