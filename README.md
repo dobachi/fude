@@ -180,6 +180,7 @@ Linux / WSL では `FUDE_GUI_TCP=<addr>` を指定したときだけ開くので
 - キーモード (Normal/Vim)
 - 機能トグル (AIコパイロット)
 - 末尾を越えてスクロール (Scroll Past End): 文章の末尾の下に余白（画面の高さの半分）を足し、最後の行を画面の中ほどまで持ち上げられるようにします。余白まで送ると、末尾の位置に破線が出ます。既定で有効
+- Markdown 入力補助 (Markdown Input Assist): Enter でリストを続ける、Backspace でリスト記号やチェックボックスを消す、`- [` と打つと `- [ ] ` に補完する（直後の Backspace で `- [` に戻せるので、`- [リンク](url)` も書けます）。オフにすると Enter / Backspace は普通の改行・削除になります。既定で有効
 - OpenRouter APIキー (AIコパイロット用)
 
 設定は `~/.config/fude/config.json` に保存されます。

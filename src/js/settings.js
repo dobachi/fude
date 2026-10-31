@@ -77,6 +77,10 @@ export async function openSettings() {
           <small class="setting-hint">文章の末尾の下に余白を足し、最後の行を画面の中ほどまでスクロールできるようにします。</small>
         </div>
         <div class="setting-group">
+          <label><input type="checkbox" id="setting-markdown-assist" ${config.features?.markdown_assist !== false ? 'checked' : ''} /> Markdown Input Assist</label>
+          <small class="setting-hint">Enter でリストを続ける、Backspace で記号を消す、「- [」を「- [ ] 」に補完する、などの入力補助です。オフにすると Enter / Backspace は普通の改行・削除になります。</small>
+        </div>
+        <div class="setting-group">
           <label>OpenRouter API Key</label>
           <input type="password" id="setting-api-key" value="" placeholder="${config.has_api_key ? '••••••••  (saved)' : 'sk-or-...'}" />
           ${config.has_api_key ? `<small class="setting-hint key-storage-hint">Stored in: ${config.api_key_storage === 'keychain' ? 'OS Keychain' : 'Config file'}</small>` : ''}
@@ -354,6 +358,7 @@ async function saveSettings() {
       code_highlight: document.querySelector('#setting-code-highlight')?.checked || false,
       source_code_mode: document.querySelector('#setting-source-code-mode')?.checked || false,
       scroll_past_end: document.querySelector('#setting-scroll-past-end')?.checked ?? true,
+      markdown_assist: document.querySelector('#setting-markdown-assist')?.checked ?? true,
       plantuml_preview: document.querySelector('#setting-plantuml')?.checked || false,
       mermaid_preview: document.querySelector('#setting-mermaid')?.checked || false,
     },

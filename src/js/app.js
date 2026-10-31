@@ -22,6 +22,7 @@ import {
   toggleNumbered,
   openSearch,
   setSourceCodeMode,
+  setMarkdownAssist,
   convertSelectionToTable,
 } from './core/editor.js';
 import { setScrollPastEndEnabled } from './core/scroll-past-end.js';
@@ -727,6 +728,7 @@ async function init() {
   setSourceCodeMode(sourceCodeModeEnabled);
   // On unless switched off: configs written before the setting existed lack it.
   setScrollPastEndEnabled(config.features?.scroll_past_end !== false);
+  setMarkdownAssist(config.features?.markdown_assist !== false);
 
   // Live-apply config changes saved from the Settings panel.
   window.addEventListener('fude:config-saved', (e) => {
@@ -738,6 +740,7 @@ async function init() {
     sourceCodeModeEnabled = !!saved.features?.source_code_mode;
     setSourceCodeMode(sourceCodeModeEnabled);
     setScrollPastEndEnabled(saved.features?.scroll_past_end !== false);
+    setMarkdownAssist(saved.features?.markdown_assist !== false);
     if (saved.ui_font_size) setUiFontSize(saved.ui_font_size);
     rerenderPreviews();
   });

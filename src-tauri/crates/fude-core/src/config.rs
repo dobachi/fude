@@ -14,6 +14,9 @@ pub struct Features {
     /// Blank space below the end of a document, so its last lines can be
     /// scrolled up from the bottom edge of the window.
     pub scroll_past_end: bool,
+    /// Markdown input assist in the editor: list continuation, marker removal
+    /// on Backspace, `- [` → `- [ ] `.
+    pub markdown_assist: bool,
     pub plantuml_preview: bool,
     pub mermaid_preview: bool,
 }
@@ -113,6 +116,7 @@ impl Default for Features {
             code_highlight: false,
             source_code_mode: false,
             scroll_past_end: true,
+            markdown_assist: true,
             plantuml_preview: false,
             mermaid_preview: false,
         }
@@ -226,6 +230,7 @@ mod tests {
                 code_highlight: true,
                 source_code_mode: true,
                 scroll_past_end: false,
+                markdown_assist: false,
                 plantuml_preview: true,
                 mermaid_preview: true,
             },
@@ -253,6 +258,7 @@ mod tests {
         assert!(!restored.features.diff_highlight);
         assert!(restored.features.mermaid_preview);
         assert!(!restored.features.scroll_past_end);
+        assert!(!restored.features.markdown_assist);
         assert_eq!(restored.font_size, 18);
         assert_eq!(restored.ui_font_size, 16);
         assert!(restored.vim_mode);
@@ -283,6 +289,16 @@ mod tests {
         assert!(config.ai_model.is_none()); // default
         assert!(config.sidebar_sort.is_none()); // default
         assert!(config.sidebar_show_all_files.is_none()); // default
+    }
+
+    #[test]
+    fn markdown_assist_is_on_unless_switched_off() {
+        assert!(Config::default().features.markdown_assist);
+        let old: Config = serde_json::from_str(r#"{"features":{"diff_highlight":false}}"#).unwrap();
+        assert!(old.features.markdown_assist);
+        let off: Config =
+            serde_json::from_str(r#"{"features":{"markdown_assist":false}}"#).unwrap();
+        assert!(!off.features.markdown_assist);
     }
 
     #[test]

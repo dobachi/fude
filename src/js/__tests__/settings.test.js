@@ -191,6 +191,35 @@ describe('settings module', () => {
     expect(backend.saveConfig.mock.calls.at(-1)[0].features.scroll_past_end).toBe(false);
   });
 
+  it('Markdown Input Assist is checked unless the config switches it off', async () => {
+    const backend = await import('../backend.js');
+    await mod.openSettings();
+    expect(document.querySelector('#setting-markdown-assist').checked).toBe(true);
+    mod.closeSettings();
+
+    backend.getConfig.mockResolvedValueOnce({
+      theme: 'dark',
+      features: { markdown_assist: false },
+      font_size: 14,
+    });
+    await mod.openSettings();
+    expect(document.querySelector('#setting-markdown-assist').checked).toBe(false);
+  });
+
+  it('save persists markdown_assist in the config', async () => {
+    const backend = await import('../backend.js');
+    await mod.openSettings();
+    document.querySelector('.btn-save-settings').click();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(backend.saveConfig.mock.calls.at(-1)[0].features.markdown_assist).toBe(true);
+
+    await mod.openSettings();
+    document.querySelector('#setting-markdown-assist').checked = false;
+    document.querySelector('.btn-save-settings').click();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(backend.saveConfig.mock.calls.at(-1)[0].features.markdown_assist).toBe(false);
+  });
+
   it('save calls setApiKey when API key is provided', async () => {
     const backend = await import('../backend.js');
     await mod.openSettings();

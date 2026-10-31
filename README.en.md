@@ -153,6 +153,7 @@ Press `Ctrl+,` to open settings:
 - Key mode (Normal / Vim)
 - Feature toggles (AI Copilot, Diff Highlight)
 - Scroll Past End: blank space below the end of the document (half the pane), so the last lines can be scrolled up from the bottom edge; a dashed rule marks the real end. On by default
+- Markdown Input Assist: Enter continues a list, Backspace removes list markers and checkboxes, and typing `- [` completes to `- [ ] ` (a Backspace right after goes back to `- [`, for `- [link](url)`). When off, Enter and Backspace are a plain newline and delete. On by default
 - OpenRouter API key
 
 Settings are stored in `~/.config/fude/config.json`.

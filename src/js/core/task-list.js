@@ -112,3 +112,24 @@ export function taskMarkerBackspace(lineText, col) {
   if (!m) return null;
   return { from: m[1].length, to: col };
 }
+
+// A list prefix with nothing after it yet: what's typed before "[" when the
+// user starts a task item ("- ", "  * ", "1. ", "> - ").
+const LIST_PREFIX_ONLY = /^(?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+$/;
+
+/** What typing "[" after a bare list prefix completes to. */
+export const TASK_MARKER_COMPLETION = '[ ] ';
+
+/**
+ * Typing "[" right after a bare list prefix starts a task item: "- [" becomes
+ * "- [ ] ", the caret after it. Only at the end of the line, so editing an
+ * existing item ("- |foo") is left alone.
+ *
+ * @param {string} before text of the line before the caret
+ * @param {string} after text of the line after the caret
+ * @returns {string | null} the text to insert instead of "[", or null
+ */
+export function taskMarkerCompletion(before, after) {
+  if (after.trim() !== '') return null;
+  return LIST_PREFIX_ONLY.test(before) ? TASK_MARKER_COMPLETION : null;
+}

@@ -19,7 +19,7 @@ import {
 // Marks transactions that replace document content from disk (file reload).
 // Listeners use this to skip dirty-marking and autosave for these updates.
 export const reloadAnnotation = Annotation.define();
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+import { markdown, markdownLanguage, markdownKeymap } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import {
   defaultKeymap,
@@ -42,6 +42,7 @@ import {
   defaultHighlightStyle,
   bracketMatching,
   HighlightStyle,
+  syntaxTree,
 } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -55,7 +56,7 @@ import {
 } from './table.js';
 import { shouldOpenAsCode, languageDescForPath } from './file-lang.js';
 import { scrollPastEnd } from './editor-past-end.js';
-import { taskMarkerBackspace } from './task-list.js';
+import { taskMarkerBackspace, taskMarkerCompletion, TASK_MARKER_COMPLETION } from './task-list.js';
 
 let currentFontSize = 14;
 
@@ -65,6 +66,49 @@ let sourceCodeModeEnabled = false;
 /** Toggle source code mode (set from config). Affects editors created after. */
 export function setSourceCodeMode(enabled) {
   sourceCodeModeEnabled = !!enabled;
+}
+
+// Markdown input assist: list continuation on Enter, marker removal on
+// Backspace, "- [" → "- [ ] ". Read when a key is handled, so switching it in
+// the settings applies to open editors at once. Explicit commands (Ctrl+B,
+// Ctrl+Shift+8, table Tab/Enter) are not assists and stay on.
+let markdownAssistEnabled = true;
+
+/** Switch the Markdown input assist on or off (set from config). */
+export function setMarkdownAssist(enabled) {
+  markdownAssistEnabled = !!enabled;
+}
+
+export function isMarkdownAssistEnabled() {
+  return markdownAssistEnabled;
+}
+
+/**
+ * Whether `pos` is in Markdown prose: Markdown is the language there and it is
+ * not inside a code block (a fence without a language is still "Markdown").
+ */
+function inMarkdownProse(state, pos) {
+  if (!markdownLanguage.isActiveAt(state, pos)) return false;
+  for (let n = syntaxTree(state).resolveInner(pos, -1); n; n = n.parent) {
+    if (n.name === 'FencedCode' || n.name === 'CodeBlock') return false;
+  }
+  return true;
+}
+
+/** A key binding that runs only while the input assist is on. */
+function assistBinding(binding) {
+  return { ...binding, run: (view) => markdownAssistEnabled && binding.run(view) };
+}
+
+/**
+ * Markdown support with its keymap (Enter continues markup, Backspace removes
+ * it) behind the assist switch. markdown() would add the keymap unguarded.
+ */
+function markdownSupport() {
+  return [
+    markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: false }),
+    Prec.high(keymap.of(markdownKeymap.map(assistBinding))),
+  ];
 }
 
 // Match http(s) URLs and mailto: addresses inside editor text. The terminators
@@ -212,6 +256,7 @@ function autoListExtension() {
     {
       key: 'Enter',
       run(view) {
+        if (!markdownAssistEnabled) return false;
         const { state } = view;
         const { from } = state.selection.main;
         const line = state.doc.lineAt(from);
@@ -359,6 +404,7 @@ function taskBackspaceKeymap() {
       {
         key: 'Backspace',
         run(view) {
+          if (!markdownAssistEnabled) return false;
           const { state } = view;
           const sel = state.selection;
           if (sel.ranges.length !== 1 || !sel.main.empty) return false;
@@ -379,6 +425,69 @@ function taskBackspaceKeymap() {
       },
     ]),
   );
+}
+
+// Where the last "- [" → "- [ ] " completion ended, while nothing has happened
+// since; a Backspace there takes the completion back to the typed "[".
+const setTaskCompletion = StateEffect.define();
+const taskCompletionField = StateField.define({
+  create: () => null,
+  update(value, tr) {
+    for (const e of tr.effects) if (e.is(setTaskCompletion)) return e.value;
+    return tr.docChanged || tr.selection ? null : value;
+  },
+});
+
+/**
+ * "- [" completes to "- [ ] " (a task item); Backspace right after takes it
+ * back to "- [", for an item that starts with a link ("- [label](url)").
+ */
+function taskCompletionExtension() {
+  return [
+    taskCompletionField,
+    EditorView.inputHandler.of((view, from, to, text) => {
+      if (!markdownAssistEnabled || text !== '[' || from !== to) return false;
+      const { state } = view;
+      if (state.selection.ranges.length !== 1) return false;
+      if (!inMarkdownProse(state, from)) return false;
+      const line = state.doc.lineAt(from);
+      const insert = taskMarkerCompletion(
+        line.text.slice(0, from - line.from),
+        line.text.slice(from - line.from),
+      );
+      if (!insert) return false;
+      const end = from + insert.length;
+      view.dispatch({
+        changes: { from, insert },
+        selection: { anchor: end },
+        effects: setTaskCompletion.of(end),
+        userEvent: 'input.type',
+      });
+      return true;
+    }),
+    Prec.high(
+      keymap.of([
+        {
+          key: 'Backspace',
+          run(view) {
+            const { state } = view;
+            const end = state.field(taskCompletionField, false);
+            if (end == null || !state.selection.main.empty || state.selection.main.head !== end) {
+              return false;
+            }
+            const from = end - TASK_MARKER_COMPLETION.length;
+            if (state.sliceDoc(from, end) !== TASK_MARKER_COMPLETION) return false;
+            view.dispatch({
+              changes: { from, to: end, insert: '[' },
+              selection: { anchor: from + 1 },
+              userEvent: 'delete.backward',
+            });
+            return true;
+          },
+        },
+      ]),
+    ),
+  ];
 }
 
 function listKeymap() {
@@ -622,7 +731,7 @@ export function createEditor(
   // Markdown is the default language. In source code mode, a non-Markdown file
   // starts as plain text (no Markdown mis-parsing flash) and swaps to its real
   // language once the parser is lazily loaded below.
-  const markdownLang = markdown({ base: markdownLanguage, codeLanguages: languages });
+  const markdownLang = markdownSupport();
   const asCode = shouldOpenAsCode(opts.filePath, sourceCodeModeEnabled);
   const initialLang = asCode ? [] : markdownLang;
 
@@ -643,6 +752,7 @@ export function createEditor(
     flashLineField,
     // Before the language: the Markdown keymap's Backspace has the same
     // precedence, and the earlier extension wins.
+    taskCompletionExtension(),
     taskBackspaceKeymap(),
     languageCompartment.of(initialLang),
     keymap.of([
@@ -878,8 +988,9 @@ export function createInlineEditor(parent, content, handlers, cursor = 0, opts =
         drawSelection(),
         history(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        taskCompletionExtension(),
         taskBackspaceKeymap(),
-        markdown({ base: markdownLanguage, codeLanguages: languages }),
+        markdownSupport(),
         // indentWithTab as in the main editor: unbound, Tab is the browser's
         // focus navigation, which leaves the editor and so finishes the edit.
         keymap.of([
