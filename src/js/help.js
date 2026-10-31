@@ -32,12 +32,17 @@ const sections = [
   {
     title: 'ファイル・タブ',
     items: [
-      ['Ctrl+Shift+T / Ctrl+Shift+N', '新規タブ'],
+      ['Ctrl+Shift+T', '新規タブ'],
+      ['Ctrl+Shift+N', '新しいウィンドウ'],
       ['Ctrl+Tab / Ctrl+PageDown', '次のタブ'],
       ['Ctrl+Shift+Tab / Ctrl+PageUp', '前のタブ（Linuxでは Ctrl+PageUp 推奨）'],
       ['Ctrl+S', '保存（Emacsモードは C-x C-s）'],
       ['Ctrl+Shift+S', '名前を付けて保存'],
       ['Ctrl+Shift+O', 'フォルダを開く'],
+      [
+        'Ctrl+Shift+P',
+        'パスを開く（ssh://ホスト/パス・ホスト:/パス も可。クリップボードの 1 行指定は最初から入っている）',
+      ],
       ['Ctrl+Shift+X', 'リモート接続（ssh 先・WSL のフォルダを開く／接続の一覧と切断）'],
       ['Ctrl+Shift+U', 'ファイラでこのファイルの場所を表示（ツリー外ならそのフォルダを開く）'],
       ['Ctrl+Shift+R', 'ファイルをディスクから再読込（外部変更を検知すると自動）'],

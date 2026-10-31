@@ -37,6 +37,7 @@ import { isImagePath, mimeToExt, insertImageMarkdown } from './core/image-insert
 import { attachPanZoom } from './core/svg-panzoom.js';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
+import { parseRemoteSpec, prefillFromClipboard } from './core/remote-spec.js';
 import { outdatedCliMessage } from './core/setup-hosts.js';
 import {
   isRemotePath,
@@ -2044,8 +2045,26 @@ function handleRevealActiveFileDir() {
 
 // ── Go to path (open a file or folder by typing its path) ──
 async function handleGoToPath() {
-  const raw = await promptDialog('開くパスを入力（ファイル / フォルダ）', vaultPath || '', '開く');
+  // A one-line remote place on the clipboard (an AI's output, say) is put in
+  // the field so that Enter opens it; otherwise start from the open folder.
+  const clip = await Promise.race([
+    Promise.resolve()
+      .then(() => navigator.clipboard.readText())
+      .catch(() => ''),
+    new Promise((resolve) => setTimeout(() => resolve(''), 300)),
+  ]);
+  const raw = await promptDialog(
+    '開くパスを入力（ファイル / フォルダ。ssh://ホスト/パス・ホスト:/パス も可）',
+    prefillFromClipboard(clip) || vaultPath || '',
+    '開く',
+  );
   if (raw == null) return; // cancelled
+  const spec = parseRemoteSpec(raw);
+  if (spec) {
+    if (spec.error) showToast(spec.error, { type: 'error', duration: 6000 });
+    else await openRemoteSpec(spec);
+    return;
+  }
   let home;
   try {
     home = await backend.getOpenDir();
@@ -2059,6 +2078,37 @@ async function handleGoToPath() {
     scheduleSessionSave();
   } else {
     showToast(`開けませんでした: ${path}`, { type: 'error', duration: 6000 });
+  }
+}
+
+/**
+ * Open a remote place read by parseRemoteSpec (a file or a folder) the way
+ * the remote view does: Fude starts the host's fude-cli over ssh itself.
+ */
+async function openRemoteSpec({ host, path }) {
+  const where = `${host}:${path || '~'}`;
+  if (!isLocalTauri()) {
+    showToast('リモートを開くのはデスクトップ版だけです', { type: 'error' });
+    return;
+  }
+  showToast(`${where} を開いています…`);
+  try {
+    const res = await backend.remoteOpen(host, path || '~');
+    if (!res?.ok) {
+      const why = String(res?.log || '')
+        .trim()
+        .split('\n')
+        .pop();
+      showToast(`開けませんでした: ${where}${why ? `（${why}）` : ''}`, {
+        type: 'error',
+        duration: 8000,
+      });
+    }
+  } catch (e) {
+    showToast(`開けませんでした: ${where}（${e?.message || e}）`, {
+      type: 'error',
+      duration: 8000,
+    });
   }
 }
 
