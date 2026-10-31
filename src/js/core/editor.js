@@ -55,6 +55,7 @@ import {
 } from './table.js';
 import { shouldOpenAsCode, languageDescForPath } from './file-lang.js';
 import { scrollPastEnd } from './editor-past-end.js';
+import { taskMarkerBackspace } from './task-list.js';
 
 let currentFontSize = 14;
 
@@ -347,6 +348,39 @@ export function computeNumberedToggle(state) {
   return { changes };
 }
 
+/**
+ * Backspace just after a task marker ("- [ ] |") removes only the checkbox.
+ * Must run before the Markdown keymap's Backspace (deleteMarkupBackward),
+ * which would remove the bullet too; elsewhere it falls through.
+ */
+function taskBackspaceKeymap() {
+  return Prec.high(
+    keymap.of([
+      {
+        key: 'Backspace',
+        run(view) {
+          const { state } = view;
+          const sel = state.selection;
+          if (sel.ranges.length !== 1 || !sel.main.empty) return false;
+          const pos = sel.main.head;
+          // Only in Markdown (not in source-code mode, nor inside a fenced block)
+          if (!markdownLanguage.isActiveAt(state, pos)) return false;
+          const line = state.doc.lineAt(pos);
+          const span = taskMarkerBackspace(line.text, pos - line.from);
+          if (!span) return false;
+          const from = line.from + span.from;
+          view.dispatch({
+            changes: { from, to: line.from + span.to },
+            selection: { anchor: from },
+            userEvent: 'delete.backward',
+          });
+          return true;
+        },
+      },
+    ]),
+  );
+}
+
 function listKeymap() {
   return keymap.of([
     {
@@ -607,6 +641,9 @@ export function createEditor(
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     highlightSelectionMatches(),
     flashLineField,
+    // Before the language: the Markdown keymap's Backspace has the same
+    // precedence, and the earlier extension wins.
+    taskBackspaceKeymap(),
     languageCompartment.of(initialLang),
     keymap.of([
       {
@@ -841,6 +878,7 @@ export function createInlineEditor(parent, content, handlers, cursor = 0, opts =
         drawSelection(),
         history(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        taskBackspaceKeymap(),
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         // indentWithTab as in the main editor: unbound, Tab is the browser's
         // focus navigation, which leaves the editor and so finishes the edit.

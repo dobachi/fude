@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import markdownIt from 'markdown-it';
-import { taskListPlugin, taskToggleChange, isTaskCheckbox } from '../core/task-list.js';
+import {
+  taskListPlugin,
+  taskToggleChange,
+  isTaskCheckbox,
+  taskMarkerBackspace,
+} from '../core/task-list.js';
 import { renderMarkdown, initPreview } from '../core/preview.js';
 
 function render(src) {
@@ -229,5 +234,42 @@ describe('preview checkbox click', () => {
       .querySelector('input.task-list-item-checkbox')
       .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     expect(onBlockEdit).not.toHaveBeenCalled();
+  });
+});
+
+// Regression: Backspace after "- [ ] " removed the bullet together with the
+// checkbox (CodeMirror's Markdown Backspace treats "- [ ] " as one marker).
+describe('taskMarkerBackspace', () => {
+  const at = (line) => {
+    const col = line.indexOf('|');
+    return taskMarkerBackspace(line.replace('|', ''), col);
+  };
+
+  it('removes only the checkbox, keeping the bullet', () => {
+    expect(at('- [ ] |todo')).toEqual({ from: 2, to: 6 });
+    expect(at('- [x] |done')).toEqual({ from: 2, to: 6 });
+    expect(at('- [X] |')).toEqual({ from: 2, to: 6 });
+  });
+
+  it('works for *, +, ordered items, indentation and blockquotes', () => {
+    expect(at('* [ ] |a')).toEqual({ from: 2, to: 6 });
+    expect(at('+ [ ] |a')).toEqual({ from: 2, to: 6 });
+    expect(at('1. [ ] |a')).toEqual({ from: 3, to: 7 });
+    expect(at('12) [ ] |a')).toEqual({ from: 4, to: 8 });
+    expect(at('    - [ ] |a')).toEqual({ from: 6, to: 10 });
+    expect(at('> - [ ] |a')).toEqual({ from: 4, to: 8 });
+  });
+
+  it('takes the extra spaces after the marker with it', () => {
+    expect(at('- [ ]   |a')).toEqual({ from: 2, to: 8 });
+  });
+
+  it('leaves other carets to the normal Backspace', () => {
+    expect(at('- [ ] t|odo')).toBeNull(); // inside the text
+    expect(at('- [ ]|todo')).toBeNull(); // no space: not a task marker
+    expect(at('- [ |] x')).toBeNull(); // inside the marker
+    expect(at('- |todo')).toBeNull(); // plain bullet
+    expect(at('[ ] |todo')).toBeNull(); // no list item
+    expect(at('- [y] |todo')).toBeNull(); // not a task state
   });
 });

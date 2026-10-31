@@ -93,3 +93,22 @@ export function taskToggleChange(lineText, lineFrom, wasChecked) {
   const from = lineFrom + m[1].length;
   return { from, to: from + 1, insert: checked ? ' ' : 'x' };
 }
+
+// The text before the caret when it sits right after a task marker: the list
+// prefix (group 1), then "[ ]"/"[x]" and the space after it (group 2).
+const MARKER_BEFORE_CARET = /^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)(\[[ xX]\][ \t]+)$/;
+
+/**
+ * Backspace right after a task marker removes just the checkbox, keeping the
+ * list item: "- [ ] |todo" → "- |todo". CodeMirror's Markdown Backspace treats
+ * "- [ ] " as one marker and would drop the bullet along with it.
+ *
+ * @param {string} lineText text of the caret's line
+ * @param {number} col caret offset within the line
+ * @returns {{from: number, to: number} | null} the span to delete (line offsets)
+ */
+export function taskMarkerBackspace(lineText, col) {
+  const m = MARKER_BEFORE_CARET.exec(lineText.slice(0, col));
+  if (!m) return null;
+  return { from: m[1].length, to: col };
+}
