@@ -602,6 +602,20 @@ fn get_open_dir() -> Result<String, String> {
 
 /// Returns (path, remote, new_window). `new_window` is true when `--new-window`
 /// / `-n` is present, requesting the target open in a freshly spawned window.
+/// Whether a second launch (while Fude is running) opens a new window rather
+/// than handing its file to the main window. A bare launch (Start menu, dock,
+/// plain `fude`) means "give me another window"; a launch naming a file or a
+/// remote opens it in the main window's tabs, unless `--new-window` asks
+/// otherwise or the main window is gone.
+fn second_launch_opens_new_window(
+    has_path: bool,
+    has_remote: bool,
+    new_window: bool,
+    has_main: bool,
+) -> bool {
+    new_window || !has_main || (!has_path && !has_remote)
+}
+
 fn parse_open_args(args: &[String]) -> (Option<String>, Option<String>, bool) {
     let mut path: Option<String> = None;
     let mut remote: Option<String> = None;
@@ -2094,9 +2108,12 @@ pub fn run() {
             let (path, remote, new_window) = parse_open_args(&argv);
             let base = Some(PathBuf::from(&cwd));
 
-            // `--new-window` (or no usable main window) spawns a fresh window;
-            // otherwise reuse and focus the existing main window.
-            if new_window {
+            if second_launch_opens_new_window(
+                path.is_some(),
+                remote.is_some(),
+                new_window,
+                app.get_webview_window("main").is_some(),
+            ) {
                 let _ = spawn_window(app, path, remote, base);
                 return;
             }
@@ -2656,6 +2673,35 @@ mod tests {
 
     fn args(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn second_launch_without_file_opens_a_new_window() {
+        // Start menu / dock / bare `fude`: another window
+        let (p, r, n) = parse_open_args(&args(&["fude.exe"]));
+        assert!(second_launch_opens_new_window(
+            p.is_some(),
+            r.is_some(),
+            n,
+            true
+        ));
+        // A file goes to the main window's tabs
+        let (p, r, n) = parse_open_args(&args(&["fude.exe", "C:\\notes\\a.md"]));
+        assert!(!second_launch_opens_new_window(
+            p.is_some(),
+            r.is_some(),
+            n,
+            true
+        ));
+        // ... unless --new-window, or the main window was closed
+        let (p, r, n) = parse_open_args(&args(&["fude", "--new-window", "a.md"]));
+        assert!(second_launch_opens_new_window(
+            p.is_some(),
+            r.is_some(),
+            n,
+            true
+        ));
+        assert!(second_launch_opens_new_window(true, false, false, false));
     }
 
     #[test]
