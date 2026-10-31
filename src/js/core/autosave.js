@@ -17,7 +17,14 @@ export function onContentChange(path, content) {
   }, AUTOSAVE_DEBOUNCE);
 }
 
-export async function triggerSave(path, content) {
+/**
+ * Write `content` to `path`. Resolves true on success. A failed write used to
+ * be logged only, so the save looked done; `onError` gets a message to show.
+ * @param {string} path
+ * @param {string} content
+ * @param {{onError?: (message: string) => void}} [opts]
+ */
+export async function triggerSave(path, content, opts = {}) {
   if (autosaveTimeout) clearTimeout(autosaveTimeout);
   if (!path) return false;
 
@@ -31,6 +38,7 @@ export async function triggerSave(path, content) {
     return true;
   } catch (e) {
     console.error('Save failed:', e);
+    if (opts.onError) opts.onError(`保存できませんでした: ${e?.message || e}`);
     return false;
   }
 }

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { parseRemoteSpec, formatRemoteSpec, prefillFromClipboard } from '../core/remote-spec.js';
+import {
+  parseRemoteSpec,
+  formatRemoteSpec,
+  prefillFromClipboard,
+  remoteSpecFromLaunch,
+} from '../core/remote-spec.js';
 
 // The same table as Tana's remotespec.test.js (both apps accept the same forms)
 const OK = [
@@ -103,5 +108,36 @@ describe('prefillFromClipboard', () => {
     expect(prefillFromClipboard('ssh://k16:2222/x')).toBeNull();
     expect(prefillFromClipboard('')).toBeNull();
     expect(prefillFromClipboard(undefined)).toBeNull();
+  });
+});
+
+// Tana hands a remote file to Fude as `fude ssh://host/path`; the launch path
+// must open over ssh (saving writes back) instead of failing as a local path.
+describe('remoteSpecFromLaunch', () => {
+  it('reads the URL forms', () => {
+    expect(remoteSpecFromLaunch('ssh://k16/home/u/a.md')).toEqual({
+      host: 'k16',
+      path: '/home/u/a.md',
+    });
+    expect(remoteSpecFromLaunch('sftp://u@k16/tmp/x y.md')).toEqual({
+      host: 'u@k16',
+      path: '/tmp/x y.md',
+    });
+  });
+
+  it('leaves ordinary paths (and the short host:/path form) to the local open', () => {
+    expect(remoteSpecFromLaunch('/home/u/a.md')).toBeNull();
+    expect(remoteSpecFromLaunch('C:\\Users\\u\\a.md')).toBeNull();
+    expect(remoteSpecFromLaunch('C:/Users/u/a.md')).toBeNull();
+    expect(remoteSpecFromLaunch('k16:/etc/hosts')).toBeNull();
+    // Fude's own name for an open remote tab: it reaches openPath too, and
+    // treating it as a launch spec re-opened the file over and over
+    expect(remoteSpecFromLaunch('remote://k16/etc/hostname')).toBeNull();
+    expect(remoteSpecFromLaunch('notes.md')).toBeNull();
+    expect(remoteSpecFromLaunch(null)).toBeNull();
+  });
+
+  it('passes on the error for a port it cannot use', () => {
+    expect(remoteSpecFromLaunch('ssh://k16:2222/a.md').error).toMatch('ポート');
   });
 });

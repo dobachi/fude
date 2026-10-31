@@ -100,3 +100,17 @@ export function prefillFromClipboard(text) {
   const r = parseRemoteSpec(text);
   return r && !r.error ? formatRemoteSpec(r.host, r.path) : null;
 }
+
+/**
+ * A remote place handed over at launch (`fude ssh://host/path`, as Tana does
+ * for a remote file), or null for an ordinary path. Only `ssh://` / `sftp://`
+ * count here: the short `host:/path` form could be mistaken for a local name,
+ * and `remote://host/path` is Fude's own name for an open remote tab, which
+ * also comes through openPath (catching it here re-opened it in a loop).
+ * @param {string} path
+ * @returns {{host: string, path: string} | {error: string} | null}
+ */
+export function remoteSpecFromLaunch(path) {
+  if (typeof path !== 'string' || !/^\s*(ssh|sftp):\/\//i.test(path)) return null;
+  return parseRemoteSpec(path);
+}

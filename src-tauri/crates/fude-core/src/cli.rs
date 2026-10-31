@@ -7,6 +7,11 @@ use std::path::{Path, PathBuf};
 /// result is canonicalized when the target exists; otherwise the lexical join is
 /// returned. On Windows the lexical join is used to avoid `\\?\` verbatim paths.
 pub fn resolve_cli_path(path: &str, base: Option<PathBuf>) -> String {
+    // A remote place (`ssh://host/path`, as Tana hands over) is not a local
+    // path: joining it to the working directory would mangle it.
+    if is_remote_uri(path) {
+        return path.to_string();
+    }
     let p = Path::new(path);
     let joined = if p.is_absolute() {
         p.to_path_buf()
@@ -26,11 +31,43 @@ pub fn resolve_cli_path(path: &str, base: Option<PathBuf>) -> String {
     joined.to_string_lossy().to_string()
 }
 
+/// True for a remote place given as a URL: `ssh://`, `sftp://` or `remote://`
+/// (any case). The front end opens these over ssh instead of from disk.
+pub fn is_remote_uri(path: &str) -> bool {
+    let lower = path.trim_start().to_ascii_lowercase();
+    ["ssh://", "sftp://", "remote://"]
+        .iter()
+        .any(|scheme| lower.starts_with(scheme))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn resolve_cli_path_keeps_remote_uris_unchanged() {
+        let base = Some(PathBuf::from("/work"));
+        for uri in [
+            "ssh://k16/etc/hosts",
+            "SFTP://h/x.md",
+            "remote://h/~/a b.md",
+        ] {
+            assert_eq!(resolve_cli_path(uri, base.clone()), uri);
+        }
+    }
+
+    #[test]
+    fn is_remote_uri_only_matches_url_schemes() {
+        assert!(is_remote_uri("ssh://h/p"));
+        assert!(is_remote_uri("sftp://h/p"));
+        assert!(is_remote_uri("Remote://h/p"));
+        assert!(!is_remote_uri("/tmp/ssh://x"));
+        assert!(!is_remote_uri("k16:/etc/hosts"));
+        assert!(!is_remote_uri("C:/Users/a.md"));
+        assert!(!is_remote_uri("notes.md"));
+    }
 
     #[cfg(not(windows))]
     #[test]

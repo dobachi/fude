@@ -79,6 +79,22 @@ describe('autosave module', () => {
     expect(result).toBe(false);
   });
 
+  // Regression: a failed write was only logged, so the save looked done.
+  it('triggerSave reports a failed write through onError', async () => {
+    backend.writeFile.mockRejectedValueOnce(new Error('Permission denied'));
+    const onError = vi.fn();
+    const result = await mod.triggerSave('/test.md', 'content', { onError });
+    expect(result).toBe(false);
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('Permission denied'));
+    expect(onError.mock.calls[0][0]).toMatch('保存できませんでした');
+  });
+
+  it('triggerSave does not call onError on success', async () => {
+    const onError = vi.fn();
+    await mod.triggerSave('/test.md', 'content', { onError });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it('triggerSave returns false on write failure', async () => {
     backend.writeFile.mockRejectedValueOnce(new Error('write error'));
 

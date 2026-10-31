@@ -37,7 +37,7 @@ import { isImagePath, mimeToExt, insertImageMarkdown } from './core/image-insert
 import { attachPanZoom } from './core/svg-panzoom.js';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { showToast } from './core/toast.js';
-import { parseRemoteSpec, prefillFromClipboard } from './core/remote-spec.js';
+import { parseRemoteSpec, prefillFromClipboard, remoteSpecFromLaunch } from './core/remote-spec.js';
 import { outdatedCliMessage } from './core/setup-hosts.js';
 import {
   isRemotePath,
@@ -925,6 +925,15 @@ async function init() {
   // Additional windows are handed a file to open via take_open_request; the
   // main window relies on the cli-args event instead (so this stays null there).
   let pendingOpen = null;
+  // `fude ssh://host/path` at a cold start: the host's agent asks for the tab
+  // through the `cli-args` event, which is only listened to further down, so
+  // opening it right away lost the tab. It is opened once the listeners exist.
+  let deferredRemoteLaunch = null;
+  const deferRemoteLaunch = (path) => {
+    if (!remoteSpecFromLaunch(path)) return false;
+    deferredRemoteLaunch = path;
+    return true;
+  };
   if (isLocalTauri()) {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -1036,12 +1045,12 @@ async function init() {
 
     // A CLI launch path arrives alongside a restored session: open it as an
     // additional tab on top, matching the pre-queue (`cli-args` event) behavior.
-    if (pendingOpen && pendingOpen.path) {
+    if (pendingOpen && pendingOpen.path && !deferRemoteLaunch(pendingOpen.path)) {
       await openPath(pendingOpen.path);
     }
   } else if (pendingOpen && pendingOpen.path) {
     // A new window opened with a specific file (e.g. "open in new window").
-    await openPath(pendingOpen.path);
+    if (!deferRemoteLaunch(pendingOpen.path)) await openPath(pendingOpen.path);
   } else {
     // The folder fude-browser was launched with (--open-dir, else --root).
     if (!isLocalTauri()) {
@@ -1081,6 +1090,7 @@ async function init() {
       // to the path so saving creates it, instead of leaving the caller hung.
       if (!ok && event.payload?.wait) openTab(path, '');
     });
+    if (deferredRemoteLaunch) openPath(deferredRemoteLaunch);
     // A remote fude-cli agent went away: its tabs stay open (edits are kept in
     // the autosave temp file) but cannot be saved until it reconnects.
     listen('remote-disconnected', (event) => {
@@ -1877,6 +1887,17 @@ function handleTabContextMenu(tabId, x, y) {
  * care about the outcome can ignore the return value.
  */
 async function openPath(path) {
+  // `fude ssh://host/path` (Tana hands a remote file over this way): open it
+  // over ssh, so saving writes back to the host instead of a local copy.
+  const spec = remoteSpecFromLaunch(path);
+  if (spec) {
+    if (spec.error) {
+      showToast(spec.error, { type: 'error' });
+      return false;
+    }
+    await openRemoteSpec(spec);
+    return true;
+  }
   try {
     const tree = await backend.readDirTree(path, getShowAllFiles());
     setVaultPath(path);
@@ -2902,7 +2923,7 @@ async function performSave({ forceDialog }) {
       });
     } else {
       openSavePicker(tab.path || vaultPath || '', async (filePath) => {
-        const ok = await triggerSave(filePath, content);
+        const ok = await triggerSave(filePath, content, { onError: showSaveError });
         if (ok) {
           updateTabPath(tab.id, filePath);
           markClean(tab.id);
@@ -2913,7 +2934,7 @@ async function performSave({ forceDialog }) {
       return;
     }
     if (filePath) {
-      const ok = await triggerSave(filePath, content);
+      const ok = await triggerSave(filePath, content, { onError: showSaveError });
       if (ok) {
         updateTabPath(tab.id, filePath);
         markClean(tab.id);
@@ -3041,9 +3062,13 @@ async function saveWithConflictCheck(tab, content) {
   await finalizeSave(tab, content);
 }
 
+function showSaveError(message) {
+  showToast(message, { type: 'error', duration: 8000 });
+}
+
 /** Write content to the tab's path and update clean/baseline state. */
 async function finalizeSave(tab, content) {
-  const ok = await triggerSave(tab.path, content);
+  const ok = await triggerSave(tab.path, content, { onError: showSaveError });
   if (ok) {
     markClean(tab.id);
     await markTabSynced(tab.id, content);

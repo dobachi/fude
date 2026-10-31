@@ -653,7 +653,8 @@ Usage: fude [OPTIONS] [PATH]
        fude browser [BROWSER OPTIONS]
 
 Arguments:
-  [PATH]  Path to a file or directory to open
+  [PATH]  Path to a file or directory to open, or a remote place over ssh
+          (ssh://HOST/PATH; saving writes back to the host)
 
 Options:
   -r, --remote <URL>  Connect to a remote Fude server URL (e.g., http://localhost:3000)
