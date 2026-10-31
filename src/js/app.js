@@ -91,6 +91,7 @@ import {
   startInlineEdit,
   commitInlineEdit,
   cancelInlineEdit,
+  focusInlineEdit,
   guessCursor,
   previewTableAt,
   tableCellElement,
@@ -1175,8 +1176,11 @@ async function init() {
   document.addEventListener('drop', (e) => e.preventDefault());
 
   // Auto-focus the active pane when the window gains focus (the preview
-  // container in preview-only mode, the editor otherwise).
+  // container in preview-only mode, the editor otherwise). An edit open in the
+  // preview keeps the focus: moving it elsewhere would finish the edit, and
+  // coming back by clicking into that edit is how the user resumes it.
   window.addEventListener('focus', () => {
+    if (focusInlineEdit()) return;
     focusActivePaneForMode();
   });
 

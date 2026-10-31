@@ -9,6 +9,7 @@ import {
   commitInlineEdit,
   cancelInlineEdit,
   isInlineEditing,
+  focusInlineEdit,
   INLINE_EDITOR_CLASS,
 } from '../core/preview-edit.js';
 import { renderMarkdown, initPreview, previewBlockRange } from '../core/preview.js';
@@ -453,5 +454,56 @@ describe('createInlineEditor', () => {
       expect(ev.defaultPrevented).toBe(true);
       view.destroy();
     });
+  });
+});
+
+// Regression: after using another app, clicking back into the open edit fired
+// the window's focus event first, which moved focus to the preview container
+// (or the main editor) and finished the edit before the click landed.
+describe('focusInlineEdit (window regains focus)', () => {
+  let container;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    container.tabIndex = 0;
+    container.innerHTML = '<p data-source-line="1">body</p>';
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    cancelInlineEdit();
+    container.remove();
+  });
+
+  function open() {
+    const onCommit = vi.fn();
+    startInlineEdit({
+      container,
+      blockEl: container.querySelector('p'),
+      text: 'body',
+      mountEditor: fakeMount,
+      onCommit,
+    });
+    return { onCommit };
+  }
+
+  it('returns false and does nothing when no edit is open', () => {
+    expect(focusInlineEdit()).toBe(false);
+  });
+
+  it('puts focus back in the open edit and keeps it open', () => {
+    const { onCommit } = open();
+    fakeMount.last.ta.blur();
+    expect(focusInlineEdit()).toBe(true);
+    expect(document.activeElement).toBe(fakeMount.last.ta);
+    expect(isInlineEditing(container)).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('the old path (focusing the container) is what finished the edit', () => {
+    const { onCommit } = open();
+    container.focus();
+    expect(isInlineEditing(container)).toBe(false);
+    expect(onCommit).toHaveBeenCalledTimes(1);
   });
 });

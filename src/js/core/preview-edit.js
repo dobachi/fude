@@ -242,6 +242,19 @@ export function cancelInlineEdit() {
   if (active) finish(active, 'cancel', false);
 }
 
+/**
+ * Put focus back in the open edit, if there is one. Returns whether it did.
+ *
+ * Used when the window regains focus: clicking back into the editor after
+ * using another app first fires the window's focus event, and moving focus
+ * anywhere else then would finish the edit before the click lands.
+ */
+export function focusInlineEdit() {
+  if (!active || !active.view || typeof active.view.focus !== 'function') return false;
+  active.view.focus();
+  return true;
+}
+
 /** True while an inline edit is open (optionally: in this container). */
 export function isInlineEditing(container) {
   return !!active && (!container || active.container === container);
