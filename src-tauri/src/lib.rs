@@ -894,6 +894,7 @@ fn direct_target(host: Option<&str>) -> Result<remote_direct::Target, String> {
 
 fn open_direct(
     app: tauri::AppHandle,
+    window: &str,
     registry: &Arc<gui_server::WaitRegistry>,
     sessions: &Arc<gui_server::RemoteSessions>,
     target: remote_direct::Target,
@@ -908,7 +909,8 @@ fn open_direct(
         &path,
         None,
     )?;
-    let sink: Arc<dyn gui_server::OpenSink> = Arc::new(WindowSink(app));
+    // Open it in the window that asked, not in every window (or always main).
+    let sink: Arc<dyn gui_server::OpenSink> = Arc::new(WindowSink::new(app, window));
     let outcome = remote_direct::open(
         &program,
         &args,
@@ -938,25 +940,35 @@ fn open_direct(
 #[tauri::command(async)]
 fn remote_open(
     app: tauri::AppHandle,
+    window: tauri::Window,
     registry: State<'_, Arc<gui_server::WaitRegistry>>,
     sessions: State<'_, Arc<gui_server::RemoteSessions>>,
     host: String,
     path: String,
 ) -> Result<CliOutcome, String> {
     let target = direct_target(Some(&host))?;
-    open_direct(app, registry.inner(), sessions.inner(), target, &path)
+    open_direct(
+        app,
+        window.label(),
+        registry.inner(),
+        sessions.inner(),
+        target,
+        &path,
+    )
 }
 
 /// Open `path` inside the WSL distro of WSL integration in this window.
 #[tauri::command(async)]
 fn wsl_open(
     app: tauri::AppHandle,
+    window: tauri::Window,
     registry: State<'_, Arc<gui_server::WaitRegistry>>,
     sessions: State<'_, Arc<gui_server::RemoteSessions>>,
     path: String,
 ) -> Result<CliOutcome, String> {
     open_direct(
         app,
+        window.label(),
         registry.inner(),
         sessions.inner(),
         remote_direct::Target::Wsl,
@@ -1377,32 +1389,58 @@ fn take_open_request(
 
 // ─── `fude --wait` server ──────────────────────────────────
 
-/// Opens paths requested over the IPC socket in the main window. The
-/// frontend handles `cli-args` exactly as it does for single-instance
-/// launches; `wait: true` additionally asks it to report the tab's closure
-/// through `wait_tab_closed`.
-struct WindowSink(tauri::AppHandle);
+/// Opens paths in one window: the window that opened a remote place itself,
+/// or the main window for requests over the IPC socket (`fude FILE` typed on
+/// a host, `fude --wait`). The frontend handles `cli-args` exactly as it does
+/// for single-instance launches; `wait: true` additionally asks it to report
+/// the tab's closure through `wait_tab_closed`.
+///
+/// `cli-args` is sent to that window only (`emit_to`); a plain `emit` reaches
+/// every window in Tauri v2, which made every window open the place. The
+/// other events stay app-wide: each window acts on them only for its own tabs
+/// and hosts, and windows other than the opener may show the same host.
+struct WindowSink {
+    app: tauri::AppHandle,
+    label: String,
+}
+
+/// The window a sink for `requested` opens paths in: that window while it
+/// is open, else the main window, else none.
+fn sink_window_label(requested: &str, is_open: impl Fn(&str) -> bool) -> Option<String> {
+    [requested, "main"]
+        .into_iter()
+        .find(|l| is_open(l))
+        .map(str::to_string)
+}
 
 impl WindowSink {
-    /// Tell the main window `event` happened to the connection to `host`.
-    fn emit_host(&self, event: &str, host: &str) {
-        if let Some(window) = self.0.get_webview_window("main") {
-            let _ = window.emit(event, serde_json::json!({ "host": host }));
+    fn new(app: tauri::AppHandle, label: &str) -> Self {
+        WindowSink {
+            app,
+            label: label.to_string(),
         }
+    }
+
+    /// Tell the windows `event` happened to the connection to `host`.
+    fn emit_host(&self, event: &str, host: &str) {
+        let _ = self.app.emit(event, serde_json::json!({ "host": host }));
     }
 }
 
 impl gui_server::OpenSink for WindowSink {
     fn open(&self, path: &str, wait: bool) -> Result<(), String> {
+        let label = sink_window_label(&self.label, |l| self.app.get_webview_window(l).is_some())
+            .ok_or_else(|| "no window to open in".to_string())?;
         let window = self
-            .0
-            .get_webview_window("main")
-            .ok_or_else(|| "no main window".to_string())?;
+            .app
+            .get_webview_window(&label)
+            .ok_or_else(|| "no window to open in".to_string())?;
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
-        window
-            .emit(
+        self.app
+            .emit_to(
+                tauri::EventTarget::webview_window(&label),
                 "cli-args",
                 serde_json::json!({ "path": path, "wait": wait }),
             )
@@ -1412,16 +1450,16 @@ impl gui_server::OpenSink for WindowSink {
     fn file_changed(&self, path: &str) {
         // Same event the native watcher emits, so the frontend reloads a
         // remote tab exactly like a local one.
-        if let Some(window) = self.0.get_webview_window("main") {
-            let _ = window.emit("file-changed", serde_json::json!({ "path": path }));
-        }
+        let _ = self
+            .app
+            .emit("file-changed", serde_json::json!({ "path": path }));
     }
 
     fn dir_changed(&self, path: &str) {
         // Likewise for the file tree: what the vault watcher emits.
-        if let Some(window) = self.0.get_webview_window("main") {
-            let _ = window.emit("directory-changed", serde_json::json!({ "path": path }));
-        }
+        let _ = self
+            .app
+            .emit("directory-changed", serde_json::json!({ "path": path }));
     }
 
     fn disconnected(&self, host: &str) {
@@ -1445,16 +1483,14 @@ impl gui_server::OpenSink for WindowSink {
         if !first_time(&OUTDATED_TOLD, host) {
             return;
         }
-        if let Some(window) = self.0.get_webview_window("main") {
-            let _ = window.emit(
-                "remote-cli-outdated",
-                serde_json::json!({
-                    "host": host,
-                    "cli": cli_version,
-                    "gui": env!("CARGO_PKG_VERSION"),
-                }),
-            );
-        }
+        let _ = self.app.emit(
+            "remote-cli-outdated",
+            serde_json::json!({
+                "host": host,
+                "cli": cli_version,
+                "gui": env!("CARGO_PKG_VERSION"),
+            }),
+        );
     }
 }
 
@@ -1509,7 +1545,7 @@ fn gui_ready(
             let name = fude_core::ipc::socket_name(&socket).map_err(|e| e.to_string())?;
             // Remote agents must present this; see fude_core::token.
             let token = fude_core::token::load_or_create(&dir.join(fude_core::token::TOKEN_FILE))?;
-            let sink: Arc<dyn gui_server::OpenSink> = Arc::new(WindowSink(app));
+            let sink: Arc<dyn gui_server::OpenSink> = Arc::new(WindowSink::new(app, "main"));
             gui_server::start(
                 name,
                 token.clone(),
@@ -2125,8 +2161,13 @@ pub fn run() {
                 let _ = window.set_focus();
                 if let Some(p) = path {
                     let resolved = resolve_cli_path(&p, base);
-                    // Target the main window only so other open windows are unaffected.
-                    let _ = window.emit("cli-args", serde_json::json!({ "path": resolved }));
+                    // Target the main window only so other open windows are
+                    // unaffected (`window.emit` would reach them all).
+                    let _ = app.emit_to(
+                        tauri::EventTarget::webview_window("main"),
+                        "cli-args",
+                        serde_json::json!({ "path": resolved }),
+                    );
                 }
             } else {
                 let _ = spawn_window(app, path, remote, base);
@@ -2703,6 +2744,31 @@ mod tests {
             true
         ));
         assert!(second_launch_opens_new_window(true, false, false, false));
+    }
+
+    // 複数ウィンドウ: リモートの場所は開いたウィンドウだけに開く（他のウィンドウの
+    // パスを変えない）。そのウィンドウが閉じられていれば main、どちらも無ければ無し。
+    #[test]
+    fn sink_window_label_prefers_the_window_that_asked() {
+        let open = |ls: &'static [&'static str]| move |l: &str| ls.contains(&l);
+        assert_eq!(
+            sink_window_label("win-2", open(&["main", "win-1", "win-2"])),
+            Some("win-2".to_string())
+        );
+        assert_eq!(
+            sink_window_label("main", open(&["main", "win-1"])),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            sink_window_label("win-2", open(&["main", "win-1"])),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            sink_window_label("win-2", open(&["win-1"])),
+            None,
+            "never some other window"
+        );
+        assert_eq!(sink_window_label("main", open(&[])), None);
     }
 
     #[test]

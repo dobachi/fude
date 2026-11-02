@@ -29,6 +29,27 @@ describe('backend module (Tauri mode)', () => {
     window.location = originalLocation;
   });
 
+  // 複数ウィンドウ: 開く要求（cli-args）は自分のウィンドウ宛てだけを受ける。
+  // event モジュールの listen は全ウィンドウ宛てを受けるので、リモートの場所を
+  // 開くと他のウィンドウまでそのパスに変わっていた。
+  it('listenToThisWindow は現在のウィンドウのリスナーで受ける（全ウィンドウ宛ての listen は使わない）', async () => {
+    const unlisten = vi.fn();
+    const winListen = vi.fn().mockResolvedValue(unlisten);
+    const anyListen = vi.fn();
+    vi.doMock('@tauri-apps/api/webviewWindow', () => ({
+      getCurrentWebviewWindow: () => ({ label: 'win-2', listen: winListen }),
+    }));
+    vi.doMock('@tauri-apps/api/event', () => ({ listen: anyListen }));
+    const mod = await import('../backend.js');
+    const handler = vi.fn();
+    const off = await mod.listenToThisWindow('cli-args', handler);
+    expect(winListen).toHaveBeenCalledWith('cli-args', handler);
+    expect(anyListen).not.toHaveBeenCalled();
+    expect(off).toBe(unlisten);
+    vi.doUnmock('@tauri-apps/api/webviewWindow');
+    vi.doUnmock('@tauri-apps/api/event');
+  });
+
   it('readFile calls invoke with read_file command', async () => {
     const mod = await import('../backend.js');
     await mod.readFile('/test.md');

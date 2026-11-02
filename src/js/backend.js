@@ -141,6 +141,19 @@ export async function updateEnv() {
 // is connected to this GUI; the host forwards these calls to it. Only what
 // the editor needs for an open tab is routed — tree, read, write, watch.
 
+/**
+ * Listen for `event` sent to this window only (`emit_to` it), not to any
+ * window: the plain `listen` of '@tauri-apps/api/event' hears every target,
+ * so a request meant for one window would act in all of them.
+ * @param {string} event
+ * @param {(event: { payload: any }) => void} handler
+ * @returns {Promise<() => void>} unlisten
+ */
+export async function listenToThisWindow(event, handler) {
+  const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+  return getCurrentWebviewWindow().listen(event, handler);
+}
+
 export async function readFile(path) {
   if (isRemotePath(path)) return doInvoke('remote_read_file', { path });
   return doInvoke('read_file', { path });

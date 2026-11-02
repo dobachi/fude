@@ -1084,7 +1084,9 @@ async function init() {
   // Listen for CLI args and drag-drop events from Tauri
   if (isLocalTauri()) {
     const { listen } = await import('@tauri-apps/api/event');
-    listen('cli-args', async (event) => {
+    // Paths to open are sent to one window; `listen` would hear those meant
+    // for the other windows too (and open, say, their remote place here).
+    backend.listenToThisWindow('cli-args', async (event) => {
       const path = event.payload?.path;
       if (!path) return;
       if (event.payload?.wait) waitTracker.add(path);
