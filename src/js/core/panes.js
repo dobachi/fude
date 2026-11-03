@@ -25,7 +25,7 @@ let activePaneId = null;
 let onChangeCallback = null; // (pane, newContent) => void
 let onScrollCallback = null; // (pane, info) => void
 let onPreviewScrollCallback = null; // (pane) => void
-let onSelectionChangeCallback = null; // (selectedText) => void
+let onSelectionChangeCallback = null; // (selectedText, pane) => void
 let onEditorCreatedCallback = null; // (pane) => void — invoked after createEditorInPane
 let onSourceJumpCallback = null; // (line, previewContainer) => void — preview Ctrl+click
 let onFileLinkCallback = null; // (target, previewContainer) => void — preview file link click
@@ -265,7 +265,7 @@ export function createEditorInPane(pane, content, opts = {}) {
       if (onScrollCallback) onScrollCallback(pane, info);
     },
     (selectedText) => {
-      if (onSelectionChangeCallback) onSelectionChangeCallback(selectedText);
+      if (onSelectionChangeCallback) onSelectionChangeCallback(selectedText, pane);
     },
     editorOpts,
   );

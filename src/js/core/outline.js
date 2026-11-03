@@ -59,6 +59,27 @@ export function extractHeadings(text) {
 let listContainer = null;
 let onJumpCallback = null;
 let lastRenderedHeadings = [];
+// Last editor line reported via setActiveOutlineLine. Kept so a re-render
+// (typing, tab switch, external reload) restores the highlight instead of
+// dropping it until the next scroll event.
+let currentLine = 1;
+
+/**
+ * Index of the heading that "contains" the given 1-based (possibly fractional)
+ * editor line: the last heading whose line ≤ given line. When the line sits
+ * above the first heading (preamble / front matter) the first heading is
+ * returned so the outline always shows where the reader is. Returns -1 only
+ * when there are no headings. Pure — exported for testing.
+ */
+export function findActiveHeadingIndex(headings, line) {
+  if (!headings || !headings.length) return -1;
+  let idx = 0;
+  for (let i = 0; i < headings.length; i++) {
+    if (headings[i].line <= line) idx = i;
+    else break;
+  }
+  return idx;
+}
 
 /**
  * Initialise the outline panel. Stores the click target and the jump
@@ -112,6 +133,7 @@ export function renderOutline(headings) {
     });
     listContainer.appendChild(item);
   }
+  applyActive(false);
 }
 
 /**
@@ -122,20 +144,44 @@ export function updateOutline(text) {
 }
 
 /**
+ * Which editor line the outline highlight should follow, by view mode.
+ *   editor / split → the cursor line (where the user is writing). Scrolling
+ *                    alone does not move the highlight.
+ *   preview        → the source line at the top of the preview, since there
+ *                    is no visible cursor. Falls back to the cursor line (then
+ *                    line 1) while the preview has not rendered yet.
+ * Pure — exported for testing.
+ */
+export function pickOutlineLine({ viewMode, cursorLine, previewTopLine } = {}) {
+  const valid = (n) => typeof n === 'number' && !Number.isNaN(n);
+  if (viewMode === 'preview' && valid(previewTopLine)) return previewTopLine;
+  if (valid(cursorLine)) return cursorLine;
+  return 1;
+}
+
+/**
  * Highlight the heading that contains the given 1-based (possibly fractional)
- * editor line — i.e. the largest heading whose line ≤ given line.
+ * editor line — i.e. the largest heading whose line ≤ given line, or the first
+ * heading when the line is above every heading.
  */
 export function setActiveOutlineLine(line) {
+  if (typeof line === 'number' && !Number.isNaN(line)) currentLine = line;
+  applyActive(true);
+}
+
+/** The editor line the outline highlight is currently based on. */
+export function getActiveOutlineLine() {
+  return currentLine;
+}
+
+function applyActive(scroll) {
   if (!listContainer) return;
   const items = listContainer.querySelectorAll('.outline-item');
   if (!items.length) return;
 
-  let active = null;
-  for (const el of items) {
-    const itemLine = parseInt(el.dataset.line, 10);
-    if (itemLine <= line) active = el;
-    else break;
-  }
+  const headings = Array.from(items, (el) => ({ line: parseInt(el.dataset.line, 10) }));
+  const idx = findActiveHeadingIndex(headings, currentLine);
+  const active = idx >= 0 ? items[idx] : null;
 
   listContainer.querySelectorAll('.outline-item.active').forEach((el) => {
     if (el !== active) el.classList.remove('active');
@@ -143,12 +189,16 @@ export function setActiveOutlineLine(line) {
   if (active && !active.classList.contains('active')) {
     active.classList.add('active');
     // Keep the active heading visible inside the outline panel without
-    // moving the surrounding page.
-    active.scrollIntoView({ block: 'nearest' });
+    // moving the surrounding page. Skipped on re-render: scrolling the panel
+    // on every keystroke-driven rebuild would fight the user's own scrolling.
+    if (scroll && typeof active.scrollIntoView === 'function') {
+      active.scrollIntoView({ block: 'nearest' });
+    }
   }
 }
 
 export function clearOutline() {
   lastRenderedHeadings = [];
+  currentLine = 1;
   if (listContainer) listContainer.innerHTML = '';
 }

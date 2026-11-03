@@ -31,6 +31,7 @@ import {
   initOutline,
   updateOutline,
   setActiveOutlineLine,
+  pickOutlineLine,
   clearOutline,
   focusOutline,
 } from './core/outline.js';
@@ -792,7 +793,10 @@ async function init() {
     onBlockEdit: handlePreviewBlockEdit,
     onBlockInsert: handlePreviewBlockInsert,
     // Panes added/closed or focus moved: the buttons follow the active pane.
-    onActivePaneChange: () => syncViewModeButtons(),
+    onActivePaneChange: () => {
+      syncViewModeButtons();
+      refreshOutlineActive();
+    },
     onEditorCreated: () => {
       reapplyMode();
     },
@@ -1390,11 +1394,6 @@ function recordScrollSync(source) {
 
 function handlePaneScroll(pane, info) {
   const { topLine, ratio } = info || {};
-  // Outline highlight tracks editor scroll directly — independent of preview
-  // sync gating so the active heading stays correct even while the user is
-  // typing.
-  if (typeof topLine === 'number') setActiveOutlineLine(topLine);
-
   if (paneViewMode(pane) !== 'split' || !pane.previewContainer) return;
   // Skip preview sync while we're absorbing the editor-scroll burst that
   // immediately follows a doc-change. Otherwise the preview jitters with
@@ -1410,7 +1409,30 @@ function handlePaneScroll(pane, info) {
   }
 }
 
+// Re-pick the outline highlight for the active pane: cursor line in editor /
+// split mode, top-of-preview line in preview-only mode (see pickOutlineLine).
+// Other panes are ignored — the outline shows the active pane's document.
+function refreshOutlineActive(pane = getActivePane()) {
+  if (!pane || pane !== getActivePane()) return;
+  const view = pane.editorView;
+  let cursorLine = null;
+  if (view) {
+    try {
+      cursorLine = view.state.doc.lineAt(view.state.selection.main.head).number;
+    } catch {
+      /* fall through to pickOutlineLine's default */
+    }
+  }
+  const viewMode = paneViewMode(pane);
+  const previewTopLine =
+    viewMode === 'preview' && pane.previewContainer
+      ? getLineFromPreview(pane.previewContainer)
+      : null;
+  setActiveOutlineLine(pickOutlineLine({ viewMode, cursorLine, previewTopLine }));
+}
+
 function handlePreviewScroll(pane) {
+  if (paneViewMode(pane) === 'preview') refreshOutlineActive(pane);
   if (paneViewMode(pane) !== 'split' || !pane.editorView) return;
   if (!shouldHandleScroll('preview')) return;
   const line = getLineFromPreview(pane.previewContainer);
@@ -1617,7 +1639,8 @@ function keepUnappliedEdit(text) {
   );
 }
 
-function handleSelectionChange(selectedText) {
+function handleSelectionChange(selectedText, pane) {
+  refreshOutlineActive(pane);
   // Only forward to chat when AI panel is open
   const app = document.getElementById('app');
   if (app?.classList.contains('ai-panel-open')) {
@@ -2302,8 +2325,10 @@ function handleTabChange(tab) {
   // Update AI doc context
   updateDocContext(tab.path, tab.content);
 
-  // Refresh outline for the newly active document
+  // Refresh outline for the newly active document and highlight the section
+  // at the restored cursor (or, in preview-only mode, the preview top).
   updateOutline(tab.content);
+  refreshOutlineActive();
 
   // Focus the active pane after a tab switch (preview container in
   // preview-only mode, editor otherwise).
@@ -2472,6 +2497,8 @@ function setViewMode(mode, pane = getActivePane()) {
   // Remember the most recently chosen mode as the default for new tabs.
   defaultViewMode = mode;
   applyViewMode();
+  // Mode decides what the outline follows (cursor vs preview top).
+  refreshOutlineActive(pane);
 
   // Move focus to whichever half the new mode leaves visible, so the keymap
   // that mode implies (preview j/k/gg, editor Vim/Emacs) keeps working.
