@@ -229,10 +229,24 @@ impl RemoteSession {
     }
 }
 
+/// A watch set up through one agent: the agent that holds it, and how many
+/// times it was asked for.
+struct Pin {
+    session: Arc<RemoteSession>,
+    count: usize,
+}
+
 /// The connected remote agents, by host.
 #[derive(Default)]
 pub struct RemoteSessions {
     by_host: Mutex<HashMap<String, Vec<Arc<RemoteSession>>>>,
+    /// Remote paths (`remote://host/...`) under watch, by the agent that
+    /// watches them. Requests about such a path go to that agent: an agent
+    /// tells its own writes from others' only for what it wrote itself, so a
+    /// save sent through another connection to the same host would come back
+    /// as "changed outside" — and an unwatch sent elsewhere would leave the
+    /// watch behind.
+    pinned: Mutex<HashMap<String, Pin>>,
 }
 
 impl RemoteSessions {
@@ -248,6 +262,58 @@ impl RemoteSessions {
                 v.retain(|s| !Arc::ptr_eq(s, session));
                 if v.is_empty() {
                     m.remove(&session.host);
+                }
+            }
+        }
+        // Its watches went with it.
+        if let Ok(mut p) = self.pinned.lock() {
+            p.retain(|_, pin| !Arc::ptr_eq(&pin.session, session));
+        }
+    }
+
+    /// The agent holding the watch on `remote`, if it is still connected.
+    fn pinned_session(&self, host: &str, remote: &str) -> Option<Arc<RemoteSession>> {
+        let session = self
+            .pinned
+            .lock()
+            .ok()?
+            .get(remote)
+            .map(|pin| Arc::clone(&pin.session))?;
+        let connected = self
+            .by_host
+            .lock()
+            .ok()?
+            .get(host)
+            .is_some_and(|v| v.iter().any(|s| Arc::ptr_eq(s, &session)));
+        connected.then_some(session)
+    }
+
+    /// Record that `session` now watches `remote`, so that what is asked
+    /// about it later goes there too.
+    pub fn pin(&self, remote: &str, session: &Arc<RemoteSession>) {
+        if let Ok(mut p) = self.pinned.lock() {
+            match p.get_mut(remote) {
+                Some(pin) if Arc::ptr_eq(&pin.session, session) => pin.count += 1,
+                _ => {
+                    p.insert(
+                        remote.to_string(),
+                        Pin {
+                            session: Arc::clone(session),
+                            count: 1,
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    /// One watch on `remote` was released.
+    pub fn unpin(&self, remote: &str) {
+        if let Ok(mut p) = self.pinned.lock() {
+            if let Some(pin) = p.get_mut(remote) {
+                pin.count = pin.count.saturating_sub(1);
+                if pin.count == 0 {
+                    p.remove(remote);
                 }
             }
         }
@@ -271,7 +337,8 @@ impl RemoteSessions {
         let (host, path) = ipc::split_remote_path(remote)
             .ok_or_else(|| format!("not a remote path: {}", remote))?;
         let session = self
-            .route(host, path)
+            .pinned_session(host, remote)
+            .or_else(|| self.route(host, path))
             .ok_or_else(|| format!("{}: no agent connected", host))?;
         Ok((session, path.to_string()))
     }
@@ -1585,6 +1652,94 @@ mod tests {
             })
             .unwrap_err();
         assert!(e.contains("disconnected"));
+    }
+
+    #[test]
+    fn a_watched_path_is_asked_of_the_agent_that_watches_it() {
+        // The tab's file was opened (and watched) through the agent serving
+        // the home folder; then a folder below it was opened, a second
+        // connection whose root matches the file better.
+        let reg = RemoteSessions::default();
+        let (home, _rh) = session("box", &["/home/u"]);
+        reg.insert(Arc::clone(&home));
+        let file = "remote://box/home/u/notes/a.md";
+        let (watcher, _) = reg.lookup(file).unwrap();
+        assert!(Arc::ptr_eq(&watcher, &home));
+        reg.pin(file, &watcher);
+
+        let (notes, _rn) = session("box", &["/home/u/notes"]);
+        reg.insert(Arc::clone(&notes));
+        // Saving, reading and unwatching go to the agent holding the watch,
+        // so it knows the write is its own.
+        let (s, p) = reg.lookup(file).unwrap();
+        assert!(Arc::ptr_eq(&s, &home));
+        assert_eq!(p, "/home/u/notes/a.md");
+        // Paths nobody watches still route by root.
+        let (s, _) = reg.lookup("remote://box/home/u/notes/b.md").unwrap();
+        assert!(Arc::ptr_eq(&s, &notes));
+
+        // The pin is counted: two watches, two unwatches.
+        reg.pin(file, &home);
+        reg.unpin(file);
+        assert!(Arc::ptr_eq(&reg.lookup(file).unwrap().0, &home));
+        reg.unpin(file);
+        assert!(Arc::ptr_eq(&reg.lookup(file).unwrap().0, &notes));
+        // An unwatch too many does no harm.
+        reg.unpin(file);
+        assert!(Arc::ptr_eq(&reg.lookup(file).unwrap().0, &notes));
+    }
+
+    #[test]
+    fn a_pin_goes_with_its_agent() {
+        let reg = RemoteSessions::default();
+        let (a, _ra) = session("box", &["/home/u"]);
+        let (b, _rb) = session("box", &["/home/u/notes"]);
+        reg.insert(Arc::clone(&a));
+        reg.insert(Arc::clone(&b));
+        let file = "remote://box/home/u/notes/a.md";
+        reg.pin(file, &a);
+        assert!(Arc::ptr_eq(&reg.lookup(file).unwrap().0, &a));
+
+        // The watching agent went away: route as if nothing were pinned,
+        // and a new connection is not mistaken for the old one.
+        reg.remove(&a);
+        assert!(Arc::ptr_eq(&reg.lookup(file).unwrap().0, &b));
+        let (a2, _ra2) = session("box", &["/home/u"]);
+        reg.insert(Arc::clone(&a2));
+        assert!(Arc::ptr_eq(&reg.lookup(file).unwrap().0, &b));
+        reg.remove(&b);
+        assert!(Arc::ptr_eq(&reg.lookup(file).unwrap().0, &a2));
+    }
+
+    #[test]
+    fn pins_are_per_path_and_per_host() {
+        let reg = RemoteSessions::default();
+        let (a, _ra) = session("box", &["/r"]);
+        let (b, _rb) = session("box", &["/r"]);
+        let (c, _rc) = session("other", &["/r"]);
+        reg.insert(Arc::clone(&a));
+        reg.insert(Arc::clone(&b));
+        reg.insert(Arc::clone(&c));
+        // Same root twice: unpinned paths go to the latest connection...
+        assert!(Arc::ptr_eq(
+            &reg.lookup("remote://box/r/x.md").unwrap().0,
+            &b
+        ));
+        // ...a pinned one to its agent, without dragging its neighbours along.
+        reg.pin("remote://box/r/x.md", &a);
+        assert!(Arc::ptr_eq(
+            &reg.lookup("remote://box/r/x.md").unwrap().0,
+            &a
+        ));
+        assert!(Arc::ptr_eq(
+            &reg.lookup("remote://box/r/y.md").unwrap().0,
+            &b
+        ));
+        // The same path on another host is another file.
+        assert!(Arc::ptr_eq(
+            &reg.lookup("remote://other/r/x.md").unwrap().0,
+            &c
+        ));
     }
 
     #[test]

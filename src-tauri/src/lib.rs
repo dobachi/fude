@@ -1692,9 +1692,9 @@ fn remote_watch_file(
     sessions: State<'_, Arc<gui_server::RemoteSessions>>,
 ) -> Result<(), String> {
     let (session, p) = sessions.lookup(&path)?;
-    session
-        .request(|id| fude_core::ipc::Message::Watch { id, path: p })
-        .map(|_| ())
+    session.request(|id| fude_core::ipc::Message::Watch { id, path: p })?;
+    sessions.pin(&path, &session);
+    Ok(())
 }
 
 #[tauri::command(async)]
@@ -1703,9 +1703,11 @@ fn remote_unwatch_file(
     sessions: State<'_, Arc<gui_server::RemoteSessions>>,
 ) -> Result<(), String> {
     let (session, p) = sessions.lookup(&path)?;
-    session
-        .request(|id| fude_core::ipc::Message::Unwatch { id, path: p })
-        .map(|_| ())
+    let result = session.request(|id| fude_core::ipc::Message::Unwatch { id, path: p });
+    // Released either way: an agent that could not unwatch holds nothing
+    // this side can still use.
+    sessions.unpin(&path);
+    result.map(|_| ())
 }
 
 /// Have the agent report changes anywhere under a remote folder (the one the
@@ -1716,9 +1718,9 @@ fn remote_watch_directory(
     sessions: State<'_, Arc<gui_server::RemoteSessions>>,
 ) -> Result<(), String> {
     let (session, p) = sessions.lookup(&path)?;
-    session
-        .request(|id| fude_core::ipc::Message::WatchDir { id, path: p })
-        .map(|_| ())
+    session.request(|id| fude_core::ipc::Message::WatchDir { id, path: p })?;
+    sessions.pin(&path, &session);
+    Ok(())
 }
 
 #[tauri::command(async)]
@@ -1727,9 +1729,11 @@ fn remote_unwatch_directory(
     sessions: State<'_, Arc<gui_server::RemoteSessions>>,
 ) -> Result<(), String> {
     let (session, p) = sessions.lookup(&path)?;
-    session
-        .request(|id| fude_core::ipc::Message::UnwatchDir { id, path: p })
-        .map(|_| ())
+    let result = session.request(|id| fude_core::ipc::Message::UnwatchDir { id, path: p });
+    // Released either way: an agent that could not unwatch holds nothing
+    // this side can still use.
+    sessions.unpin(&path);
+    result.map(|_| ())
 }
 
 /// Hosts with a connected agent (for the status bar / diagnostics).
