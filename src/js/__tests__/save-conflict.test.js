@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { shouldWarnConflict, renderDiff, showConflictDialog } from '../core/save-conflict.js';
+import {
+  shouldWarnConflict,
+  renderDiff,
+  showConflictDialog,
+  isOwnWriteEcho,
+} from '../core/save-conflict.js';
 import { diffLines } from '../core/line-diff.js';
 
 describe('shouldWarnConflict', () => {
@@ -24,6 +29,50 @@ describe('shouldWarnConflict', () => {
 
   it('does not warn when disk already equals what we would write', () => {
     expect(shouldWarnConflict({ ...base, diskContent: 'same', editorContent: 'same' })).toBe(false);
+  });
+});
+
+describe('isOwnWriteEcho', () => {
+  const base = {
+    diskContent: 'external edit',
+    diskHash: 'h-disk',
+    syncedHash: 'h-synced',
+    editorContent: 'my edits',
+    writingContents: [],
+  };
+
+  it('is not an echo when the disk holds something we never had', () => {
+    expect(isOwnWriteEcho(base)).toBe(false);
+  });
+
+  it('is an echo when the disk still matches the last sync', () => {
+    expect(isOwnWriteEcho({ ...base, diskHash: 'h', syncedHash: 'h' })).toBe(true);
+  });
+
+  it('is an echo when the disk equals the buffer (save reply not back yet)', () => {
+    expect(isOwnWriteEcho({ ...base, diskContent: 'my edits' })).toBe(true);
+  });
+
+  it('is an echo when the disk equals what an in-flight save is writing', () => {
+    // The user kept typing after pressing save: the buffer moved on, but the
+    // disk holds exactly what the save wrote.
+    expect(
+      isOwnWriteEcho({ ...base, diskContent: 'saved', writingContents: ['older', 'saved'] }),
+    ).toBe(true);
+  });
+
+  it('does not treat missing hashes as a match', () => {
+    expect(isOwnWriteEcho({ ...base, diskHash: null, syncedHash: null })).toBe(false);
+    expect(isOwnWriteEcho({ ...base, diskHash: '', syncedHash: '' })).toBe(false);
+  });
+
+  it('is not an echo without disk content', () => {
+    expect(isOwnWriteEcho({ ...base, diskContent: null, editorContent: null })).toBe(false);
+  });
+
+  it('treats an emptied file as external unless we emptied it', () => {
+    expect(isOwnWriteEcho({ ...base, diskContent: '' })).toBe(false);
+    expect(isOwnWriteEcho({ ...base, diskContent: '', editorContent: '' })).toBe(true);
   });
 });
 

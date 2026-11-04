@@ -130,7 +130,7 @@ import {
   getTabByPath,
 } from './core/tabs.js';
 import { sha256Hex } from './core/hash.js';
-import { shouldWarnConflict, showConflictDialog } from './core/save-conflict.js';
+import { shouldWarnConflict, showConflictDialog, isOwnWriteEcho } from './core/save-conflict.js';
 import { tabActionForKey } from './core/tab-keys.js';
 import { createWaitTracker } from './core/wait-tracker.js';
 import { setUiFontSize, getUiFontSize } from './core/ui-font.js';
@@ -165,7 +165,12 @@ import {
 } from './core/sidebar.js';
 import { scheduleSave, restoreSession } from './core/session.js';
 import { initTheme } from './core/theme.js';
-import { onContentChange, triggerSave, checkRecovery } from './core/autosave.js';
+import {
+  onContentChange,
+  triggerSave,
+  checkRecovery,
+  contentsBeingWritten,
+} from './core/autosave.js';
 import {
   initFileWatcher,
   initDirectoryWatcher,
@@ -2398,6 +2403,32 @@ async function handleExternalFileChange(path) {
   const tab = getAllTabs().find((t) => t.path === path);
   if (!tab) return;
 
+  let diskContent = null;
+  try {
+    diskContent = await backend.readFile(path);
+  } catch (e) {
+    // Gone or unreadable: nothing to compare. A dirty tab still gets the
+    // banner (its reload reports the failure); a clean one has nothing to load.
+    if (!tab.dirty) {
+      console.error('Auto-reload failed:', e);
+      return;
+    }
+  }
+
+  // The echo of our own save (the watcher could not tell it was ours, or its
+  // report beat the save's reply): the disk holds what we have, so there is
+  // nothing to reload and nothing to warn about.
+  if (diskContent !== null) {
+    const echo = isOwnWriteEcho({
+      diskContent,
+      diskHash: await sha256Hex(diskContent),
+      syncedHash: getTabDiskHash(tab.id),
+      editorContent: tab.content,
+      writingContents: contentsBeingWritten(path),
+    });
+    if (echo) return;
+  }
+
   if (tab.dirty) {
     showReloadBanner(
       `"${getFilename(path)}" が外部で変更されました。未保存の変更を破棄して再読込しますか？`,
@@ -2409,12 +2440,7 @@ async function handleExternalFileChange(path) {
     return;
   }
 
-  try {
-    const content = await backend.readFile(path);
-    applyReloadToAllPanes(path, content, tab.id);
-  } catch (e) {
-    console.error('Auto-reload failed:', e);
-  }
+  applyReloadToAllPanes(path, diskContent, tab.id);
 }
 
 async function manualReload() {

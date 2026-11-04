@@ -116,4 +116,48 @@ describe('autosave module', () => {
     const result = await mod.checkRecovery(['/a.md']);
     expect(result).toEqual([]);
   });
+  describe('contentsBeingWritten', () => {
+    it('remembers a save while it is in flight and for a grace period after', async () => {
+      let finish;
+      backend.writeFile.mockImplementationOnce(() => new Promise((r) => (finish = r)));
+      const saving = mod.triggerSave('/a.md', 'v1');
+      expect(mod.contentsBeingWritten('/a.md')).toEqual(['v1']);
+      expect(mod.contentsBeingWritten('/b.md')).toEqual([]);
+
+      finish();
+      await saving;
+      // The watcher's report can trail the reply: still remembered.
+      expect(mod.contentsBeingWritten('/a.md')).toEqual(['v1']);
+
+      vi.advanceTimersByTime(mod.WRITE_ECHO_GRACE_MS - 1);
+      expect(mod.contentsBeingWritten('/a.md')).toEqual(['v1']);
+      vi.advanceTimersByTime(1);
+      expect(mod.contentsBeingWritten('/a.md')).toEqual([]);
+    });
+
+    it('keeps overlapping saves of the same path apart', async () => {
+      await mod.triggerSave('/a.md', 'v1');
+      vi.advanceTimersByTime(1000);
+      await mod.triggerSave('/a.md', 'v2');
+      expect(mod.contentsBeingWritten('/a.md')).toEqual(['v1', 'v2']);
+      vi.advanceTimersByTime(mod.WRITE_ECHO_GRACE_MS - 1000);
+      expect(mod.contentsBeingWritten('/a.md')).toEqual(['v2']);
+      vi.advanceTimersByTime(1000);
+      expect(mod.contentsBeingWritten('/a.md')).toEqual([]);
+    });
+
+    it('also forgets a failed save after the grace period', async () => {
+      backend.writeFile.mockRejectedValueOnce(new Error('denied'));
+      const ok = await mod.triggerSave('/a.md', 'v1');
+      expect(ok).toBe(false);
+      vi.advanceTimersByTime(mod.WRITE_ECHO_GRACE_MS);
+      expect(mod.contentsBeingWritten('/a.md')).toEqual([]);
+    });
+
+    it('returns a copy, not the internal list', async () => {
+      await mod.triggerSave('/a.md', 'v1');
+      mod.contentsBeingWritten('/a.md').push('x');
+      expect(mod.contentsBeingWritten('/a.md')).toEqual(['v1']);
+    });
+  });
 });

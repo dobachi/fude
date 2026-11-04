@@ -29,6 +29,38 @@ export function shouldWarnConflict({ loadedHash, currentDiskHash, diskContent, e
 }
 
 /**
+ * Decide whether a "file changed on disk" notification is just the echo of
+ * Fude's own save. Pure.
+ *
+ * The watcher that reports a change cannot always tell our writes from
+ * others: for a remote file, the agent watching it may not be the one that
+ * wrote it (several connections to one host), and the report can arrive
+ * before the save's reply, while the tab is still dirty. What decides is the
+ * content: if the disk holds what we last synced, what the editor holds, or
+ * what a save of ours is writing, nothing external happened.
+ *
+ * @param {object} p
+ * @param {string} p.diskContent        content on disk now
+ * @param {string|null|undefined} p.diskHash   hash of diskContent
+ * @param {string|null|undefined} p.syncedHash hash recorded at last disk sync
+ * @param {string|null|undefined} p.editorContent current buffer content
+ * @param {string[]} [p.writingContents] contents our in-flight saves are writing
+ * @returns {boolean} true → ignore the notification
+ */
+export function isOwnWriteEcho({
+  diskContent,
+  diskHash,
+  syncedHash,
+  editorContent,
+  writingContents = [],
+}) {
+  if (typeof diskContent !== 'string') return false;
+  if (diskHash && syncedHash && diskHash === syncedHash) return true;
+  if (diskContent === editorContent) return true;
+  return writingContents.includes(diskContent);
+}
+
+/**
  * Show the save-conflict dialog with a line diff (disk → editor) and let the
  * user resolve it. Exactly one callback fires.
  *
