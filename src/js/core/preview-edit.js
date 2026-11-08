@@ -145,6 +145,9 @@ let active = null;
  * @param {(edited: string) => void} [opts.onCancel]
  * @param {(dir: 1|-1) => void} [opts.onMove] called after onCommit when the
  *   editor asked to move to the next (1) or previous (-1) cell
+ * @param {(op: string) => void} [opts.onTableOp] called after onCommit when
+ *   the editor asked for a table operation (see table-structure.js), e.g.
+ *   Ctrl+Enter in a cell = add a row below
  */
 export function startInlineEdit(opts) {
   commitInlineEdit();
@@ -189,6 +192,9 @@ export function startInlineEdit(opts) {
     {
       commit: () => finish(edit, 'commit', true),
       move: (dir) => finish(edit, 'commit', true, dir),
+      ...(opts.onTableOp
+        ? { tableOp: (op) => finish(edit, 'commit', true, 0, () => opts.onTableOp(op)) }
+        : {}),
     },
     opts.cursor || 0,
   );
@@ -207,7 +213,7 @@ export function startInlineEdit(opts) {
   return edit;
 }
 
-function finish(edit, kind, refocus, moveDir = 0) {
+function finish(edit, kind, refocus, moveDir = 0, then = null) {
   if (active !== edit) return;
   active = null;
   const edited = edit.view ? edit.view.state.doc.toString() : edit.opts.text;
@@ -230,6 +236,7 @@ function finish(edit, kind, refocus, moveDir = 0) {
   // Moving (Tab in a table cell) is "commit, then open the neighbour"; the
   // caller opens it once the commit has been rendered.
   if (moveDir && edit.opts.onMove) edit.opts.onMove(moveDir);
+  if (then) then();
 }
 
 /** Finish the open edit (if any), applying it. */

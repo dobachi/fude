@@ -964,6 +964,21 @@ export function createInlineEditor(parent, content, handlers, cursor = 0, opts =
     else handlers.commit();
     return true;
   };
+  // Table structure keys (a cell of a preview table): only bound when the
+  // caller supports them, so other single-line editors keep Ctrl+Enter = done.
+  const tableOp = (op) => () => {
+    handlers.tableOp(op);
+    return true;
+  };
+  const tableOpKeys =
+    opts.singleLine && handlers.tableOp
+      ? [
+          { key: 'Mod-Enter', run: tableOp('row-below') },
+          { key: 'Mod-Shift-Enter', run: tableOp('row-above') },
+          { key: 'Mod-Alt-ArrowRight', run: tableOp('col-right') },
+          { key: 'Mod-Alt-ArrowLeft', run: tableOp('col-left') },
+        ]
+      : [];
   const view = new EditorView({
     state: EditorState.create({
       doc: content,
@@ -971,6 +986,7 @@ export function createInlineEditor(parent, content, handlers, cursor = 0, opts =
       extensions: [
         Prec.highest(
           keymap.of([
+            ...tableOpKeys,
             { key: 'Mod-Enter', run: done },
             ...(opts.singleLine
               ? [

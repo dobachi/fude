@@ -9,6 +9,7 @@ import {
   AI_ACTION_IDS,
   buildEditorMenuItems,
   buildPreviewMenuItems,
+  TABLE_ITEM_PREFIX,
 } from '../../core/editor-menu-items.js';
 
 /**
@@ -17,6 +18,9 @@ import {
  * @property {(view: any) => void} onComposer - Open composer for the view
  * @property {() => any|null} getActiveView - Get the current active EditorView
  * @property {(view: any) => void} [onConvertTable] - Convert the selection to a Markdown table
+ * @property {(preview: HTMLElement, target: Element) => ({row: number,
+ *   size: {rows: number, cols: number}, run: (op: string) => void} | null)} [previewTableCell]
+ *   - The editable table cell a preview right-click is on, if any
  */
 
 /** @type {ContextMenuCallbacks|null} */
@@ -52,7 +56,7 @@ function handleContextMenu(e) {
   if (preview) {
     e.preventDefault();
     e.stopPropagation();
-    showPreviewMenu(preview, e.clientX, e.clientY);
+    showPreviewMenu(preview, target, e.clientX, e.clientY);
   }
 }
 
@@ -81,13 +85,18 @@ function showEditorMenu(view, x, y) {
   showMenu(x, y, items, { onClose: () => view.focus() });
 }
 
-function showPreviewMenu(preview, x, y) {
+function showPreviewMenu(preview, target, x, y) {
   const sel = window.getSelection();
   const text = sel && preview.contains(sel.anchorNode) ? sel.toString() : '';
-  const specs = buildPreviewMenuItems({ hasSelection: text.length > 0 });
-  const items = specs.map((s) =>
-    s.separator ? s : { ...s, action: () => s.id === 'copy' && writeClipboard(text) },
-  );
+  const tableCell = callbacks?.previewTableCell?.(preview, target) || null;
+  const specs = buildPreviewMenuItems({ hasSelection: text.length > 0, tableCell });
+  const items = specs.map((s) => {
+    if (s.separator) return s;
+    if (tableCell && s.id.startsWith(TABLE_ITEM_PREFIX)) {
+      return { ...s, action: () => tableCell.run(s.id.slice(TABLE_ITEM_PREFIX.length)) };
+    }
+    return { ...s, action: () => s.id === 'copy' && writeClipboard(text) };
+  });
   showMenu(x, y, items);
 }
 

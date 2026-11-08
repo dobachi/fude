@@ -1279,6 +1279,45 @@ body {
   }
 }
 
+/* "+" on a preview table's bottom / right edge: add a row / column at the end
+   (preview-table-controls.js). Placed like .preview-insert-button: beside the
+   preview, by viewport coordinates, centred on the edge. */
+.preview-table-add {
+  position: fixed;
+  z-index: 4;
+  transform: translate(-50%, -50%);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--fg-accent);
+  border-radius: 50%;
+  background: var(--bg-primary);
+  color: var(--fg-accent);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 16px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.preview-table-add:hover {
+  background: var(--fg-accent);
+  color: var(--bg-primary);
+  opacity: 1;
+}
+
+.preview-table-add[hidden],
+.pane:not(.view-preview):not(.view-split) > .preview-table-add {
+  display: none;
+}
+
+@media print {
+  .preview-table-add {
+    display: none;
+  }
+}
+
 /* Space below the end of the document (scroll-past-end.js), with a rule that
    marks the real end while the view is scrolled into it. Not for print: the
    printed document reuses .preview-pane but never gets the class. */

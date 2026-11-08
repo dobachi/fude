@@ -22,6 +22,7 @@ import {
   isInsideInlineEditor,
   tableCellOf,
 } from './preview-edit.js';
+import { attachTableControls } from './preview-table-controls.js';
 import { attachInsertButton } from './preview-insert.js';
 import { attachScrollPastEnd, scrollToDocumentEnd } from './scroll-past-end.js';
 import {
@@ -310,6 +311,8 @@ export function sourceLineFromElement(el) {
  *     cell: {cellEl: HTMLElement, row: number, col: number} | null}) => void,
  *   onBlockInsert?: (req: {container: HTMLElement, prevEl: Element|null,
  *     nextEl: Element|null}) => void,
+ *   onTableOp?: (req: {container: HTMLElement, line: number, op: string,
+ *     row: number, col: number}) => void,
  * }} [opts]
  */
 export function initPreview(container, opts = {}) {
@@ -320,6 +323,9 @@ export function initPreview(container, opts = {}) {
 
   // "+" in the left margin = write a new block here (see preview-insert.js).
   if (opts.onBlockInsert) attachInsertButton(container, opts.onBlockInsert);
+
+  // "+" on a table's bottom / right edge = add a row / column at the end.
+  if (opts.onTableOp) attachTableControls(container, opts.onTableOp);
 
   // Double-click = edit here. The top-level block under the pointer is handed
   // to the app, which swaps it for an inline editor on its source (see

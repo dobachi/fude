@@ -53,11 +53,41 @@ export function buildEditorMenuItems({ hasSelection, canUndo = true, canRedo = t
   return items;
 }
 
+/** Prefix of the preview menu's table items; the rest is a table-structure op. */
+export const TABLE_ITEM_PREFIX = 'table-';
+
 /**
- * Menu for a right-click inside the (read-only) preview.
- * @param {{hasSelection: boolean}} state
+ * Menu for a right-click inside the preview.
+ *
+ * On a cell of a table that can be edited, it also offers adding and removing
+ * rows and columns there. The items keep their place when they don't apply
+ * (no row above the header, the header row can't be removed, nor the only
+ * column) and are disabled instead.
+ *
+ * @param {{hasSelection: boolean,
+ *   tableCell?: {row: number, size: {rows: number, cols: number}} | null}} state
  * @returns {MenuSpec[]}
  */
-export function buildPreviewMenuItems({ hasSelection }) {
-  return [{ id: 'copy', label: 'コピー', shortcut: 'Ctrl+C', disabled: !hasSelection }];
+export function buildPreviewMenuItems({ hasSelection, tableCell = null }) {
+  const items = [{ id: 'copy', label: 'コピー', shortcut: 'Ctrl+C', disabled: !hasSelection }];
+  if (tableCell) {
+    const header = tableCell.row === 0;
+    const t = TABLE_ITEM_PREFIX;
+    items.push(
+      SEP,
+      {
+        id: `${t}row-above`,
+        label: '上に行を挿入',
+        shortcut: 'Ctrl+Shift+Enter',
+        disabled: header,
+      },
+      { id: `${t}row-below`, label: '下に行を挿入', shortcut: 'Ctrl+Enter' },
+      { id: `${t}col-left`, label: '左に列を挿入', shortcut: 'Ctrl+Alt+←' },
+      { id: `${t}col-right`, label: '右に列を挿入', shortcut: 'Ctrl+Alt+→' },
+      SEP,
+      { id: `${t}row-delete`, label: '行を削除', disabled: header },
+      { id: `${t}col-delete`, label: '列を削除', disabled: tableCell.size.cols <= 1 },
+    );
+  }
+  return items;
 }

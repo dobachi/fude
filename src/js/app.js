@@ -66,6 +66,7 @@ import {
 import { localImageUrl, PLACEHOLDER_SRC } from './core/local-image.js';
 import { planStartup, startupNotice } from './core/startup-plan.js';
 import { tableCellText, editTableCell, tableSize, adjacentCell } from './core/table-cell-edit.js';
+import { applyTableOp } from './core/table-structure.js';
 import {
   initMenuBar,
   toggleMenuBar,
@@ -97,6 +98,8 @@ import {
   guessCursor,
   previewTableAt,
   tableCellElement,
+  topLevelBlockOf,
+  tableCellOf,
 } from './core/preview-edit.js';
 import { insertBlockChange, resolveGap, gapAfterLine } from './core/preview-insert.js';
 import { createPreviewScheduler } from './core/preview-scheduler.js';
@@ -782,6 +785,7 @@ async function init() {
       onTaskToggle: handlePreviewTaskToggle,
       onBlockEdit: handlePreviewBlockEdit,
       onBlockInsert: handlePreviewBlockInsert,
+      onTableOp: handlePreviewTableOp,
     });
 
   initPanes();
@@ -797,6 +801,7 @@ async function init() {
     onTaskToggle: handlePreviewTaskToggle,
     onBlockEdit: handlePreviewBlockEdit,
     onBlockInsert: handlePreviewBlockInsert,
+    onTableOp: handlePreviewTableOp,
     // Panes added/closed or focus moved: the buttons follow the active pane.
     onActivePaneChange: () => {
       syncViewModeButtons();
@@ -1273,6 +1278,7 @@ async function init() {
       openComposerForView(view);
     },
     onConvertTable: () => convertSelectionToTableAction(),
+    previewTableCell: previewTableCellTarget,
   });
 
   // AI panel close button
@@ -1535,9 +1541,16 @@ function handlePreviewBlockEdit({ line, blockEl, word, container, cell, caretAtE
       onCancel: (edited) => {
         if (edited !== cellText) keepUnappliedEdit(edited);
       },
+      onTableOp: (op) =>
+        handlePreviewTableOp({ container, line, op, row: cell.row, col: cell.col }),
       onMove: (dir) => {
         const size = tableSize(original);
         const next = size && adjacentCell(size.rows, size.cols, cell.row, cell.col, dir);
+        // Tab past the last cell: a new row, as in a spreadsheet.
+        if (!next && size && dir === 1) {
+          handlePreviewTableOp({ container, line, op: 'row-below', row: size.rows - 1, col: 0 });
+          return;
+        }
         if (!next) return;
         // The commit queued a re-render that will rebuild this table. Run it
         // now, so the neighbour is opened in the table that stays on screen
@@ -1574,6 +1587,76 @@ function handlePreviewBlockEdit({ line, blockEl, word, container, cell, caretAtE
       if (edited !== original) keepUnappliedEdit(edited);
     },
   });
+}
+
+// A row or column added to / removed from a preview table: the "+" on its
+// edges, its cell's right-click menu, or the cell editor's keys (Ctrl+Enter
+// etc.). The table's source is rewritten as one change (one undo step), the
+// preview re-rendered, and, after an insert, the new cell opened for typing.
+function handlePreviewTableOp({ container, line, op, row, col }) {
+  const pane = getPaneByPreviewContainer(container) || getActivePane();
+  const view = pane && pane.editorView;
+  if (!view || container.dataset.wholeFile) return;
+
+  // An edit still open goes in first, and its re-render with it.
+  commitInlineEdit();
+  previewScheduler.flush(pane);
+
+  const doc = view.state.doc;
+  const range = previewBlockRange(doc.toString(), line, pane.filePath);
+  if (!range || range.to > doc.lines) return;
+  const from = doc.line(range.from).from;
+  const to = doc.line(range.to).to;
+  const original = doc.sliceString(from, to);
+  const result = applyTableOp(original, op, row, col);
+  if (!result) return;
+  if (result.text !== original) {
+    view.dispatch({
+      changes: { from, to, insert: result.text },
+      userEvent: 'input.preview-table',
+    });
+  }
+  previewScheduler.flush(pane);
+
+  if (op === 'row-delete' || op === 'col-delete') {
+    container.focus({ preventScroll: true });
+    return;
+  }
+  const table = previewTableAt(container, line);
+  const cellEl = table && tableCellElement(table, result.row, result.col);
+  if (!cellEl) return;
+  handlePreviewBlockEdit({
+    line,
+    blockEl: table,
+    word: '',
+    container,
+    cell: { cellEl, row: result.row, col: result.col },
+    caretAtEnd: true,
+  });
+}
+
+/**
+ * The preview table cell a right-click landed on, for the context menu: where
+ * it is and how big its table is. Null outside a top-level table, or where the
+ * preview can't be edited.
+ */
+function previewTableCellTarget(container, target) {
+  const pane = getPaneByPreviewContainer(container);
+  if (!pane || !pane.editorView || container.dataset.wholeFile) return null;
+  const blockEl = topLevelBlockOf(container, target);
+  const cell = blockEl && tableCellOf(blockEl, target);
+  if (!cell) return null;
+  const line = parseInt(blockEl.getAttribute('data-source-line'), 10);
+  if (!Number.isFinite(line)) return null;
+  const size = {
+    rows: blockEl.querySelectorAll('tbody > tr').length + 1,
+    cols: cell.cellEl.parentElement.children.length,
+  };
+  return {
+    size,
+    row: cell.row,
+    run: (op) => handlePreviewTableOp({ container, line, op, row: cell.row, col: cell.col }),
+  };
 }
 
 // "+" in the preview's left margin → write a new block at that boundary. An

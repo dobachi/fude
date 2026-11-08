@@ -32,6 +32,7 @@ let onFileLinkCallback = null; // (target, previewContainer) => void — preview
 let onActivePaneChangeCallback = null; // (pane) => void — active pane switched or panes changed
 let onTaskToggleCallback = null; // (line, wasChecked, previewContainer) => void — preview checkbox
 let onBlockEditCallback = null; // ({line, blockEl, word, container}) => void — preview dblclick
+let onTableOpCallback = null; // ({container, line, op, row, col}) => void — preview table edge "+"
 let onBlockInsertCallback = null; // ({container, prevEl, nextEl}) => void — preview "+" button
 
 export function setCallbacks({
@@ -45,6 +46,7 @@ export function setCallbacks({
   onTaskToggle,
   onBlockEdit,
   onBlockInsert,
+  onTableOp,
   onActivePaneChange,
 }) {
   onChangeCallback = onChange;
@@ -57,6 +59,7 @@ export function setCallbacks({
   onTaskToggleCallback = onTaskToggle;
   onBlockEditCallback = onBlockEdit;
   onBlockInsertCallback = onBlockInsert;
+  onTableOpCallback = onTableOp || null;
   onActivePaneChangeCallback = onActivePaneChange;
 }
 
@@ -78,6 +81,9 @@ function previewInitOpts() {
     },
     onBlockInsert: (req) => {
       if (onBlockInsertCallback) onBlockInsertCallback(req);
+    },
+    onTableOp: (req) => {
+      if (onTableOpCallback) onTableOpCallback(req);
     },
   };
 }
