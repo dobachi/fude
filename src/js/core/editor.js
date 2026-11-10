@@ -948,7 +948,8 @@ const inlineTheme = EditorView.theme({
  *
  * @param {HTMLElement} parent
  * @param {string} content
- * @param {{commit: () => void, move?: (dir: 1|-1) => void}} handlers
+ * @param {{commit: () => void, move?: (dir: 1|-1) => void,
+ *   moveVertical?: (dir: 1|-1) => void, tableOp?: (op: string) => void}} handlers
  * @param {number} [cursor] initial caret offset
  * @param {{singleLine?: boolean}} [opts] singleLine: Enter finishes the edit
  *   instead of starting a new line, and Tab / Shift+Tab move (a table cell)
@@ -961,6 +962,13 @@ export function createInlineEditor(parent, content, handlers, cursor = 0, opts =
   };
   const move = (dir) => {
     if (handlers.move) handlers.move(dir);
+    else handlers.commit();
+    return true;
+  };
+  // Enter / Shift+Enter: on to the cell below / above, when the caller
+  // supports it (a table cell); otherwise Enter just finishes.
+  const moveVertical = (dir) => () => {
+    if (handlers.moveVertical) handlers.moveVertical(dir);
     else handlers.commit();
     return true;
   };
@@ -990,7 +998,8 @@ export function createInlineEditor(parent, content, handlers, cursor = 0, opts =
             { key: 'Mod-Enter', run: done },
             ...(opts.singleLine
               ? [
-                  { key: 'Enter', run: done },
+                  { key: 'Enter', run: moveVertical(1) },
+                  { key: 'Shift-Enter', run: moveVertical(-1) },
                   // Tab / Shift+Tab: on to the neighbouring cell, when the
                   // caller supports it (handlers.move); otherwise just finish.
                   { key: 'Tab', run: () => move(1) },

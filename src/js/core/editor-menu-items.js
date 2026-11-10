@@ -22,10 +22,19 @@ export const AI_ACTION_IDS = ['rewrite', 'summarize', 'expand', 'fix_grammar'];
  * selected (the menu keeps its shape); the AI section only appears with a
  * selection because every AI action needs one.
  *
- * @param {{hasSelection: boolean, canUndo?: boolean, canRedo?: boolean}} state
+ * Inside a table it also offers adding and removing rows and columns at the
+ * cursor's cell (the same items as the preview, without the cell editor's keys).
+ *
+ * @param {{hasSelection: boolean, canUndo?: boolean, canRedo?: boolean,
+ *   tableCell?: {row: number, size: {rows: number, cols: number}} | null}} state
  * @returns {MenuSpec[]}
  */
-export function buildEditorMenuItems({ hasSelection, canUndo = true, canRedo = true }) {
+export function buildEditorMenuItems({
+  hasSelection,
+  canUndo = true,
+  canRedo = true,
+  tableCell = null,
+}) {
   const noSel = !hasSelection;
   const items = [
     { id: 'undo', label: '元に戻す', shortcut: 'Ctrl+Z', disabled: !canUndo },
@@ -40,6 +49,7 @@ export function buildEditorMenuItems({ hasSelection, canUndo = true, canRedo = t
     SEP,
     { id: 'to-table', label: '選択範囲を表に変換', disabled: noSel },
   ];
+  if (tableCell) items.push(...tableMenuItems(tableCell, { keys: false }));
   if (hasSelection) {
     items.push(
       SEP,
@@ -70,24 +80,31 @@ export const TABLE_ITEM_PREFIX = 'table-';
  */
 export function buildPreviewMenuItems({ hasSelection, tableCell = null }) {
   const items = [{ id: 'copy', label: 'コピー', shortcut: 'Ctrl+C', disabled: !hasSelection }];
-  if (tableCell) {
-    const header = tableCell.row === 0;
-    const t = TABLE_ITEM_PREFIX;
-    items.push(
-      SEP,
-      {
-        id: `${t}row-above`,
-        label: '上に行を挿入',
-        shortcut: 'Ctrl+Shift+Enter',
-        disabled: header,
-      },
-      { id: `${t}row-below`, label: '下に行を挿入', shortcut: 'Ctrl+Enter' },
-      { id: `${t}col-left`, label: '左に列を挿入', shortcut: 'Ctrl+Alt+←' },
-      { id: `${t}col-right`, label: '右に列を挿入', shortcut: 'Ctrl+Alt+→' },
-      SEP,
-      { id: `${t}row-delete`, label: '行を削除', disabled: header },
-      { id: `${t}col-delete`, label: '列を削除', disabled: tableCell.size.cols <= 1 },
-    );
-  }
+  if (tableCell) items.push(...tableMenuItems(tableCell));
   return items;
+}
+
+/**
+ * Row and column items for a table cell, shared by the editor and the preview.
+ * They keep their place when they don't apply (no row above the header, the
+ * header row can't be removed, nor the only column) and are disabled instead.
+ *
+ * @param {{row: number, size: {rows: number, cols: number}}} tableCell
+ * @param {{keys?: boolean}} [opts] show the cell editor's keys (preview only)
+ * @returns {MenuSpec[]}
+ */
+export function tableMenuItems(tableCell, { keys = true } = {}) {
+  const header = tableCell.row === 0;
+  const t = TABLE_ITEM_PREFIX;
+  const k = (shortcut) => (keys ? { shortcut } : {});
+  return [
+    SEP,
+    { id: `${t}row-above`, label: '上に行を挿入', ...k('Ctrl+Shift+Enter'), disabled: header },
+    { id: `${t}row-below`, label: '下に行を挿入', ...k('Ctrl+Enter') },
+    { id: `${t}col-left`, label: '左に列を挿入', ...k('Ctrl+Alt+←') },
+    { id: `${t}col-right`, label: '右に列を挿入', ...k('Ctrl+Alt+→') },
+    SEP,
+    { id: `${t}row-delete`, label: '行を削除', disabled: header },
+    { id: `${t}col-delete`, label: '列を削除', disabled: tableCell.size.cols <= 1 },
+  ];
 }

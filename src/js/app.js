@@ -65,7 +65,13 @@ import {
 } from './core/pane-view-mode.js';
 import { localImageUrl, PLACEHOLDER_SRC } from './core/local-image.js';
 import { planStartup, startupNotice } from './core/startup-plan.js';
-import { tableCellText, editTableCell, tableSize, adjacentCell } from './core/table-cell-edit.js';
+import {
+  tableCellText,
+  editTableCell,
+  tableSize,
+  adjacentCell,
+  verticalCell,
+} from './core/table-cell-edit.js';
 import { applyTableOp } from './core/table-structure.js';
 import {
   initMenuBar,
@@ -1545,8 +1551,14 @@ function handlePreviewBlockEdit({ line, blockEl, word, container, cell, caretAtE
         handlePreviewTableOp({ container, line, op, row: cell.row, col: cell.col }),
       onMove: (dir) => {
         const size = tableSize(original);
-        const next = size && adjacentCell(size.rows, size.cols, cell.row, cell.col, dir);
-        // Tab past the last cell: a new row, as in a spreadsheet.
+        const vertical = dir === 'down' || dir === 'up';
+        const next =
+          size &&
+          (vertical
+            ? verticalCell(size.rows, size.cols, cell.row, cell.col, dir === 'down' ? 1 : -1)
+            : adjacentCell(size.rows, size.cols, cell.row, cell.col, dir));
+        // Tab past the last cell: a new row, as in a spreadsheet. Enter on the
+        // last row only finishes the edit (no row appears unasked).
         if (!next && size && dir === 1) {
           handlePreviewTableOp({ container, line, op: 'row-below', row: size.rows - 1, col: 0 });
           return;

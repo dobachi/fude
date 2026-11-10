@@ -2,9 +2,11 @@
 // Replaces the WebView's default (browser-style) menu with an app menu built
 // on the shared core/menu.js, so it looks and behaves like the other menus.
 import { EditorView } from '@codemirror/view';
+import { language } from '@codemirror/language';
 import { undo, redo, undoDepth, redoDepth } from '@codemirror/commands';
 import { executeActionDirect } from './composer.js';
 import { showMenu } from '../../core/menu.js';
+import { sourceTableCell, applySourceTableOp } from '../../core/table-source.js';
 import {
   AI_ACTION_IDS,
   buildEditorMenuItems,
@@ -73,16 +75,56 @@ function moveCursorToClick(view, x, y) {
 }
 
 function showEditorMenu(view, x, y) {
-  const { from, to } = view.state.selection.main;
+  const { from, to, head } = view.state.selection.main;
+  // A table at the cursor (Markdown only): offer its rows and columns too.
+  const docText = view.state.doc.toString();
+  const line = view.state.doc.lineAt(head);
+  const tableCell = isMarkdownView(view)
+    ? sourceTableCell(docText, line.number - 1, head - line.from)
+    : null;
   const specs = buildEditorMenuItems({
     hasSelection: from !== to,
     canUndo: undoDepth(view.state) > 0,
     canRedo: redoDepth(view.state) > 0,
+    tableCell,
   });
-  const items = specs.map((s) =>
-    s.separator ? s : { ...s, action: () => runEditorAction(s.id, view) },
-  );
+  const items = specs.map((s) => {
+    if (s.separator) return s;
+    if (tableCell && s.id.startsWith(TABLE_ITEM_PREFIX)) {
+      const op = s.id.slice(TABLE_ITEM_PREFIX.length);
+      return { ...s, action: () => runSourceTableOp(view, op) };
+    }
+    return { ...s, action: () => runEditorAction(s.id, view) };
+  });
   showMenu(x, y, items, { onClose: () => view.focus() });
+}
+
+/** Markdown editors only: a source file of another language has no tables. */
+function isMarkdownView(view) {
+  const lang = view.state.facet(language);
+  return !lang || /markdown/i.test(lang.name || '');
+}
+
+/** Insert / remove a row or column of the table at the cursor, as one undo step. */
+function runSourceTableOp(view, op) {
+  const { head } = view.state.selection.main;
+  const doc = view.state.doc;
+  const line = doc.lineAt(head);
+  const result = applySourceTableOp(doc.toString(), line.number - 1, head - line.from, op);
+  if (!result) return;
+  const from = doc.line(result.startLine + 1).from;
+  const to = doc.line(result.endLine + 1).to;
+  // The cursor's place in the new document: the table starts where it did.
+  const newLines = result.text.split('\n');
+  let anchor = from;
+  for (let i = 0; i < result.cursorLine - result.startLine; i++) anchor += newLines[i].length + 1;
+  anchor += result.cursorCol;
+  view.dispatch({
+    changes: { from, to, insert: result.text },
+    selection: { anchor },
+    userEvent: 'input.table',
+    scrollIntoView: true,
+  });
 }
 
 function showPreviewMenu(preview, target, x, y) {

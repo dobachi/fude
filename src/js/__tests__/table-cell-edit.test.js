@@ -5,6 +5,7 @@ import {
   tableCellText,
   editTableCell,
   adjacentCell,
+  verticalCell,
   tableSize,
 } from '../core/table-cell-edit.js';
 import { formatTableText, parseTableBlock, splitRow } from '../core/table.js';
@@ -265,6 +266,53 @@ describe('createInlineEditor singleLine', () => {
     parent.remove();
   });
 
+  it('Enter / Shift+Enter move down / up when the caller supports it, never adding a row', () => {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const commit = vi.fn();
+    const moveVertical = vi.fn();
+    const tableOp = vi.fn();
+    const move = vi.fn();
+    const view = createInlineEditor(parent, 'cell', { commit, moveVertical, tableOp, move }, 4, {
+      singleLine: true,
+    });
+    const key = (init) =>
+      view.contentDOM.dispatchEvent(
+        new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }),
+      );
+    key({ key: 'Enter' });
+    key({ key: 'Enter', shiftKey: true });
+    expect(moveVertical.mock.calls).toEqual([[1], [-1]]);
+    expect(tableOp).not.toHaveBeenCalled();
+    expect(move).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+    expect(view.state.doc.toString()).toBe('cell');
+    // Adding a row stays an explicit key
+    key({ key: 'Enter', ctrlKey: true });
+    expect(tableOp.mock.calls).toEqual([['row-below']]);
+    view.destroy();
+    parent.remove();
+  });
+
+  it('Shift+Enter just finishes when the caller cannot move', () => {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const commit = vi.fn();
+    const view = createInlineEditor(parent, 'cell', { commit }, 4, { singleLine: true });
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(view.state.doc.toString()).toBe('cell');
+    view.destroy();
+    parent.remove();
+  });
+
   it('without singleLine, Enter does not finish the edit', () => {
     const parent = document.createElement('div');
     document.body.appendChild(parent);
@@ -300,6 +348,29 @@ describe('adjacentCell', () => {
     expect(adjacentCell(1, 1, 0, 0, 1)).toBeNull();
     expect(adjacentCell(0, 2, 0, 0, 1)).toBeNull();
     expect(adjacentCell(2, 0, 0, 0, 1)).toBeNull();
+  });
+});
+
+describe('verticalCell', () => {
+  // 3 rows (header + 2) × 2 columns
+  it('moves down / up in the same column, header included', () => {
+    expect(verticalCell(3, 2, 0, 1, 1)).toEqual({ row: 1, col: 1 });
+    expect(verticalCell(3, 2, 1, 0, 1)).toEqual({ row: 2, col: 0 });
+    expect(verticalCell(3, 2, 2, 1, -1)).toEqual({ row: 1, col: 1 });
+    expect(verticalCell(3, 2, 1, 0, -1)).toEqual({ row: 0, col: 0 });
+  });
+
+  it('stops on the last / first row (Enter there adds no row)', () => {
+    expect(verticalCell(3, 2, 2, 0, 1)).toBeNull();
+    expect(verticalCell(3, 2, 0, 0, -1)).toBeNull();
+    expect(verticalCell(1, 1, 0, 0, 1)).toBeNull();
+  });
+
+  it('rejects degenerate sizes and columns outside the table', () => {
+    expect(verticalCell(0, 2, 0, 0, 1)).toBeNull();
+    expect(verticalCell(3, 0, 0, 0, 1)).toBeNull();
+    expect(verticalCell(3, 2, 0, 2, 1)).toBeNull();
+    expect(verticalCell(3, 2, 0, -1, 1)).toBeNull();
   });
 });
 
@@ -378,6 +449,52 @@ describe('inline edit move (Tab)', () => {
       ['commit', 'A', 'a'],
       ['move', 1],
     ]);
+    container.remove();
+  });
+
+  it('Enter / Shift+Enter in a cell commit, then move down / up', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    renderMarkdown('| a | b |\n|---|---|\n| c | d |\n', '', container);
+    const table = container.querySelector('table');
+    const order = [];
+    const open = (cellEl, text) =>
+      startInlineEdit({
+        container,
+        blockEl: table,
+        cellEl,
+        text,
+        mountEditor: fakeMount,
+        onCommit: (t) => order.push(['commit', t]),
+        onMove: (dir) => order.push(['move', dir]),
+      });
+    open(table.querySelector('th'), 'a');
+    fakeMount.last.ta.value = 'A';
+    fakeMount.last.handlers.moveVertical(1);
+    open(table.querySelector('td'), 'c');
+    fakeMount.last.handlers.moveVertical(-1);
+    expect(order).toEqual([
+      ['commit', 'A'],
+      ['move', 'down'],
+      ['commit', 'c'],
+      ['move', 'up'],
+    ]);
+    container.remove();
+  });
+
+  it('without onMove there is no vertical move: Enter just finishes', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    renderMarkdown('para\n', '', container);
+    startInlineEdit({
+      container,
+      blockEl: container.querySelector('p'),
+      text: 'para',
+      mountEditor: fakeMount,
+      onCommit: () => {},
+    });
+    expect(fakeMount.last.handlers.moveVertical).toBeUndefined();
+    commitInlineEdit();
     container.remove();
   });
 

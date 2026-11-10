@@ -143,8 +143,9 @@ let active = null;
  *   cursor: number) => {state: {doc: {toString(): string}}, destroy(): void, focus?(): void}} opts.mountEditor
  * @param {(edited: string) => void} opts.onCommit
  * @param {(edited: string) => void} [opts.onCancel]
- * @param {(dir: 1|-1) => void} [opts.onMove] called after onCommit when the
- *   editor asked to move to the next (1) or previous (-1) cell
+ * @param {(dir: 1|-1|'down'|'up') => void} [opts.onMove] called after onCommit
+ *   when the editor asked to move to the next (1) or previous (-1) cell (Tab),
+ *   or the one below ('down') / above ('up') (Enter / Shift+Enter)
  * @param {(op: string) => void} [opts.onTableOp] called after onCommit when
  *   the editor asked for a table operation (see table-structure.js), e.g.
  *   Ctrl+Enter in a cell = add a row below
@@ -192,6 +193,10 @@ export function startInlineEdit(opts) {
     {
       commit: () => finish(edit, 'commit', true),
       move: (dir) => finish(edit, 'commit', true, dir),
+      // Enter / Shift+Enter in a table cell: the cell below / above.
+      ...(opts.onMove
+        ? { moveVertical: (dir) => finish(edit, 'commit', true, dir > 0 ? 'down' : 'up') }
+        : {}),
       ...(opts.onTableOp
         ? { tableOp: (op) => finish(edit, 'commit', true, 0, () => opts.onTableOp(op)) }
         : {}),

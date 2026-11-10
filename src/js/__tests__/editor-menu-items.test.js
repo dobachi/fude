@@ -3,6 +3,7 @@ import {
   AI_ACTION_IDS,
   buildEditorMenuItems,
   buildPreviewMenuItems,
+  tableMenuItems,
 } from '../core/editor-menu-items.js';
 
 const ids = (items) => items.filter((i) => !i.separator).map((i) => i.id);
@@ -76,5 +77,49 @@ describe('buildPreviewMenuItems', () => {
       { id: 'copy', label: 'コピー', shortcut: 'Ctrl+C', disabled: true },
     ]);
     expect(byId(buildPreviewMenuItems({ hasSelection: true }), 'copy').disabled).toBe(false);
+  });
+});
+
+describe('table items in the editor menu', () => {
+  const TABLE_IDS = [
+    'table-row-above',
+    'table-row-below',
+    'table-col-left',
+    'table-col-right',
+    'table-row-delete',
+    'table-col-delete',
+  ];
+
+  it('only appear inside a table', () => {
+    expect(
+      ids(buildEditorMenuItems({ hasSelection: false })).some((i) => i.startsWith('table-')),
+    ).toBe(false);
+    const items = buildEditorMenuItems({
+      hasSelection: false,
+      tableCell: { row: 1, size: { rows: 3, cols: 2 } },
+    });
+    expect(ids(items).filter((i) => i.startsWith('table-'))).toEqual(TABLE_IDS);
+  });
+
+  it('carry no cell-editor keys (those work in the preview only)', () => {
+    const items = buildEditorMenuItems({
+      hasSelection: false,
+      tableCell: { row: 1, size: { rows: 3, cols: 2 } },
+    });
+    for (const id of TABLE_IDS) expect(byId(items, id).shortcut).toBeUndefined();
+    expect(
+      byId(tableMenuItems({ row: 1, size: { rows: 3, cols: 2 } }), 'table-row-below').shortcut,
+    ).toBe('Ctrl+Enter');
+  });
+
+  it('disable what does not apply on the header and with one column', () => {
+    const items = buildEditorMenuItems({
+      hasSelection: true,
+      tableCell: { row: 0, size: { rows: 1, cols: 1 } },
+    });
+    expect(byId(items, 'table-row-above').disabled).toBe(true);
+    expect(byId(items, 'table-row-delete').disabled).toBe(true);
+    expect(byId(items, 'table-col-delete').disabled).toBe(true);
+    expect(byId(items, 'table-row-below').disabled).toBeFalsy();
   });
 });

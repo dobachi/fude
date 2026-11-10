@@ -156,6 +156,26 @@ export function adjacentCell(rows, cols, row, col, dir) {
 }
 
 /**
+ * The cell Enter (dir = 1) or Shift+Enter (dir = -1) moves to: the same column
+ * one row down / up, as in a spreadsheet. The header is row 0. Null past the
+ * last / first row: Enter there only finishes the edit, it never adds a row
+ * (rows are added explicitly: Ctrl+Enter, Tab past the last cell, the "+").
+ *
+ * @param {number} rows total rows including the header
+ * @param {number} cols columns
+ * @param {number} row
+ * @param {number} col
+ * @param {1|-1} dir
+ * @returns {{row: number, col: number} | null}
+ */
+export function verticalCell(rows, cols, row, col, dir) {
+  if (rows < 1 || cols < 1 || col < 0 || col >= cols) return null;
+  const next = row + dir;
+  if (next < 0 || next >= rows) return null;
+  return { row: next, col };
+}
+
+/**
  * Size of a table as the preview shows it: rows including the header, and
  * columns. Null when `tableText` is not a table.
  * @returns {{rows: number, cols: number} | null}
