@@ -54,6 +54,7 @@ let tabs = [];
 let activeTabId = null;
 let nextTabId = 1;
 let onTabChange = null;
+let onBeforeTabChange = null;
 let onTabPathChange = null;
 let onTabContextMenu = null;
 
@@ -63,6 +64,23 @@ export function setTabContextMenuCallback(callback) {
 
 export function setTabChangeCallback(callback) {
   onTabChange = callback;
+}
+
+/**
+ * Notified with the still-active tab just before another tab becomes active,
+ * so per-tab view state (cursor, editor/preview scroll) can be captured from
+ * the shared pane. Fires for every switch path — tab click, Ctrl+Tab, opening
+ * a new or an already-open file — not just the keyboard shortcut.
+ * @param {(tab: object) => void} callback
+ */
+export function setBeforeTabChangeCallback(callback) {
+  onBeforeTabChange = callback;
+}
+
+function notifyBeforeTabChange() {
+  if (!onBeforeTabChange || !activeTabId) return;
+  const current = tabs.find((t) => t.id === activeTabId);
+  if (current) onBeforeTabChange(current);
 }
 
 /**
@@ -100,6 +118,9 @@ export function openTab(path, content = '', opts = {}) {
     dirty: false,
     cursor: { from: 0, to: 0 },
     scroll: { top: 0, left: 0 },
+    // Preview scrollTop. The preview container is shared by every tab in a
+    // pane, so without this each tab inherited the previous tab's position.
+    previewScrollTop: 0,
     // 'text' (editable) or 'image' (read-only viewer).
     kind: opts.kind || 'text',
     // Per-tab view mode: 'split' | 'editor' | 'preview'.
@@ -109,6 +130,7 @@ export function openTab(path, content = '', opts = {}) {
     diskHash: null,
   };
 
+  notifyBeforeTabChange();
   tabs.push(tab);
   activeTabId = tab.id;
 
@@ -208,10 +230,12 @@ function forceCloseTab(id) {
 
 export function switchTab(id) {
   if (activeTabId === id) return;
-  activeTabId = id;
   const tab = tabs.find((t) => t.id === id);
+  if (!tab) return;
+  notifyBeforeTabChange();
+  activeTabId = id;
   renderTabBar();
-  if (onTabChange && tab) onTabChange(tab);
+  if (onTabChange) onTabChange(tab);
 }
 
 export function nextTab() {
@@ -280,6 +304,11 @@ export function updateTabCursor(id, cursor) {
 export function updateTabScroll(id, scroll) {
   const tab = tabs.find((t) => t.id === id);
   if (tab) tab.scroll = scroll;
+}
+
+export function updateTabPreviewScroll(id, top) {
+  const tab = tabs.find((t) => t.id === id);
+  if (tab) tab.previewScrollTop = Math.max(0, Number(top) || 0);
 }
 
 /** Set a tab's view mode ('split' | 'editor' | 'preview'). */

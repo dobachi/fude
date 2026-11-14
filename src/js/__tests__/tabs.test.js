@@ -280,6 +280,101 @@ describe('tabs module', () => {
   });
 });
 
+// タブごとの表示状態（カーソル・スクロール）の退避。プレビュー領域はペイン内で
+// 全タブ共有なので、切替の直前に「まだアクティブなタブ」で状態を取り出せないと、
+// 別タブのスクロール位置が引き継がれてしまう（クリック切替では保存されていなかった）。
+describe('切替前フック（タブごとのスクロール位置保持）', () => {
+  let mod;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    document.body.innerHTML = '<div id="tab-bar"></div>';
+    mod = await import('../core/tabs.js');
+  });
+
+  it('switchTab は切替前にまだアクティブな旧タブを渡す', () => {
+    const a = mod.openTab('/a.md', 'A');
+    const b = mod.openTab('/b.md', 'B');
+    const seen = [];
+    mod.setBeforeTabChangeCallback((t) => seen.push([t.id, mod.getActiveTab().id]));
+    mod.switchTab(a.id);
+    expect(seen).toEqual([[b.id, b.id]]);
+  });
+
+  it('タブバーのクリック切替でもフックが呼ばれる', () => {
+    const a = mod.openTab('/a.md', 'A');
+    mod.openTab('/b.md', 'B');
+    const before = vi.fn();
+    mod.setBeforeTabChangeCallback(before);
+    const el = [...document.querySelectorAll('#tab-bar .tab')].find((e) =>
+      e.textContent.includes('a.md'),
+    );
+    el.click();
+    expect(before).toHaveBeenCalledTimes(1);
+    expect(mod.getActiveTab().id).toBe(a.id);
+  });
+
+  it('nextTab / prevTab でも呼ばれる', () => {
+    mod.openTab('/a.md', 'A');
+    mod.openTab('/b.md', 'B');
+    const before = vi.fn();
+    mod.setBeforeTabChangeCallback(before);
+    mod.nextTab();
+    mod.prevTab();
+    expect(before).toHaveBeenCalledTimes(2);
+  });
+
+  it('新しいタブを開く前に旧タブを渡す（最初のタブでは呼ばない）', () => {
+    const before = vi.fn();
+    mod.setBeforeTabChangeCallback(before);
+    const a = mod.openTab('/a.md', 'A');
+    expect(before).not.toHaveBeenCalled();
+    mod.openTab('/b.md', 'B');
+    expect(before).toHaveBeenCalledTimes(1);
+    expect(before.mock.calls[0][0].id).toBe(a.id);
+  });
+
+  it('開いている既存ファイルを開き直すと切替として扱う', () => {
+    const a = mod.openTab('/a.md', 'A');
+    mod.openTab('/b.md', 'B');
+    const before = vi.fn();
+    mod.setBeforeTabChangeCallback(before);
+    expect(mod.openTab('/a.md').id).toBe(a.id);
+    expect(before).toHaveBeenCalledTimes(1);
+  });
+
+  it('同じタブ・存在しないタブへの切替ではフックも切替も起きない', () => {
+    const a = mod.openTab('/a.md', 'A');
+    const before = vi.fn();
+    const change = vi.fn();
+    mod.setBeforeTabChangeCallback(before);
+    mod.setTabChangeCallback(change);
+    mod.switchTab(a.id);
+    mod.switchTab('tab-does-not-exist');
+    expect(before).not.toHaveBeenCalled();
+    expect(change).not.toHaveBeenCalled();
+    expect(mod.getActiveTab().id).toBe(a.id);
+  });
+
+  it('プレビューのスクロール位置はタブごとに独立して保持される', () => {
+    const a = mod.openTab('/a.md', 'A');
+    const b = mod.openTab('/b.md', 'B');
+    expect(a.previewScrollTop).toBe(0);
+    mod.updateTabPreviewScroll(a.id, 1200);
+    expect(mod.getAllTabs().find((t) => t.id === a.id).previewScrollTop).toBe(1200);
+    expect(mod.getAllTabs().find((t) => t.id === b.id).previewScrollTop).toBe(0);
+  });
+
+  it('updateTabPreviewScroll は不正値・負値を 0 に丸める', () => {
+    const a = mod.openTab('/a.md', 'A');
+    mod.updateTabPreviewScroll(a.id, -5);
+    expect(a.previewScrollTop).toBe(0);
+    mod.updateTabPreviewScroll(a.id, NaN);
+    expect(a.previewScrollTop).toBe(0);
+    mod.updateTabPreviewScroll('nope', 10); // 存在しないタブは無視
+  });
+});
+
 // タブバー右端に固定した表示切替ボタン（.tab-bar-actions）との共存。
 // タブは常にアクションの前へ入れる必要がある — 後ろに積むとタブが増えた
 // ときにボタンが右端から押し出されて隠れてしまう。

@@ -124,6 +124,8 @@ import {
   updateTabScroll,
   updateTabPath,
   setTabChangeCallback,
+  setBeforeTabChangeCallback,
+  updateTabPreviewScroll,
   setTabPathChangeCallback,
   setTabContextMenuCallback,
   closeOtherTabs,
@@ -868,6 +870,7 @@ async function init() {
   initEditorPreviewResizer();
 
   // Tab change callback
+  setBeforeTabChangeCallback(saveActivePaneTabState);
   setTabChangeCallback(handleTabChange);
   setTabPathChangeCallback(handleTabPathChange);
   setTabContextMenuCallback(handleTabContextMenu);
@@ -2415,6 +2418,15 @@ function handleTabChange(tab) {
   // view-mode (width) change above triggers, otherwise a line-based scroll is
   // computed against the wrong width and the view lands on a different line.
   if (tab.cursor) setCursor(view, tab.cursor.from || 0, tab.cursor.to || 0);
+  // The preview container is shared by all tabs in this pane, so it still
+  // holds the previous tab's scrollTop. Put back this tab's own position.
+  // Claiming 'editor' as the sync source keeps the resulting scroll event from
+  // dragging the editor along; in split mode the editor restore below then
+  // re-syncs the preview to the restored line anyway.
+  if (pane.previewContainer) {
+    recordScrollSync('editor');
+    pane.previewContainer.scrollTop = tab.previewScrollTop || 0;
+  }
   if (tab.scroll && view) {
     const scroll = tab.scroll;
     requestAnimationFrame(() => setScroll(view, scroll));
@@ -3031,14 +3043,21 @@ async function handleOpenFolder() {
 
 // ── Helpers ────────────────────────────────────────────────
 
-/** Save the current active pane's tab state (cursor, scroll) before switching. */
-function saveActivePaneTabState() {
+/**
+ * Save the active pane's tab state (cursor, editor and preview scroll) before
+ * switching. Called by tabs.js for every switch path, with the still-active tab.
+ */
+function saveActivePaneTabState(tab = getActiveTab()) {
+  if (!tab || tab.kind === 'image') return;
+  const pane = getActivePane();
   const view = currentView();
-  if (!view) return;
-  const tab = getActiveTab();
-  if (!tab) return;
-  updateTabCursor(tab.id, getCursor(view));
-  updateTabScroll(tab.id, getScroll(view));
+  if (view) {
+    updateTabCursor(tab.id, getCursor(view));
+    updateTabScroll(tab.id, getScroll(view));
+  }
+  if (pane && pane.previewContainer) {
+    updateTabPreviewScroll(tab.id, pane.previewContainer.scrollTop);
+  }
 }
 
 // ── Global keyboard shortcuts ──────────────────────────────
@@ -3312,7 +3331,6 @@ function handleGlobalKeys(e) {
     e.stopPropagation();
     // Apply an open preview edit while its tab is still the active one.
     commitInlineEdit();
-    saveActivePaneTabState();
     if (tabAction === 'next') nextTab();
     else prevTab();
     return;
