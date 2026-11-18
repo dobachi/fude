@@ -17,6 +17,10 @@ pub struct Features {
     /// Markdown input assist in the editor: list continuation, marker removal
     /// on Backspace, `- [` → `- [ ] `.
     pub markdown_assist: bool,
+    /// Automatic section numbers ("1.2.3") on the preview's headings.
+    pub section_numbers: bool,
+    /// The same numbers in front of each heading in the sidebar outline.
+    pub outline_numbers: bool,
     pub plantuml_preview: bool,
     pub mermaid_preview: bool,
 }
@@ -117,6 +121,8 @@ impl Default for Features {
             source_code_mode: false,
             scroll_past_end: true,
             markdown_assist: true,
+            section_numbers: false,
+            outline_numbers: false,
             plantuml_preview: false,
             mermaid_preview: false,
         }
@@ -231,6 +237,8 @@ mod tests {
                 source_code_mode: true,
                 scroll_past_end: false,
                 markdown_assist: false,
+                section_numbers: true,
+                outline_numbers: true,
                 plantuml_preview: true,
                 mermaid_preview: true,
             },
@@ -259,6 +267,8 @@ mod tests {
         assert!(restored.features.mermaid_preview);
         assert!(!restored.features.scroll_past_end);
         assert!(!restored.features.markdown_assist);
+        assert!(restored.features.section_numbers);
+        assert!(restored.features.outline_numbers);
         assert_eq!(restored.font_size, 18);
         assert_eq!(restored.ui_font_size, 16);
         assert!(restored.vim_mode);
@@ -299,6 +309,27 @@ mod tests {
         let off: Config =
             serde_json::from_str(r#"{"features":{"markdown_assist":false}}"#).unwrap();
         assert!(!off.features.markdown_assist);
+    }
+
+    #[test]
+    fn section_numbers_are_off_unless_switched_on() {
+        assert!(!Config::default().features.section_numbers);
+        // A features block written before the setting existed.
+        let old: Config = serde_json::from_str(r#"{"features":{"diff_highlight":false}}"#).unwrap();
+        assert!(!old.features.section_numbers);
+        let on: Config = serde_json::from_str(r#"{"features":{"section_numbers":true}}"#).unwrap();
+        assert!(on.features.section_numbers);
+    }
+
+    #[test]
+    fn outline_numbers_are_off_unless_switched_on() {
+        assert!(!Config::default().features.outline_numbers);
+        let old: Config = serde_json::from_str(r#"{"features":{"diff_highlight":false}}"#).unwrap();
+        assert!(!old.features.outline_numbers);
+        // Independent of the preview setting.
+        let on: Config = serde_json::from_str(r#"{"features":{"outline_numbers":true}}"#).unwrap();
+        assert!(on.features.outline_numbers);
+        assert!(!on.features.section_numbers);
     }
 
     #[test]

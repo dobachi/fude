@@ -73,6 +73,14 @@ export async function openSettings() {
           <small class="setting-hint">Non-Markdown files open with language highlighting, editor-only.</small>
         </div>
         <div class="setting-group">
+          <label><input type="checkbox" id="setting-section-numbers" ${config.features?.section_numbers ? 'checked' : ''} /> Section Numbers (preview)</label>
+          <small class="setting-hint">プレビューの見出しに 1, 1.1, 1.1.1 … の番号を付けます。文書の先頭に # 見出しが一つだけある場合は、それをタイトルとみなして番号を付けません。原文は変わりません。</small>
+        </div>
+        <div class="setting-group">
+          <label><input type="checkbox" id="setting-outline-numbers" ${config.features?.outline_numbers ? 'checked' : ''} /> Section Numbers (outline)</label>
+          <small class="setting-hint">サイドバーのアウトラインに、プレビューと同じ規則で番号を付けます。</small>
+        </div>
+        <div class="setting-group">
           <label><input type="checkbox" id="setting-scroll-past-end" ${config.features?.scroll_past_end !== false ? 'checked' : ''} /> Scroll Past End</label>
           <small class="setting-hint">文章の末尾の下に余白を足し、最後の行を画面の中ほどまでスクロールできるようにします。</small>
         </div>
@@ -359,6 +367,8 @@ async function saveSettings() {
       source_code_mode: document.querySelector('#setting-source-code-mode')?.checked || false,
       scroll_past_end: document.querySelector('#setting-scroll-past-end')?.checked ?? true,
       markdown_assist: document.querySelector('#setting-markdown-assist')?.checked ?? true,
+      section_numbers: document.querySelector('#setting-section-numbers')?.checked || false,
+      outline_numbers: document.querySelector('#setting-outline-numbers')?.checked || false,
       plantuml_preview: document.querySelector('#setting-plantuml')?.checked || false,
       mermaid_preview: document.querySelector('#setting-mermaid')?.checked || false,
     },

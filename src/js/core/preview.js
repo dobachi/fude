@@ -23,6 +23,7 @@ import {
   tableCellOf,
 } from './preview-edit.js';
 import { attachTableControls } from './preview-table-controls.js';
+import { applySectionNumbers } from './section-numbers.js';
 import { attachInsertButton } from './preview-insert.js';
 import { attachScrollPastEnd, scrollToDocumentEnd } from './scroll-past-end.js';
 import {
@@ -459,7 +460,20 @@ function updatePreviewDom(container, mdInstance, basePath, htmlList) {
     applyBlocks(container, reusable ? prev.blocks : null, htmlList),
   );
   blockState.set(container, { md: mdInstance, basePath, blocks: result.blocks });
+  // Recomputed over the whole document every time: a heading added or removed
+  // anywhere renumbers everything after it, and reused blocks would otherwise
+  // keep their stale numbers.
+  applySectionNumbers(container, sectionNumbersEnabled);
   return result;
+}
+
+// ── Section numbers ────────────────────────────────────────
+
+let sectionNumbersEnabled = false;
+
+/** Turn automatic heading numbers in the preview on or off. */
+export function setSectionNumbersEnabled(enabled) {
+  sectionNumbersEnabled = !!enabled;
 }
 
 /**

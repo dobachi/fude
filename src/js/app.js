@@ -34,6 +34,7 @@ import {
   pickOutlineLine,
   clearOutline,
   focusOutline,
+  setOutlineNumbersEnabled,
 } from './core/outline.js';
 import { isImagePath, mimeToExt, insertImageMarkdown } from './core/image-insert.js';
 import { attachPanZoom } from './core/svg-panzoom.js';
@@ -89,6 +90,7 @@ import {
   syncPreviewToLine,
   getLineFromPreview,
   setPlantumlEnabled,
+  setSectionNumbersEnabled,
   setMermaidEnabled,
   setCodeHighlightEnabled,
   renderPreview,
@@ -746,6 +748,8 @@ async function init() {
   // On unless switched off: configs written before the setting existed lack it.
   setScrollPastEndEnabled(config.features?.scroll_past_end !== false);
   setMarkdownAssist(config.features?.markdown_assist !== false);
+  setSectionNumbersEnabled(!!config.features?.section_numbers);
+  setOutlineNumbersEnabled(!!config.features?.outline_numbers);
 
   // Live-apply config changes saved from the Settings panel.
   window.addEventListener('fude:config-saved', (e) => {
@@ -758,6 +762,8 @@ async function init() {
     setSourceCodeMode(sourceCodeModeEnabled);
     setScrollPastEndEnabled(saved.features?.scroll_past_end !== false);
     setMarkdownAssist(saved.features?.markdown_assist !== false);
+    setSectionNumbersEnabled(!!saved.features?.section_numbers);
+    setOutlineNumbersEnabled(!!saved.features?.outline_numbers);
     if (saved.ui_font_size) setUiFontSize(saved.ui_font_size);
     rerenderPreviews();
   });

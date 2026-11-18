@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   extractHeadings,
   initOutline,
@@ -9,6 +9,7 @@ import {
   setActiveOutlineLine,
   getActiveOutlineLine,
   clearOutline,
+  setOutlineNumbersEnabled,
 } from '../core/outline.js';
 
 describe('extractHeadings', () => {
@@ -233,5 +234,61 @@ describe('outline active highlight', () => {
     updateOutline('just text');
     expect(() => setActiveOutlineLine(3)).not.toThrow();
     expect(activeTexts()).toEqual([]);
+  });
+});
+
+describe('outline section numbers', () => {
+  let ol;
+  const DOC = ['# Title', '## A', '### A1', '## B', '```', '## not a heading', '```'].join('\n');
+  const numbers = () =>
+    Array.from(ol.querySelectorAll('.outline-item'), (el) => {
+      const n = el.querySelector('.outline-number');
+      return n ? n.textContent : null;
+    });
+
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="outline-list" tabindex="-1"></div>';
+    ol = document.getElementById('outline-list');
+    initOutline(ol, {});
+    clearOutline();
+  });
+  afterEach(() => setOutlineNumbersEnabled(false));
+
+  it('shows no numbers by default', () => {
+    updateOutline(DOC);
+    expect(ol.querySelector('.outline-number')).toBeNull();
+    expect(Array.from(ol.querySelectorAll('.outline-item'), (el) => el.textContent)).toEqual([
+      'Title',
+      'A',
+      'A1',
+      'B',
+    ]);
+  });
+
+  it('numbers headings by the same rule as the preview (title unnumbered)', () => {
+    setOutlineNumbersEnabled(true);
+    updateOutline(DOC);
+    expect(numbers()).toEqual([null, '1', '1.1', '2']);
+    // The heading text and tooltip stay as written.
+    const b = ol.querySelectorAll('.outline-item')[3];
+    expect(b.title).toBe('B');
+    expect(b.lastChild.textContent).toBe('B');
+  });
+
+  it('re-renders in place when toggled, keeping the highlight', () => {
+    updateOutline(DOC);
+    setActiveOutlineLine(4);
+    setOutlineNumbersEnabled(true);
+    expect(numbers()).toEqual([null, '1', '1.1', '2']);
+    expect(ol.querySelector('.outline-item.active').dataset.line).toBe('4');
+    setOutlineNumbersEnabled(false);
+    expect(ol.querySelector('.outline-number')).toBeNull();
+  });
+
+  it('renumbers as headings are added', () => {
+    setOutlineNumbersEnabled(true);
+    updateOutline(DOC);
+    updateOutline(['# Title', '## New', '## A', '### A1', '## B'].join('\n'));
+    expect(numbers()).toEqual([null, '1', '2', '2.1', '3']);
   });
 });

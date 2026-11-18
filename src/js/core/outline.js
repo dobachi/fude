@@ -3,6 +3,7 @@
 // and tracks the current section based on editor scroll position.
 
 import { createListKeyHandler } from './list-nav.js';
+import { computeSectionNumbers } from './section-numbers.js';
 
 /**
  * Extract ATX headings ("# ...", "## ...", etc.) from markdown source.
@@ -63,6 +64,17 @@ let lastRenderedHeadings = [];
 // (typing, tab switch, external reload) restores the highlight instead of
 // dropping it until the next scroll event.
 let currentLine = 1;
+// Section numbers ("1.2.3") in front of each heading. A setting of its own,
+// separate from the preview's, but numbered by the same rule.
+let numbersEnabled = false;
+
+/** Turn section numbers in the outline on or off, re-rendering in place. */
+export function setOutlineNumbersEnabled(enabled) {
+  const next = !!enabled;
+  if (next === numbersEnabled) return;
+  numbersEnabled = next;
+  if (listContainer && lastRenderedHeadings.length) renderOutline(lastRenderedHeadings);
+}
 
 /**
  * Index of the heading that "contains" the given 1-based (possibly fractional)
@@ -121,18 +133,29 @@ export function renderOutline(headings) {
     return;
   }
 
-  for (const h of lastRenderedHeadings) {
+  const numbers = numbersEnabled
+    ? computeSectionNumbers(lastRenderedHeadings.map((h) => h.level))
+    : [];
+  lastRenderedHeadings.forEach((h, i) => {
     const item = document.createElement('div');
     item.className = `outline-item outline-level-${h.level}`;
     item.dataset.line = String(h.line);
-    item.textContent = h.text;
+    if (numbers[i]) {
+      const num = document.createElement('span');
+      num.className = 'outline-number';
+      num.textContent = numbers[i];
+      item.appendChild(num);
+      item.appendChild(document.createTextNode(h.text));
+    } else {
+      item.textContent = h.text;
+    }
     item.title = h.text; // tooltip for truncated long titles
     item.tabIndex = -1; // focusable for keyboard navigation
     item.addEventListener('click', () => {
       if (onJumpCallback) onJumpCallback(h.line);
     });
     listContainer.appendChild(item);
-  }
+  });
   applyActive(false);
 }
 

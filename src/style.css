@@ -520,6 +520,12 @@ body {
   user-select: none;
 }
 
+.outline-number {
+  margin-right: 0.5em;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
 .outline-item:hover {
   background: var(--bg-hover);
   color: var(--fg-primary);
@@ -970,6 +976,16 @@ body {
   font-weight: 600;
   line-height: 1.25;
   color: var(--fg-primary);
+}
+
+/* Automatic section numbers (Settings → Section Numbers). Drawn from an
+   attribute so the heading text, its anchor id and copy-paste stay clean. */
+.preview-pane [data-section-number]::before {
+  content: attr(data-section-number);
+  margin-right: 0.6em;
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
 }
 
 .preview-pane h1 {
