@@ -62,8 +62,12 @@ jobs:
           node-version: 22
           cache: npm
 
+      # Pinned: Rust 1.100 moved build-script OUT_DIRs (new build-dir layout),
+      # and tauri-build 2.6.2 derives the sidecar destination from OUT_DIR, so
+      # it lands on target/debug/build/fude-cli (a directory) and panics with
+      # "Is a directory". Unpin after upgrading tauri-build past 2.6.
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
