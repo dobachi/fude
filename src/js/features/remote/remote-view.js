@@ -73,13 +73,19 @@ export function mountRemoteView(api, config, onClose, preset = null) {
     onOpened: onClose,
   });
   const conns = initConnections(el, api);
-  initRemoteSection(el, api, config.setup_hosts, { onHosts: (h) => open?.setHosts(h) });
+  const setup = initRemoteSection(el, api, config.setup_hosts, {
+    onHosts: (h) => open?.setHosts(h),
+    recent: config.remote_recent,
+  });
   initWslSection(el, api, undefined, { onChange: (st) => open?.setWsl(st) }).catch((e) =>
     console.error('WSL section failed:', e),
   );
   api
     .sshHostCandidates()
-    .then((names) => open?.setCandidates(names))
+    .then((names) => {
+      open?.setCandidates(names);
+      setup?.setCandidates(names);
+    })
     .catch(() => {});
   el.querySelector('#remote-open-path')?.focus();
   return { el, conns };

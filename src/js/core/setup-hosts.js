@@ -155,3 +155,28 @@ export function pathSuggestions(typed, recent, completions) {
   for (const p of clean(completions)) add(p);
   return out.slice(0, SUGGEST_MAX);
 }
+
+/**
+ * What to offer while a host name is typed: the hosts used lately, the ones
+ * set up, then the names in the ssh config — each once, without those in
+ * `exclude` (already listed next to the field, say).
+ */
+export function hostSuggestions(recent, setupHosts, candidates, exclude = []) {
+  const skip = clean(exclude).map((h) => h.trim());
+  return openTargets(recent, setupHosts, candidates).filter((h) => !skip.includes(h));
+}
+
+/**
+ * The line shown next to a set-up host about the way back from it (the ssh
+ * forward the app holds; see src-tauri/src/remote_hold.rs). `status` is one
+ * entry of remoteHoldsStatus(), or undefined when none is held.
+ */
+export function holdText(status) {
+  if (!status) return { text: '', kind: '' };
+  if (status.up) return { text: '転送を維持中', kind: 'ok' };
+  const why = String(status.last_error || '').trim();
+  return {
+    text: why ? `転送の再接続待ち（${why}）` : '転送の再接続待ち',
+    kind: 'waiting',
+  };
+}

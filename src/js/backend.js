@@ -332,6 +332,22 @@ export async function remoteOpen(host, path) {
   return doInvoke('remote_open', { host, path });
 }
 
+/**
+ * Hold the way back (the ssh forward) from each set-up host, and from no
+ * other: call after the saved host list changed. Resolves to the states
+ * `[{ host, up, last_error }]`.
+ */
+export async function remoteHoldsSync() {
+  if (!isTauriWebview()) return [];
+  return doInvoke('remote_holds_sync');
+}
+
+/** How the forward of each set-up host stands: `[{ host, up, last_error }]`. */
+export async function remoteHoldsStatus() {
+  if (!isTauriWebview()) return [];
+  return doInvoke('remote_holds_status');
+}
+
 /** The host names in the ssh config of the machine that runs ssh for this app. */
 export async function sshHostCandidates() {
   if (!isTauriWebview()) return [];

@@ -38,7 +38,8 @@ export function openSectionHtml() {
       <p class="remote-lead">ssh で入れるホスト（または WSL）のフォルダやファイルを、この Fude で開きます。事前の設定は要りません。</p>
       <div class="remote-open-form">
         <select id="remote-target" title="接続先"></select>
-        <input type="text" id="remote-target-host" placeholder="ssh のホスト名（例: k16, user@host）" spellcheck="false" autocomplete="off" style="display:none" />
+        <input type="text" id="remote-target-host" list="remote-target-suggest" placeholder="ssh のホスト名（例: k16, user@host）" spellcheck="false" autocomplete="off" style="display:none" />
+        <datalist id="remote-target-suggest"></datalist>
         <div class="remote-path-wrap">
           <input type="text" id="remote-open-path" placeholder="フォルダ / ファイル（空欄はホーム。例: ~/notes）" spellcheck="false" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="remote-suggest" aria-expanded="false" />
           <ul class="remote-suggest" id="remote-suggest" role="listbox" style="display:none"></ul>
@@ -139,6 +140,16 @@ export function initOpenSection(root, backend, opts = {}) {
     for (const h of hosts) add(sshValue(h), h);
     if (wslDistro) add(WSL, `WSL（${wslDistro}）`);
     add(OTHER, '別のホストを入力…');
+    // The same names, offered while one is typed into "another host".
+    const suggestEl = root.querySelector('#remote-target-suggest');
+    if (suggestEl) {
+      suggestEl.textContent = '';
+      for (const h of hosts) {
+        const o = document.createElement('option');
+        o.value = h;
+        suggestEl.appendChild(o);
+      }
+    }
     const values = [...targetEl.options].map((o) => o.value);
     const asked = preset ? (preset.kind === 'wsl' ? WSL : sshValue(preset.host)) : null;
     if (asked && values.includes(asked)) {

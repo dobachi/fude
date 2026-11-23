@@ -14,6 +14,8 @@ import {
   commonPrefix,
   pathSuggestions,
   SUGGEST_MAX,
+  hostSuggestions,
+  holdText,
 } from '../core/setup-hosts.js';
 
 describe('hostError', () => {
@@ -194,6 +196,45 @@ describe('reconnectTargets: 更新後に繋ぎ直す接続', () => {
     expect(reconnectTargets([{ id: 9, origin: 'ssh:k16' }], 'k16')).toEqual({
       ids: [9],
       roots: [],
+    });
+  });
+});
+
+describe('hostSuggestions', () => {
+  const recent = ['k16\t~/notes', 'wsl\t/srv', 'box\t~'];
+  it('offers the hosts used lately, set up, then from the ssh config, each once', () => {
+    expect(hostSuggestions(recent, ['k16', 'dev'], ['dev', 'pi', 'bad host'])).toEqual([
+      'k16',
+      'box',
+      'dev',
+      'pi',
+    ]);
+  });
+  it('leaves out what is excluded (the hosts listed next to the field)', () => {
+    expect(hostSuggestions(recent, ['k16'], ['pi'], ['k16', ' box '])).toEqual(['pi']);
+  });
+  it('copes with nothing known', () => {
+    expect(hostSuggestions(undefined, null, undefined)).toEqual([]);
+  });
+});
+
+describe('holdText', () => {
+  it('says nothing for a host without a held forward', () => {
+    expect(holdText(undefined)).toEqual({ text: '', kind: '' });
+  });
+  it('says the forward is held while its connection is up', () => {
+    expect(holdText({ host: 'k16', up: true, last_error: '' })).toEqual({
+      text: '転送を維持中',
+      kind: 'ok',
+    });
+  });
+  it('says it is waiting, and why, when the connection ended', () => {
+    expect(
+      holdText({ host: 'k16', up: false, last_error: 'remote port forwarding failed' }).text,
+    ).toBe('転送の再接続待ち（remote port forwarding failed）');
+    expect(holdText({ host: 'k16', up: false, last_error: ' ' })).toEqual({
+      text: '転送の再接続待ち',
+      kind: 'waiting',
     });
   });
 });

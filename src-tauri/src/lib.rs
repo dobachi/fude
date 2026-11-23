@@ -2,6 +2,7 @@ mod file_watcher;
 mod gui_server;
 mod key_storage;
 mod remote_direct;
+mod remote_hold;
 mod updater_env;
 mod wait_client;
 mod wsl_bridge;
@@ -850,8 +851,49 @@ fn cli_outcome(success: bool, stdout: &[u8], stderr: &[u8]) -> CliOutcome {
 /// return what it printed. ssh runs in batch mode there, so this never waits
 /// on a password prompt nobody can see.
 #[tauri::command(async)]
-fn remote_setup(host: String, check_only: bool) -> Result<CliOutcome, String> {
-    run_fude_cli(&remote_setup_args(&host, check_only)?)
+fn remote_setup(
+    holds: State<'_, Arc<remote_hold::Manager>>,
+    host: String,
+    check_only: bool,
+) -> Result<CliOutcome, String> {
+    let out = run_fude_cli(&remote_setup_args(&host, check_only)?)?;
+    if out.ok && !check_only {
+        // The host joins the list the frontend saves; hold its forward now.
+        let mut hosts = setup_hosts_in_config();
+        if let Ok(h) = valid_ssh_host(&host) {
+            if !hosts.contains(&h) {
+                hosts.push(h);
+            }
+        }
+        holds.sync(&hosts, wsl_distro_in_use().as_deref());
+    }
+    Ok(out)
+}
+
+/// The hosts set up from the settings panel, as saved.
+fn setup_hosts_in_config() -> Vec<String> {
+    fude_core::load_config()
+        .map(|c| c.setup_hosts)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|h| valid_ssh_host(&h).ok())
+        .collect()
+}
+
+/// Hold the way back from each set-up host (remote_hold.rs), and only from
+/// those: call after the saved list or WSL integration changed.
+#[tauri::command(async)]
+fn remote_holds_sync(holds: State<'_, Arc<remote_hold::Manager>>) -> Vec<remote_hold::HoldStatus> {
+    holds.sync(&setup_hosts_in_config(), wsl_distro_in_use().as_deref());
+    holds.status()
+}
+
+/// How the forward of each set-up host stands.
+#[tauri::command]
+fn remote_holds_status(
+    holds: State<'_, Arc<remote_hold::Manager>>,
+) -> Vec<remote_hold::HoldStatus> {
+    holds.status()
 }
 
 /// A path typed into the remote view, as an argument: one line, not
@@ -1149,6 +1191,7 @@ fn wsl_bridge_status(
 #[tauri::command(async)]
 fn wsl_bridge_set(
     manager: State<'_, Arc<wsl_bridge::Manager>>,
+    holds: State<'_, Arc<remote_hold::Manager>>,
     distro: Option<String>,
 ) -> Result<WslStatus, String> {
     if !cfg!(windows) {
@@ -1165,6 +1208,8 @@ fn wsl_bridge_set(
     if let Some(d) = &distro {
         start_wsl_bridge(&manager, d)?;
     }
+    // ssh now runs elsewhere (inside or outside WSL): hold the forwards there.
+    holds.sync(&setup_hosts_in_config(), wsl_distro_in_use().as_deref());
     Ok(wsl_status(&manager, false))
 }
 
@@ -1533,10 +1578,12 @@ fn gui_ready(
     registry: State<'_, Arc<gui_server::WaitRegistry>>,
     sessions: State<'_, Arc<gui_server::RemoteSessions>>,
     wsl: State<'_, Arc<wsl_bridge::Manager>>,
+    holds: State<'_, Arc<remote_hold::Manager>>,
 ) -> Result<String, String> {
     let registry = Arc::clone(&registry);
     let sessions = Arc::clone(&sessions);
     let wsl = Arc::clone(&wsl);
+    let holds = Arc::clone(&holds);
     GUI_SOCKET_STARTED
         .get_or_init(|| {
             let dir = ensure_config_dir()?;
@@ -1580,6 +1627,10 @@ fn gui_ready(
                     eprintln!("fude: WSL integration not started: {}", e);
                 }
             }
+            // And the way back from the hosts that were set up, so that
+            // `fude FILE` there reaches this window without running setup
+            // again (see remote_hold.rs).
+            holds.sync(&setup_hosts_in_config(), wsl_distro_in_use().as_deref());
             Ok(socket.to_string_lossy().to_string())
         })
         .clone()
@@ -2189,6 +2240,7 @@ pub fn run() {
         .manage(Arc::new(gui_server::WaitRegistry::default()))
         .manage(Arc::new(gui_server::RemoteSessions::default()))
         .manage(Arc::new(wsl_bridge::Manager::default()))
+        .manage(Arc::new(remote_hold::Manager::default()))
         .invoke_handler(tauri::generate_handler![
             new_window,
             take_open_request,
@@ -2212,6 +2264,8 @@ pub fn run() {
             remote_disconnect,
             wsl_bridge_status,
             wsl_bridge_set,
+            remote_holds_sync,
+            remote_holds_status,
             read_file,
             write_file,
             rename_path,
@@ -2325,6 +2379,9 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 if let Some(wsl) = app.try_state::<Arc<wsl_bridge::Manager>>() {
                     wsl.stop();
+                }
+                if let Some(holds) = app.try_state::<Arc<remote_hold::Manager>>() {
+                    holds.stop_all();
                 }
             }
         });

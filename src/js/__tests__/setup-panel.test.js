@@ -408,3 +408,75 @@ describe('更新したら、そのホストの接続を新しい fude-cli で繋
     expect($('#remote-status').dataset.kind).toBe('error');
   });
 });
+
+describe('ホスト名の入力候補と、張り続ける転送', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  function mountWith(opts = {}, backendExtra = {}) {
+    document.body.innerHTML = `<div id="root">${remoteSectionHtml()}</div>`;
+    const root = document.getElementById('root');
+    const backend = {
+      remoteSetup: vi.fn(async () => ({ ok: true, log: '' })),
+      getConfig: vi.fn(async () => ({})),
+      saveConfig: vi.fn(async () => {}),
+      ...backendExtra,
+    };
+    const api = initRemoteSection(root, backend, opts.hosts ?? ['k16'], {
+      holdPoll: 0,
+      ...opts,
+    });
+    const options = () =>
+      [...root.querySelectorAll('#remote-host-suggest option')].map((o) => o.value);
+    return { root, backend, api, options, $: (sel) => root.querySelector(sel) };
+  }
+
+  it('the field offers hosts used before and from the ssh config, not those listed', () => {
+    const { $, api, options } = mountWith({
+      hosts: ['k16'],
+      recent: ['k16\t~/a', 'box\t~'],
+    });
+    expect($('#remote-host').getAttribute('list')).toBe('remote-host-suggest');
+    expect(options()).toEqual(['box']);
+    api.setCandidates(['pi', 'k16']);
+    expect(options()).toEqual(['box', 'pi']);
+  });
+
+  it('shows how the forward of each host stands', async () => {
+    const remoteHoldsStatus = vi.fn(async () => [
+      { host: 'k16', up: true, last_error: '' },
+      { host: 'box', up: false, last_error: 'Connection refused' },
+    ]);
+    const { root } = mountWith({ hosts: ['k16', 'box'] }, { remoteHoldsStatus });
+    await flush();
+    const text = (h) => root.querySelector(`[data-host="${h}"] .remote-hold`).textContent;
+    expect(text('k16')).toBe('転送を維持中');
+    expect(text('box')).toBe('転送の再接続待ち（Connection refused）');
+  });
+
+  it('after a host is set up or removed, the forwards follow the list', async () => {
+    const remoteHoldsSync = vi.fn(async () => [{ host: 'box', up: true, last_error: '' }]);
+    const { $, root, backend } = mountWith(
+      { hosts: ['k16'] },
+      { remoteHoldsSync, remoteHoldsStatus: vi.fn(async () => []) },
+    );
+    $('#remote-host').value = 'box';
+    $('#remote-setup-btn').click();
+    await flush();
+    await flush();
+    expect(backend.saveConfig).toHaveBeenCalled();
+    expect(remoteHoldsSync).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('[data-host="box"] .remote-hold').textContent).toBe('転送を維持中');
+    root.querySelector('[data-host="k16"] .remote-forget').click();
+    await flush();
+    await flush();
+    expect(remoteHoldsSync).toHaveBeenCalledTimes(2);
+  });
+
+  it('works with a backend that holds no forwards', async () => {
+    const { root } = mountWith({ hosts: ['k16'] });
+    await flush();
+    expect(root.querySelector('[data-host="k16"] .remote-hold').textContent).toBe('');
+  });
+});

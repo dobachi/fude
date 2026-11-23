@@ -14,6 +14,8 @@ vi.mock('../backend.js', () => ({
   wslBridgeStatus: vi.fn(async () => ({ supported: false, distros: [] })),
   wslBridgeSet: vi.fn(),
   wslOpen: vi.fn(),
+  remoteHoldsSync: vi.fn(async () => []),
+  remoteHoldsStatus: vi.fn(async () => [{ host: 'k16', up: true, last_error: '' }]),
 }));
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -159,6 +161,18 @@ describe('remote view', () => {
     await view.openRemoteView();
     expect(document.querySelector('.remote-panel')).toBeNull();
     expect(backend.getConfig).not.toHaveBeenCalled();
+  });
+
+  it('the setup field suggests hosts from the ssh config; listed hosts show their forward', async () => {
+    await view.openRemoteView();
+    await flush();
+    await flush();
+    const opts = [...document.querySelectorAll('#remote-host-suggest option')].map((o) => o.value);
+    // k16 is set up already (listed below the field); dev comes from the ssh config.
+    expect(opts).toEqual(['dev']);
+    expect(document.querySelector('[data-host="k16"] .remote-hold').textContent).toBe(
+      '転送を維持中',
+    );
   });
 
   it('still opens when the config cannot be read', async () => {

@@ -4,7 +4,14 @@
 // instead of a terminal, keeps the hosts that were set up so they can be
 // re-checked or updated later, and switches WSL integration.
 // Opening a place from here needs none of this: see open-panel.js.
-import { hostError, addHost, removeHost, reconnectTargets } from '../../core/setup-hosts.js';
+import {
+  hostError,
+  addHost,
+  removeHost,
+  reconnectTargets,
+  hostSuggestions,
+  holdText,
+} from '../../core/setup-hosts.js';
 
 export function remoteSectionHtml() {
   return `
@@ -12,10 +19,11 @@ export function remoteSectionHtml() {
       <p class="remote-lead">ホストの端末（ssh でログインした先）で <code>fude FILE</code> と打って、この Fude に開きたい場合だけ必要な設定です。上の「開く」だけを使うなら、ここは触らなくて構いません。</p>
       <label>ssh ホスト</label>
       <div class="remote-add">
-        <input type="text" id="remote-host" placeholder="ssh のホスト名（例: k16, user@host）" spellcheck="false" autocomplete="off" />
+        <input type="text" id="remote-host" list="remote-host-suggest" placeholder="ssh のホスト名（例: k16, user@host）" spellcheck="false" autocomplete="off" />
+        <datalist id="remote-host-suggest"></datalist>
         <button type="button" id="remote-setup-btn">セットアップ</button>
       </div>
-      <small class="setting-hint">ホストに <code>fude-cli</code> を入れ、そのホストから この Fude へ戻る経路（ssh の転送）を <code>~/.ssh/config</code> に書きます（<code>fude setup HOST</code> と同じ）。パスワード入力なしで <code>ssh HOST</code> できることが前提です。</small>
+      <small class="setting-hint">ホストに <code>fude-cli</code> を入れ、そのホストから この Fude へ戻る経路（ssh の転送）を <code>~/.ssh/config</code> に書きます（<code>fude setup HOST</code> と同じ）。パスワード入力なしで <code>ssh HOST</code> できることが前提です。一覧のホストへは、Fude の起動中この転送を自動で張り続けます（起動のたびにセットアップし直す必要はありません）。</small>
       <div class="remote-hosts" id="remote-hosts"></div>
       <div class="remote-status" id="remote-status" role="status"></div>
       <pre class="remote-log" id="remote-log" style="display:none"></pre>
@@ -118,7 +126,11 @@ export async function initWslSection(root, backend, delays = [2000, 6000, 15000]
  * Wire the section inside `root`.
  * `backend` needs remoteSetup(host, checkOnly), getConfig() and saveConfig(),
  * and remoteConnections(), remoteDisconnect(id) and remoteOpen(host, path)
- * to reconnect after an update.
+ * to reconnect after an update; remoteHoldsSync() and remoteHoldsStatus()
+ * when it has them, for the forwards the app holds. `opts`: `onHosts(hosts)`,
+ * `recent` (remote_recent) and `candidates` (ssh config names) for the
+ * field's suggestions, `holdPoll` (ms between status reads, 0: none).
+ * Returns `{ setCandidates }`.
  */
 export function initRemoteSection(root, backend, initialHosts, opts = {}) {
   const input = root.querySelector('#remote-host');
@@ -126,10 +138,50 @@ export function initRemoteSection(root, backend, initialHosts, opts = {}) {
   const listEl = root.querySelector('#remote-hosts');
   const statusEl = root.querySelector('#remote-status');
   const logEl = root.querySelector('#remote-log');
-  if (!input || !addBtn || !listEl) return;
+  const suggestEl = root.querySelector('#remote-host-suggest');
+  if (!input || !addBtn || !listEl) return null;
 
   let hosts = addHost(initialHosts, '');
   let busy = false;
+  let recent = Array.isArray(opts.recent) ? opts.recent : [];
+  let candidates = Array.isArray(opts.candidates) ? opts.candidates : [];
+  let holds = [];
+  const holdPoll = opts.holdPoll ?? 3000;
+
+  /** The hosts used or known before, offered while one is typed. */
+  const renderSuggestions = () => {
+    if (!suggestEl) return;
+    suggestEl.textContent = '';
+    for (const h of hostSuggestions(recent, hosts, candidates, hosts)) {
+      const opt = document.createElement('option');
+      opt.value = h;
+      suggestEl.appendChild(opt);
+    }
+  };
+
+  const renderHolds = () => {
+    for (const row of listEl.querySelectorAll('.remote-host-row')) {
+      const el = row.querySelector('.remote-hold');
+      if (!el) continue;
+      const { text, kind } = holdText(holds.find((s) => s?.host === row.dataset.host));
+      el.textContent = text;
+      el.dataset.kind = kind;
+      el.title = text;
+    }
+  };
+
+  const readHolds = async (sync) => {
+    try {
+      // A backend without these (older, or a stand-in) holds no forwards.
+      const fn = sync ? backend.remoteHoldsSync : backend.remoteHoldsStatus;
+      if (typeof fn !== 'function') return;
+      const st = await fn();
+      holds = Array.isArray(st) ? st : [];
+    } catch {
+      return;
+    }
+    renderHolds();
+  };
   // Waits (ms) between checks that the connections cut after an update ended.
   const gonePoll = opts.gonePoll ?? [100, 200, 400, 800, 1500];
 
@@ -148,6 +200,9 @@ export function initRemoteSection(root, backend, initialHosts, opts = {}) {
     await backend.saveConfig({ ...existing, setup_hosts: hosts });
     // The open section lists these hosts among its destinations.
     opts.onHosts?.(hosts);
+    renderSuggestions();
+    // Hold the way back from exactly these hosts.
+    await readHolds(true);
   };
 
   const render = () => {
@@ -160,6 +215,9 @@ export function initRemoteSection(root, backend, initialHosts, opts = {}) {
       name.className = 'remote-host-name';
       name.textContent = host;
       row.appendChild(name);
+      const hold = document.createElement('span');
+      hold.className = 'remote-hold';
+      row.appendChild(hold);
       const button = (label, title, onClick, cls) => {
         const b = document.createElement('button');
         b.type = 'button';
@@ -192,6 +250,7 @@ export function initRemoteSection(root, backend, initialHosts, opts = {}) {
     }
     addBtn.disabled = busy;
     input.disabled = busy;
+    renderHolds();
   };
 
   async function run(rawHost, checkOnly) {
@@ -319,4 +378,22 @@ export function initRemoteSection(root, backend, initialHosts, opts = {}) {
     }
   });
   render();
+  renderSuggestions();
+  readHolds(false);
+  if (holdPoll > 0) {
+    const handle = setInterval(() => {
+      // A view that was closed stops asking.
+      if (!listEl.isConnected) {
+        clearInterval(handle);
+        return;
+      }
+      readHolds(false);
+    }, holdPoll);
+  }
+  return {
+    setCandidates(names) {
+      candidates = Array.isArray(names) ? names : [];
+      renderSuggestions();
+    },
+  };
 }

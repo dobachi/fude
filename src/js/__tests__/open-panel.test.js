@@ -67,6 +67,16 @@ describe('open section: destination', () => {
     document.body.innerHTML = '';
   });
 
+  it('"another host" suggests the known hosts while one is typed', () => {
+    const { $, root, api } = mount({ setupHosts: ['k16'], recent: ['box\t~'] });
+    expect($('#remote-target-host').getAttribute('list')).toBe('remote-target-suggest');
+    const opts = () =>
+      [...root.querySelectorAll('#remote-target-suggest option')].map((o) => o.value);
+    expect(opts()).toEqual(['box', 'k16']);
+    api.setCandidates(['pi']);
+    expect(opts()).toEqual(['box', 'k16', 'pi']);
+  });
+
   it('offers the known hosts and a way to name another', () => {
     const { targets, $ } = mount({ setupHosts: ['k16', 'dev'] });
     expect(targets()).toEqual(['k16', 'dev', '別のホストを入力…']);
