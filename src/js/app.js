@@ -56,6 +56,7 @@ import {
 } from './core/remote-path.js';
 import { escapeHtml } from './core/print-document.js';
 import { createStatusBar } from './core/statusbar.js';
+import { emptyStateHtml } from './core/empty-state.js';
 import { showMenu } from './core/menu.js';
 import { showTableGridPicker } from './core/table-grid.js';
 import { taskToggleChange } from './core/task-list.js';
@@ -2366,11 +2367,7 @@ function handleTabChange(tab) {
 
   if (!tab) {
     if (editorContainer) {
-      editorContainer.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state-title">Fude</div>
-          <div class="empty-state-hint"><kbd>Ctrl+O</kbd> Open file &nbsp; <kbd>Ctrl+Shift+O</kbd> Open folder &nbsp; <kbd>Ctrl+Shift+T</kbd> New tab</div>
-        </div>`;
+      editorContainer.innerHTML = emptyStateHtml();
     }
     if (previewContainer) previewContainer.innerHTML = '';
     pane.editorView = null;

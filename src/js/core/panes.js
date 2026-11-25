@@ -3,6 +3,7 @@
 
 import { createEditor, setTheme, setContent, getContent } from './editor.js';
 import { initPreview } from './preview.js';
+import { emptyStateHtml } from './empty-state.js';
 
 /**
  * @typedef {Object} Pane
@@ -461,11 +462,7 @@ export function clearPanesWithFile(filePath) {
       // Remove split view class so empty state fills the pane
       pane.element.classList.remove('view-split', 'view-preview');
       if (pane.editorContainer) {
-        pane.editorContainer.innerHTML = `
-          <div class="empty-state">
-            <div class="empty-state-title">Fude</div>
-            <div class="empty-state-hint"><kbd>Ctrl+O</kbd> Open folder &nbsp; <kbd>Ctrl+N</kbd> New file</div>
-          </div>`;
+        pane.editorContainer.innerHTML = emptyStateHtml();
       }
       if (pane.previewContainer) {
         pane.previewContainer.innerHTML = '';
