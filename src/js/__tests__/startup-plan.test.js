@@ -49,6 +49,26 @@ describe('planStartup', () => {
     expect(plan.vault).toBeNull();
   });
 
+  it('restores the folder alone for a workspace that does not keep tabs', () => {
+    const session = { vault_path: '/v', open_tabs: [] };
+    const plan = planStartup({ session, startup: null, folderWithoutTabs: true });
+    expect(plan).toMatchObject({ vault: '/v', restoreSession: true, tabs: [] });
+  });
+
+  it('folderWithoutTabs still needs a folder, and one inside --root', () => {
+    expect(
+      planStartup({ session: { vault_path: null, open_tabs: [] }, folderWithoutTabs: true })
+        .restoreSession,
+    ).toBe(false);
+    const outside = planStartup({
+      session: { vault_path: '/b', open_tabs: [] },
+      startup: { open_dir: null, root: '/r' },
+      folderWithoutTabs: true,
+    });
+    expect(outside.restoreSession).toBe(false);
+    expect(outside.vault).toBe('/r');
+  });
+
   it('no session at all opens --open-dir', () => {
     const plan = planStartup({ session: null, startup: { open_dir: '/r/sub', root: '/r' } });
     expect(plan).toMatchObject({ vault: '/r/sub', restoreSession: false, tabs: [] });

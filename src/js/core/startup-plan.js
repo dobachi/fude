@@ -38,6 +38,8 @@ export function isInsideRoot(p, root) {
  * @param {{vault_path?: string|null, open_tabs?: Array<{path?: string|null}>}|null} args.session
  * @param {{open_dir?: string|null, root?: string|null}|null} args.startup
  *   browser-mode launch options (null on the desktop)
+ * @param {boolean} [args.folderWithoutTabs] the session never has tabs (its
+ *   workspace does not keep them), so its folder alone is worth restoring
  * @returns {{
  *   vault: string|null,
  *   tabs: Array<object>,
@@ -48,7 +50,7 @@ export function isInsideRoot(p, root) {
  *   restoreSession: whether any session state is being restored; skipped:
  *   session paths left out because they are outside --root.
  */
-export function planStartup({ session, startup }) {
+export function planStartup({ session, startup, folderWithoutTabs = false }) {
   const openDir = (startup && startup.open_dir) || null;
   const root = (startup && startup.root) || null;
   const skipped = [];
@@ -68,8 +70,10 @@ export function planStartup({ session, startup }) {
   // wins over whatever folder the session last had open. Without it, the
   // session's folder if usable, else --root.
   // A session with no reopenable tabs is not restored at all (as before), so
-  // its folder is not either; only the launch options apply then.
-  const restoreSession = tabs.length > 0;
+  // its folder is not either; only the launch options apply then. The
+  // exception is a workspace that keeps its folder but not its tabs: there,
+  // no tabs is the normal state, and the folder is all there is to restore.
+  const restoreSession = tabs.length > 0 || (folderWithoutTabs && !!savedVaultOk);
   if (restoreSession && savedVault && !savedVaultOk) skipped.push(savedVault);
   const vault = restoreSession
     ? openDir || (savedVaultOk ? savedVault : null) || root || null

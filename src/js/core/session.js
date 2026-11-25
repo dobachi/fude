@@ -4,12 +4,16 @@ import * as backend from '../backend.js';
 let saveTimeout = null;
 const SAVE_DEBOUNCE = 2000;
 
-export function scheduleSave(getSessionData) {
+/**
+ * Debounced save. `save` writes the session out; by default straight to
+ * session.json, the app passes one that also records it in the workspace.
+ */
+export function scheduleSave(getSessionData, save = backend.saveSession) {
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(async () => {
     try {
       const session = getSessionData();
-      await backend.saveSession(session);
+      await save(session);
     } catch (e) {
       console.warn('Failed to save session:', e);
     }
@@ -25,10 +29,10 @@ export async function restoreSession() {
   }
 }
 
-export async function saveSessionImmediate(session) {
+export async function saveSessionImmediate(session, save = backend.saveSession) {
   if (saveTimeout) clearTimeout(saveTimeout);
   try {
-    await backend.saveSession(session);
+    await save(session);
   } catch (e) {
     console.warn('Failed to save session:', e);
   }

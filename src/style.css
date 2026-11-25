@@ -3489,3 +3489,71 @@ body:has(#app.ai-panel-open) #mode-indicator {
 #sidebar-remote-btn[hidden] {
   display: none;
 }
+
+/* ── Workspaces dialog (File → ワークスペース…) ── */
+.ws-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.ws-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--fg-primary);
+}
+
+.ws-item:hover {
+  background: var(--bg-hover);
+}
+
+.ws-item.selected {
+  background: var(--bg-active);
+}
+
+.ws-item:focus {
+  outline: none;
+}
+
+.ws-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-active-tag {
+  font-size: 0.8em;
+  color: var(--fg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 6px;
+}
+
+.ws-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ws-actions button:disabled,
+.workspace-panel .ws-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ws-keep label {
+  display: block;
+}
+
+.ws-keep .ws-keep-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}

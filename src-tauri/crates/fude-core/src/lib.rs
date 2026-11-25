@@ -13,6 +13,7 @@ pub mod session;
 pub mod temp;
 pub mod token;
 pub mod wait;
+pub mod workspaces;
 
 pub use browse::*;
 pub use cli::*;
@@ -21,3 +22,4 @@ pub use files::*;
 pub use paths::*;
 pub use session::*;
 pub use temp::*;
+pub use workspaces::*;

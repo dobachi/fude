@@ -174,10 +174,20 @@ import {
   setRootPath,
   isSidebarVisible,
   showSidebar,
+  hideSidebar,
   focusFiler,
   nextSidebarFocusAction,
 } from './core/sidebar.js';
-import { scheduleSave, restoreSession } from './core/session.js';
+import { scheduleSave, restoreSession, saveSessionImmediate } from './core/session.js';
+import {
+  DEFAULT_WORKSPACE,
+  normalizeStore,
+  activeWorkspace,
+  withSession,
+  setActive,
+  switchBlockers,
+} from './core/workspaces.js';
+import { openWorkspaceDialog } from './features/workspace/workspace-dialog.js';
 import { initTheme } from './core/theme.js';
 import {
   onContentChange,
@@ -260,6 +270,11 @@ function paneViewMode(pane) {
 // persists the global session; additional windows (label "win-*") open empty
 // or with a file handed to them, and never overwrite session.json.
 let isMainWindow = true;
+// Workspaces (see the Workspaces section below). Declared up here because
+// init reads them before the module body further down has run.
+let workspaceStore = null;
+let startupDirs = null; // browser mode's --open-dir / --root, kept for switches
+let appVersion = '';
 
 // Tabs a `fude --wait` process is blocked on; the host releases that process
 // (exit 0 if the content was kept, 1 if discarded) when we report the close.
@@ -776,6 +791,7 @@ async function init() {
       const { getVersion } = await import('@tauri-apps/api/app');
       const ver = await getVersion();
       setAppVersion(ver);
+      appVersion = ver;
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       const appWindow = getCurrentWindow();
       isMainWindow = appWindow.label === 'main';
@@ -937,9 +953,9 @@ async function init() {
 
   // Sidebar toggle buttons
   const sidebarToggle = document.getElementById('sidebar-toggle');
-  if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
+  if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebarAndSave);
   const sidebarOpen = document.getElementById('sidebar-open');
-  if (sidebarOpen) sidebarOpen.addEventListener('click', toggleSidebar);
+  if (sidebarOpen) sidebarOpen.addEventListener('click', toggleSidebarAndSave);
 
   // タブバー右端の表示切替（マウス操作用）。キーボードの
   // Ctrl+Shift+J/K/L と同じ setViewMode を呼ぶだけで、状態は一箇所に保つ。
@@ -976,8 +992,14 @@ async function init() {
     }
   }
 
-  // Try restore session — only the main window restores the global session.
-  const session = isMainWindow ? await restoreSession() : null;
+  // Try restore session — only the main window restores the global session,
+  // which is the active workspace's (see workspaces.js).
+  let session = null;
+  if (isMainWindow) {
+    workspaceStore = await loadWorkspaceStore();
+    session = activeWorkspace(workspaceStore).session;
+    updateWorkspaceTitle();
+  }
   // Browser mode: the launch options (--open-dir / --root) decide, together
   // with the session, what opens. See startup-plan.js.
   let startup = null;
@@ -988,27 +1010,13 @@ async function init() {
       /* older/unauthorized server: fall back to the session alone */
     }
   }
-  const plan = planStartup({ session, startup });
+  startupDirs = startup;
+  const plan = planWorkspaceRestore(session);
   // Anything that could not be restored is reported once, instead of the
   // silent empty sidebar this used to produce.
   const failedPaths = [];
 
   if (plan.restoreSession) {
-    setVaultPath(plan.vault || ''); // vault が決まるとパス表示が相対に変わる
-    defaultViewMode = session.view_mode || 'split';
-    applyViewMode();
-
-    if (vaultPath) {
-      try {
-        const tree = await backend.readDirTree(vaultPath, getShowAllFiles());
-        loadDirectory(tree);
-        watchVault(vaultPath);
-      } catch (e) {
-        console.warn('Failed to open folder from session:', vaultPath, e);
-        failedPaths.push(vaultPath);
-      }
-    }
-
     // Check for crash recovery temp files
     const tabPaths = plan.tabs.map((t) => t.path).filter(Boolean);
     const recoverable = await checkRecovery(tabPaths);
@@ -1018,22 +1026,8 @@ async function init() {
     }
     const recoverablePaths = Object.keys(recoverableMap);
 
-    // First, open all tabs with saved content
-    for (const tabInfo of plan.tabs) {
-      try {
-        const viewMode = tabInfo.view_mode || defaultViewMode;
-        if (isImagePath(tabInfo.path)) {
-          openTab(tabInfo.path, '', { kind: 'image', viewMode });
-          continue;
-        }
-        const content = await backend.readFile(tabInfo.path);
-        const restored = openTab(tabInfo.path, content, { viewMode });
-        if (restored) await markTabSynced(restored.id, content);
-      } catch (e) {
-        console.warn('Failed to reopen tab from session:', tabInfo.path, e);
-        failedPaths.push(tabInfo.path);
-      }
-    }
+    // First, open the folder and all tabs with saved content
+    await applySessionState(session, plan, failedPaths);
 
     // Then ask about recovery if temp files exist
     if (recoverablePaths.length > 0) {
@@ -2797,6 +2791,7 @@ function buildMenuDefinition() {
         { label: 'ファイルを開く', shortcut: 'Ctrl+O', action: handleOpenFile },
         { label: 'フォルダを開く', shortcut: 'Ctrl+Shift+O', action: handleOpenFolder },
         { label: 'パスを開く', shortcut: 'Ctrl+Shift+P', action: handleGoToPath },
+        { label: 'ワークスペース…', action: handleWorkspaces },
         { label: 'ファイラを一つ上のフォルダへ', action: handleFilerGoUp },
         ...(isLocalTauri()
           ? [
@@ -2853,7 +2848,7 @@ function buildMenuDefinition() {
         { label: '縦分割', shortcut: 'Ctrl+Shift+D', action: splitVertical },
         { label: '横分割', shortcut: 'Ctrl+Shift+H', action: splitHorizontal },
         { separator: true },
-        { label: 'サイドバー表示切替', action: toggleSidebar },
+        { label: 'サイドバー表示切替', action: toggleSidebarAndSave },
         {
           label: '文字を拡大',
           shortcut: 'Ctrl++',
@@ -2940,18 +2935,188 @@ function insertTable(view, rows, cols) {
   view.focus();
 }
 
-function scheduleSessionSave() {
-  // Only the main window owns the global session; additional windows must not
-  // overwrite it with their own (transient) state.
-  if (!isMainWindow) return;
-  scheduleSave(() => ({
+function toggleSidebarAndSave() {
+  toggleSidebar();
+  scheduleSessionSave();
+}
+
+function currentSessionData() {
+  return {
     open_tabs: getTabsForSession(),
     active_tab: getActiveTabIndex(),
     vault_path: vaultPath || null,
     view_mode: defaultViewMode,
-    sidebar_visible: !document.getElementById('app')?.classList.contains('sidebar-collapsed'),
+    sidebar_visible: isSidebarVisible(),
     pane_layout: null,
-  }));
+  };
+}
+
+function scheduleSessionSave() {
+  // Only the main window owns the global session; additional windows must not
+  // overwrite it with their own (transient) state.
+  if (!isMainWindow) return;
+  scheduleSave(currentSessionData, persistSession);
+}
+
+// ── Workspaces ─────────────────────────────────────────────
+// Named sessions (see core/workspaces.js). Only the main window has them, as
+// it alone owns the session.
+
+// (state declared near the top of the file: workspaceStore, startupDirs, appVersion)
+
+async function loadWorkspaceStore() {
+  const legacy = await restoreSession();
+  let raw = null;
+  try {
+    raw = await backend.loadWorkspaces();
+  } catch (e) {
+    // A damaged workspaces.json: start from the plain session rather than
+    // refusing to start. It is rewritten on the next save.
+    console.warn('Failed to load workspaces:', e);
+  }
+  return normalizeStore(raw, legacy);
+}
+
+/**
+ * Record `session` as the active workspace's and write it out. session.json
+ * gets the same (filtered) session, so an older Fude still restores it.
+ */
+async function persistSession(session) {
+  if (!workspaceStore) {
+    await backend.saveSession(session);
+    return;
+  }
+  workspaceStore = withSession(workspaceStore, workspaceStore.active, session);
+  await backend.saveWorkspaces(workspaceStore);
+  await backend.saveSession(activeWorkspace(workspaceStore).session);
+}
+
+function planWorkspaceRestore(session) {
+  const keep = workspaceStore ? activeWorkspace(workspaceStore).keep : null;
+  return planStartup({
+    session,
+    startup: startupDirs,
+    folderWithoutTabs: !!keep && keep.folder && !keep.tabs,
+  });
+}
+
+/** Open a session's folder and tabs and apply its view mode and sidebar. */
+async function applySessionState(session, plan, failedPaths) {
+  setVaultPath(plan.vault || ''); // vault が決まるとパス表示が相対に変わる
+  defaultViewMode = session.view_mode || 'split';
+  applyViewMode();
+  if (session.sidebar_visible === false) hideSidebar();
+  else showSidebar();
+
+  if (vaultPath) {
+    try {
+      const tree = await backend.readDirTree(vaultPath, getShowAllFiles());
+      loadDirectory(tree);
+      watchVault(vaultPath);
+    } catch (e) {
+      console.warn('Failed to open folder from session:', vaultPath, e);
+      failedPaths.push(vaultPath);
+    }
+  }
+
+  for (const tabInfo of plan.tabs) {
+    try {
+      const viewMode = tabInfo.view_mode || defaultViewMode;
+      if (isImagePath(tabInfo.path)) {
+        openTab(tabInfo.path, '', { kind: 'image', viewMode });
+        continue;
+      }
+      const content = await backend.readFile(tabInfo.path);
+      const restored = openTab(tabInfo.path, content, { viewMode });
+      if (restored) await markTabSynced(restored.id, content);
+    } catch (e) {
+      console.warn('Failed to reopen tab from session:', tabInfo.path, e);
+      failedPaths.push(tabInfo.path);
+    }
+  }
+}
+
+/** Show the active workspace in the window title (default stays unmarked). */
+function updateWorkspaceTitle() {
+  if (!workspaceStore) return;
+  const name = workspaceStore.active;
+  const base = appVersion ? `Fude v${appVersion}` : 'Fude';
+  const title = name === DEFAULT_WORKSPACE ? base : `${base} — ${name}`;
+  document.title = title;
+  if (isLocalTauri()) {
+    import('@tauri-apps/api/window')
+      .then(({ getCurrentWindow }) => getCurrentWindow().setTitle(title))
+      .catch(() => {});
+  }
+}
+
+/**
+ * Switch to workspace `name`: keep the current workspace's session, close
+ * what is open, and restore the other's. Unsaved tabs stop the switch, since
+ * closing them would lose the edits.
+ * @returns {Promise<boolean>} whether the switch happened
+ */
+async function switchWorkspace(name) {
+  if (!isMainWindow || !workspaceStore || name === workspaceStore.active) return false;
+  const block = switchBlockers(getAllTabs());
+  if (!block.ok) {
+    showToast(
+      `未保存のタブがあります（${block.dirty.join(', ')}）。保存してから切り替えてください`,
+      {
+        type: 'error',
+        duration: 8000,
+      },
+    );
+    return false;
+  }
+
+  await saveSessionImmediate(currentSessionData(), persistSession);
+
+  closeAllTabs();
+  setVaultPath('');
+  loadDirectory([]);
+  watchVault(null);
+
+  workspaceStore = setActive(workspaceStore, name);
+  const session = activeWorkspace(workspaceStore).session;
+  const plan = planWorkspaceRestore(session);
+  const failedPaths = [];
+  if (plan.restoreSession) {
+    await applySessionState(session, plan, failedPaths);
+  } else {
+    defaultViewMode = (session && session.view_mode) || 'split';
+    applyViewMode();
+    if (plan.vault) await applySessionState(session || {}, plan, failedPaths);
+  }
+  await saveSessionImmediate(currentSessionData(), persistSession);
+  updateWorkspaceTitle();
+
+  const notice = startupNotice({ skipped: plan.skipped, failed: failedPaths });
+  if (notice) showToast(notice, { type: 'error', duration: 10000 });
+  else showToast(`ワークスペース「${name}」に切り替えました`);
+  return true;
+}
+
+/** File → ワークスペース…: the dialog edits the store; the app does the switch. */
+async function handleWorkspaces() {
+  if (!isMainWindow || !workspaceStore) {
+    showToast('ワークスペースはメインウィンドウで使えます');
+    return;
+  }
+  // Bring the stored session up to date first, so a keep change filters it.
+  workspaceStore = withSession(workspaceStore, workspaceStore.active, currentSessionData());
+  const result = await openWorkspaceDialog(workspaceStore);
+  if (!result) return;
+  // The dialog never removes the active workspace (it has to be switched away
+  // from first), so its store is consistent as it stands; a rename of the
+  // active one already moved `active` along.
+  const { store, switchTo } = result;
+  workspaceStore = store;
+  await backend
+    .saveWorkspaces(workspaceStore)
+    .catch((e) => console.warn('Failed to save workspaces:', e));
+  updateWorkspaceTitle();
+  if (switchTo && switchTo !== workspaceStore.active) await switchWorkspace(switchTo);
 }
 
 // ── Refresh sidebar ────────────────────────────────────────

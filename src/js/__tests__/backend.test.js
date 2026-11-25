@@ -251,6 +251,8 @@ describe('backend module (Tauri mode)', () => {
       ['readDirTree', 'read_dir_tree'],
       ['saveSession', 'save_session'],
       ['loadSession', 'load_session'],
+      ['loadWorkspaces', 'load_workspaces'],
+      ['saveWorkspaces', 'save_workspaces'],
       ['getConfig', 'get_config'],
       ['saveConfig', 'save_config'],
       ['setApiKey', 'set_api_key'],

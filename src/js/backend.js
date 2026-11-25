@@ -232,6 +232,14 @@ export async function loadSession() {
   return doInvoke('load_session');
 }
 
+export async function loadWorkspaces() {
+  return doInvoke('load_workspaces');
+}
+
+export async function saveWorkspaces(store) {
+  return doInvoke('save_workspaces', { store });
+}
+
 export async function getConfig() {
   return doInvoke('get_config');
 }

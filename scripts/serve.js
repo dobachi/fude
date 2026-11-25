@@ -229,7 +229,9 @@ const api = {
           is_dir: item.isDirectory(),
         });
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return { current: target, parent: path.dirname(target), entries };
   },
 
@@ -269,6 +271,26 @@ const api = {
     return null;
   },
 
+  // Named workspaces (see src/js/core/workspaces.js). Stored as given; the
+  // front end validates and normalises what it reads back.
+  load_workspaces() {
+    const p = path.join(CONFIG_DIR, 'workspaces.json');
+    if (!fs.existsSync(p)) return null;
+    return JSON.parse(fs.readFileSync(p, 'utf-8'));
+  },
+
+  save_workspaces({ store }) {
+    if (!store || typeof store !== 'object' || typeof store.active !== 'string') {
+      throw new Error('workspaces: store with an active name is required');
+    }
+    fs.writeFileSync(
+      path.join(CONFIG_DIR, 'workspaces.json'),
+      JSON.stringify(store, null, 2),
+      'utf-8',
+    );
+    return null;
+  },
+
   get_config() {
     const configPath = path.join(CONFIG_DIR, 'config.json');
     let config = {
@@ -280,9 +302,11 @@ const api = {
     if (fs.existsSync(configPath)) {
       try {
         config = { ...config, ...JSON.parse(fs.readFileSync(configPath, 'utf-8')) };
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
-    const hasApiKey = !!(config.openrouter_api_key);
+    const hasApiKey = !!config.openrouter_api_key;
     // Return ConfigResponse format (matching Tauri backend)
     return {
       theme: config.theme,
@@ -303,7 +327,9 @@ const api = {
     let existing = {};
     try {
       existing = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     const toSave = { ...config };
     // Keep existing API key if not explicitly provided
     if (!toSave.openrouter_api_key && existing.openrouter_api_key) {
@@ -321,7 +347,9 @@ const api = {
     let config = {};
     try {
       config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     config.openrouter_api_key = key;
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
     return 'config';
@@ -332,7 +360,9 @@ const api = {
     let config = {};
     try {
       config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     delete config.openrouter_api_key;
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
     return null;
@@ -439,7 +469,9 @@ function handleAiChatStream(req, res) {
     try {
       const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
       apiKey = cfg.openrouter_api_key || '';
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     if (!apiKey) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -450,7 +482,7 @@ function handleAiChatStream(req, res) {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
+      Connection: 'keep-alive',
     });
 
     const abortController = new AbortController();
@@ -465,7 +497,7 @@ function handleAiChatStream(req, res) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model: model || 'openai/gpt-4o-mini',
@@ -551,7 +583,7 @@ function handleInstallExtension(req, res) {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
+      Connection: 'keep-alive',
     });
     const send = (event) => {
       if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -589,7 +621,9 @@ api.ai_models = function () {
   try {
     const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     apiKey = cfg.openrouter_api_key || '';
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   if (!apiKey) return { data: [] };
 

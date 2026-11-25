@@ -9,7 +9,7 @@ mod wsl_bridge;
 
 use fude_core::{
     config_dir, ensure_config_dir, resolve_cli_path, set_dir_permissions, set_file_permissions,
-    BrowseResult, Config, ConfigResponse, FileEntry, Session, TempFileInfo,
+    BrowseResult, Config, ConfigResponse, FileEntry, Session, TempFileInfo, WorkspaceStore,
 };
 use futures_util::StreamExt;
 use key_storage::{create_storage, KeyStorage};
@@ -308,6 +308,16 @@ fn load_session() -> Result<Option<Session>, String> {
 #[tauri::command]
 fn save_session(session: Session) -> Result<(), String> {
     fude_core::save_session(&session)
+}
+
+#[tauri::command]
+fn load_workspaces() -> Result<Option<WorkspaceStore>, String> {
+    fude_core::load_workspaces()
+}
+
+#[tauri::command]
+fn save_workspaces(store: WorkspaceStore) -> Result<(), String> {
+    fude_core::save_workspaces(&store)
 }
 
 #[tauri::command]
@@ -2283,6 +2293,8 @@ pub fn run() {
             read_dir_tree,
             load_session,
             save_session,
+            load_workspaces,
+            save_workspaces,
             get_config,
             save_config,
             set_api_key,

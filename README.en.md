@@ -18,6 +18,7 @@ An ultra-lightweight cross-platform Markdown editor
 - **Real-time Markdown preview** - Side-by-side editor and preview
 - **Pane splitting** - VS Code-style vertical/horizontal splits with real-time sync
 - **Tabs + session restore** - Automatically restores your previous workspace
+- **Workspaces** - Switch between named sessions (File → ワークスペース…); each chooses which of folder, tabs, view mode and sidebar it keeps
 - **Dark/Light themes** - VS Code-inspired color scheme
 - **Auto-save + crash recovery** - Edits are backed up automatically; recoverable after crashes
 - **Obsidian Vault support** - Open any directory to browse `.md` files in a tree view
