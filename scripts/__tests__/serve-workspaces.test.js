@@ -1,7 +1,8 @@
 // @vitest-environment node
 //
 // Browser mode stores workspaces the way the desktop app does: workspaces.json
-// in the config dir. HOME points at a temp dir so the real config is untouched.
+// in the config dir. HOME (USERPROFILE on Windows, which os.homedir() reads
+// there) points at a temp dir so the real config is untouched.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import http from 'node:http';
 import fs from 'node:fs';
@@ -13,6 +14,7 @@ let server;
 let port;
 let tmpDir;
 let savedHome;
+let savedProfile;
 
 function call(cmd, body = {}) {
   return new Promise((resolve, reject) => {
@@ -37,10 +39,17 @@ function call(cmd, body = {}) {
   });
 }
 
+function restoreEnv(key, value) {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
+
 beforeAll(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fude-srv-ws-'));
   savedHome = process.env.HOME;
+  savedProfile = process.env.USERPROFILE;
   process.env.HOME = tmpDir;
+  process.env.USERPROFILE = tmpDir;
   fs.mkdirSync(path.join(tmpDir, '.config', 'fude'), { recursive: true });
   const distDir = path.join(tmpDir, 'dist');
   fs.mkdirSync(distDir);
@@ -54,7 +63,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (server) await new Promise((resolve) => server.close(resolve));
-  process.env.HOME = savedHome;
+  restoreEnv('HOME', savedHome);
+  restoreEnv('USERPROFILE', savedProfile);
   delete process.env.FUDE_TOKEN;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
